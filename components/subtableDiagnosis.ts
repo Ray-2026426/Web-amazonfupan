@@ -148,7 +148,7 @@ type MetricDef = {
 );
 
 const PL_SPECS: MetricDef[] = [
-    { id: 'pl_gross_profit', short: '毛利', kind: 'key', key: 'gross_profit', higherIsBetter: true },
+    { id: 'pl_gross_profit', short: '毛利额', kind: 'key', key: 'gross_profit', higherIsBetter: true },
     { id: 'pl_gross_margin', short: '毛利率', kind: 'key', key: 'gross_margin', higherIsBetter: true },
     { id: 'pl_avg_ticket', short: '客单价', kind: 'key', key: 'avg_ticket', higherIsBetter: true },
     { id: 'pl_sales_q', short: '销量', kind: 'key', key: 'sales_quantity', higherIsBetter: true },
