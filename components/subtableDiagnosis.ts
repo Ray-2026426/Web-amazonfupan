@@ -69,7 +69,7 @@ export const DEFAULT_SUBTABLE_DIAGNOSIS: SubtableDiagnosisSettings = {
     enabled: {},
     metricLabels: {},
     phrases: {},
-    showTagColumn: true,
+    showTagColumn: false,
 };
 
 export function mergeDiagnosisPhrases(p?: Partial<DiagnosisPhrases>): DiagnosisPhrases {
@@ -93,7 +93,7 @@ export function loadSubtableDiagnosisSettings(): SubtableDiagnosisSettings {
         enabled: { ...DEFAULT_SUBTABLE_DIAGNOSIS.enabled },
         metricLabels: { ...DEFAULT_SUBTABLE_DIAGNOSIS.metricLabels },
         phrases: {},
-        showTagColumn: true,
+        showTagColumn: false,
     });
     if (typeof localStorage === 'undefined') return fallback();
     try {
@@ -109,7 +109,8 @@ export function loadSubtableDiagnosisSettings(): SubtableDiagnosisSettings {
             enabled: p.enabled && typeof p.enabled === 'object' ? { ...p.enabled } : {},
             metricLabels: p.metricLabels && typeof p.metricLabels === 'object' ? { ...p.metricLabels } : {},
             phrases: p.phrases && typeof p.phrases === 'object' ? { ...p.phrases } : {},
-            showTagColumn: p.showTagColumn === false ? false : true,
+            /** 仅当显式为 true 时显示；缺省/旧数据未写该项 → 不显示 */
+            showTagColumn: p.showTagColumn === true,
         };
     } catch {
         return fallback();
@@ -127,7 +128,7 @@ export function saveSubtableDiagnosisSettings(s: SubtableDiagnosisSettings) {
                 enabled: s.enabled,
                 metricLabels: s.metricLabels || {},
                 phrases: s.phrases || {},
-                showTagColumn: s.showTagColumn !== false,
+                showTagColumn: s.showTagColumn === true,
             })
         );
     } catch {

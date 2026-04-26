@@ -51,7 +51,7 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
     const [en, setEn] = useState<Record<string, boolean>>({});
     const [labels, setLabels] = useState<Record<string, string>>({});
     const [phrases, setPhrases] = useState<DiagnosisPhrases>(DEFAULT_DIAGNOSIS_PHRASES);
-    const [showTagCol, setShowTagCol] = useState(true);
+    const [showTagCol, setShowTagCol] = useState(false);
 
     const options = getDiagnosisMetricOptions(subType);
 
@@ -60,7 +60,7 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
         const s = loadSubtableDiagnosisSettings();
         setRedPct(ratioToPct(s.redThreshold));
         setGrPct(ratioToPct(s.greenThreshold));
-        setShowTagCol(s.showTagColumn !== false);
+        setShowTagCol(s.showTagColumn === true);
         const m: Record<string, boolean> = {};
         const lab: Record<string, string> = {};
         for (const o of getDiagnosisMetricOptions(subType)) {
@@ -132,13 +132,13 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
         setEn(m);
         setLabels(lab);
         setPhrases(DEFAULT_DIAGNOSIS_PHRASES);
-        setShowTagCol(true);
+        setShowTagCol(false);
         saveSubtableDiagnosisSettings({
             ...DEFAULT_SUBTABLE_DIAGNOSIS,
             enabled: {},
             metricLabels: {},
             phrases: {},
-            showTagColumn: true,
+            showTagColumn: false,
         });
     };
 
@@ -166,7 +166,7 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
                             onChange={(e) => setShowTagCol(e.target.checked)}
                             className="h-3.5 w-3.5 rounded border-slate-300"
                         />
-                        在子表中显示「标签」列（关闭后，复制表格也不会包含该列）
+                        在子表中显示「标签」列（默认不显示；开启后，复制表格也会带上该列）
                     </label>
                     <p className="text-xs leading-relaxed text-slate-500">
                         不调用 AI。相对变化 = (当前 − 基期) ÷ |基期|。环、同均触发且方向一致时合并为一条（如「同环比异常下降」）。占位符：{' '}

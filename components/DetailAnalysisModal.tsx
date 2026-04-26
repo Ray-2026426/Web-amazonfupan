@@ -376,7 +376,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
     const [copyFeishuHint, setCopyFeishuHint] = useState<'idle' | 'ok' | 'err'>('idle');
     const [subtableDiagnosisOpen, setSubtableDiagnosisOpen] = useState(false);
     const [diagnosisSettings, setDiagnosisSettings] = useState(() => loadSubtableDiagnosisSettings());
-    const tagColumnVisible = diagnosisSettings.showTagColumn !== false;
+    const tagColumnVisible = diagnosisSettings.showTagColumn === true;
     const prevTagColumnVisible = useRef<boolean | null>(null);
     useEffect(() => {
         if (prevTagColumnVisible.current === null) {
@@ -842,7 +842,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             ];
             const plTagCol = { title: '标签', key: 'tags', isDiagnosis: true, formatter: (_n: number) => '—' };
             const plTrendCol = { title: '趋势', key: 'trend', isTrend: true, isInteractive: true, triggerTrend: true };
-            if (diagnosisSettings.showTagColumn !== false) {
+            if (diagnosisSettings.showTagColumn === true) {
                 return [...plCols, plTagCol, plTrendCol];
             }
             return [...plCols, plTrendCol];
@@ -878,7 +878,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             ];
             const trTagCol = { title: '标签', key: 'tags', isDiagnosis: true, formatter: (_n: number) => '—' };
             const trTrendCol = { title: '趋势', key: 'trend', isTrend: true, isInteractive: true, triggerTrend: true };
-            if (diagnosisSettings.showTagColumn !== false) {
+            if (diagnosisSettings.showTagColumn === true) {
                 return [...trCols, trTagCol, trTrendCol];
             }
             return [...trCols, trTrendCol];

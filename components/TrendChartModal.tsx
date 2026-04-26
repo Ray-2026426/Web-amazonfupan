@@ -145,9 +145,11 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
     useEffect(() => {
         if (isOpen) {
             setChartWeekly(sidebarWeeklyMode);
-            const preferred = ['销售额', '毛利额', '毛利率'].filter(t => columns.some(c => c.title === t));
+            const preferred = ['销量', '毛利率', '广告占比', '退款占比', '头程占比'].filter(t =>
+                columns.some(c => c.title === t)
+            );
             setSelectedMetrics(
-                preferred.length > 0 ? preferred : columns.slice(0, Math.min(3, columns.length)).map(c => c.title)
+                preferred.length > 0 ? preferred : columns.slice(0, Math.min(5, columns.length)).map(c => c.title)
             );
         }
     }, [isOpen, sidebarWeeklyMode, columns]);
@@ -158,7 +160,7 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
                 if (prev.length === 1) return prev; // Keep at least one
                 return prev.filter(m => m !== title);
             }
-            if (prev.length >= 5) return prev; // Max 5 metrics to avoid clutter
+            if (prev.length >= 7) return prev; // Max 7 metrics to avoid clutter
             return [...prev, title];
         });
     };
@@ -300,7 +302,7 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
                         </div>
                         <div className="min-w-0">
                             <h2 className="truncate text-base font-semibold tracking-tight">趋势 · {title}</h2>
-                            <p className="truncate text-[10px] text-slate-400">最多 5 项 · 结果 / 过程 / 目标</p>
+                            <p className="truncate text-[10px] text-slate-400">最多 7 项 · 结果 / 过程 / 目标</p>
                         </div>
                     </div>
                     <button type="button" onClick={onClose} className="flex-shrink-0 rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white">
