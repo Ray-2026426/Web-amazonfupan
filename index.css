@@ -1,1 +1,223 @@
-/* 预留样式；主要样式在 index.html 内联与 Tailwind CDN */
+/*
+ * 主题样式（亮 / 暗）
+ *
+ * 暗色模式参考 GitHub Dark（数据密集型界面长时间阅读舒适）：
+ *  - 页面底色：#0d1117（最沉）
+ *  - 卡片表面：#161b22（轻微抬升，比底色「亮一档」）
+ *  - 卡内子区域：#1c2128
+ *  - 表头/分块：#21262d
+ *  - 边框：#30363d（清晰可见但不喧宾夺主）
+ *  - 主文字：#e6edf3（柔白，不刺眼）
+ *  - 次要文字：#c9d1d9 / #8b949e
+ *  - 蓝色强调：#58a6ff（柔和的 GitHub 蓝，识别度高且不灼眼）
+ *  - 彩色强调（sky/emerald/amber/rose 等）：统一提亮到 -300/-400 档
+ *
+ * 实现方式：在 html.dark 下覆盖 Tailwind 常用工具类，整站统一变暗，
+ *           无需逐组件添加 dark: 变体。!important 用于稳定胜过 Tailwind CDN
+ *           运行时注入的样式。
+ */
+
+:root { color-scheme: light; }
+html.dark { color-scheme: dark; }
+
+/* ---------- 基础底色与字色 ---------- */
+html.dark body {
+    background-color: #0d1117 !important;
+    color: #e6edf3;
+}
+
+/* App 根容器使用了浅色径向渐变；暗色下统一为单色深底，避免色相突兀 */
+html.dark [class*="radial-gradient"] {
+    background-image: none !important;
+    background-color: transparent !important;
+}
+
+/* ---------- 表面层级：page < card < subtle < header ---------- */
+html.dark .bg-white { background-color: #161b22 !important; }
+html.dark .bg-white\/60 { background-color: rgba(22, 27, 34, 0.60) !important; }
+html.dark .bg-white\/70 { background-color: rgba(22, 27, 34, 0.70) !important; }
+html.dark .bg-white\/75 { background-color: rgba(22, 27, 34, 0.75) !important; }
+html.dark .bg-white\/80 { background-color: rgba(22, 27, 34, 0.80) !important; }
+html.dark .bg-white\/85 { background-color: rgba(22, 27, 34, 0.85) !important; }
+html.dark .bg-white\/90 { background-color: rgba(22, 27, 34, 0.90) !important; }
+
+html.dark .bg-slate-50 { background-color: #1c2128 !important; }
+html.dark .bg-slate-50\/60 { background-color: rgba(28, 33, 40, 0.60) !important; }
+html.dark .bg-slate-50\/80 { background-color: rgba(28, 33, 40, 0.80) !important; }
+html.dark .bg-slate-50\/90 { background-color: rgba(28, 33, 40, 0.90) !important; }
+
+/* 主页面 P&L / 流量表格的「偶数列斑马底」——
+ * 原本是 35% 透明的浅白叠在白底上（淡灰列），暗色下浏览器仍会画浅白半透明，
+ * 叠在深色卡片上就出现「脏灰色块」。这里用极淡的「白色 tint」做克制的斑马效果。
+ */
+html.dark .bg-slate-50\/30,
+html.dark .even\:bg-slate-50\/30:nth-child(even),
+html.dark .bg-slate-50\/35,
+html.dark .even\:bg-slate-50\/35:nth-child(even),
+html.dark .bg-slate-50\/40,
+html.dark .even\:bg-slate-50\/40:nth-child(even),
+html.dark .bg-slate-50\/50,
+html.dark .even\:bg-slate-50\/50:nth-child(even) {
+    background-color: rgba(177, 186, 196, 0.05) !important;
+}
+
+html.dark .bg-slate-100 { background-color: #21262d !important; }
+html.dark .bg-slate-100\/80 { background-color: rgba(33, 38, 45, 0.80) !important; }
+
+html.dark .bg-slate-200 { background-color: #2d333b !important; }
+html.dark .bg-slate-300 { background-color: #3e4651 !important; }
+
+/* 原本就是「深底白字」的元素（模态顶栏等）保持深色 */
+html.dark .bg-slate-700 { background-color: #21262d !important; }
+html.dark .bg-slate-800 { background-color: #161b22 !important; }
+html.dark .bg-slate-900 { background-color: #0d1117 !important; }
+html.dark .bg-slate-900\/60 { background-color: rgba(1, 4, 9, 0.65) !important; }
+
+/* ---------- 文字色（柔白系，不刺眼） ----------
+ * 注意：text-slate-100/200/300 在项目里基本都用于「深底浅字」场景（如侧栏、
+ * 模态深色头），暗色下必须继续保持「浅色」，否则会出现深灰压深底的情况。
+ */
+html.dark .text-slate-900,
+html.dark .text-slate-800 { color: #e6edf3 !important; }
+html.dark .text-slate-700,
+html.dark .text-slate-600 { color: #c9d1d9 !important; }
+html.dark .text-slate-500 { color: #8b949e !important; }
+html.dark .text-slate-400 { color: #9aa4ae !important; }
+/* slate-300：原色 #cbd5e1，深底上的次要文字 —— 暗色下仍保持浅色 */
+html.dark .text-slate-300 { color: #c9d1d9 !important; }
+/* slate-200：原色 #e2e8f0，深底上的主要文字 —— 暗色下保持更亮的浅色 */
+html.dark .text-slate-200 { color: #dde3ea !important; }
+/* slate-100：原色 #f1f5f9，深底上的高亮文字 —— 不覆盖（默认即很浅） */
+html.dark .text-white { color: #f0f6fc !important; }
+
+/* ---------- 边框（关键：卡片必须有可见轮廓） ---------- */
+html.dark .border-slate-100 { border-color: #21262d !important; }
+html.dark .border-slate-200 { border-color: #30363d !important; }
+html.dark .border-slate-300 { border-color: #3e4651 !important; }
+html.dark .border-slate-700,
+html.dark .border-slate-800 { border-color: #30363d !important; }
+
+/* white 半透明边框：在浅色下是「淡白边」，暗色下必须提亮成可见的灰蓝色，
+   否则概览卡片、表格容器等全部失去轮廓，看起来「飘在底上」 */
+html.dark .border-white { border-color: #30363d !important; }
+html.dark .border-white\/60,
+html.dark .border-white\/70,
+html.dark .border-white\/75,
+html.dark .border-white\/80,
+html.dark .border-white\/90 { border-color: #30363d !important; }
+
+/* divide-x / divide-y 工具类 */
+html.dark .divide-slate-100 > * + * { border-color: #21262d !important; }
+html.dark .divide-slate-200 > * + * { border-color: #30363d !important; }
+
+/* ---------- Ring（外描边）：用于概览卡的色感装饰 ---------- */
+html.dark .ring-slate-100 { --tw-ring-color: rgba(33, 38, 45, 0.9) !important; }
+html.dark .ring-slate-200 { --tw-ring-color: rgba(48, 54, 61, 0.9) !important; }
+html.dark .ring-slate-200\/70,
+html.dark .ring-slate-200\/80 { --tw-ring-color: rgba(48, 54, 61, 0.75) !important; }
+
+/* 概览卡使用 ring-{颜色}-200/80（柔粉色描边）；暗色下需提亮 */
+html.dark .ring-sky-100,
+html.dark .ring-sky-200,
+html.dark .ring-sky-200\/80 { --tw-ring-color: rgba(56, 189, 248, 0.40) !important; }
+html.dark .ring-emerald-100,
+html.dark .ring-emerald-200,
+html.dark .ring-emerald-200\/80 { --tw-ring-color: rgba(52, 211, 153, 0.40) !important; }
+html.dark .ring-amber-100,
+html.dark .ring-amber-200,
+html.dark .ring-amber-200\/80 { --tw-ring-color: rgba(251, 191, 36, 0.40) !important; }
+html.dark .ring-rose-100,
+html.dark .ring-rose-200,
+html.dark .ring-rose-200\/80 { --tw-ring-color: rgba(251, 113, 133, 0.45) !important; }
+
+/* ---------- 彩色强调（sky / emerald / amber / rose）：-700 改 -300，-200 边框改更亮 ---------- */
+/* sky */
+html.dark .text-sky-700 { color: #7dd3fc !important; }
+html.dark .text-sky-600 { color: #38bdf8 !important; }
+html.dark .border-sky-200,
+html.dark .border-sky-200\/80 { border-color: rgba(56, 189, 248, 0.40) !important; }
+html.dark .bg-sky-500\/10 { background-color: rgba(56, 189, 248, 0.18) !important; }
+html.dark .bg-sky-500\/15 { background-color: rgba(56, 189, 248, 0.22) !important; }
+html.dark .hover\:bg-sky-100:hover { background-color: rgba(56, 189, 248, 0.18) !important; }
+
+/* emerald */
+html.dark .text-emerald-700 { color: #6ee7b7 !important; }
+html.dark .text-emerald-600 { color: #34d399 !important; }
+html.dark .border-emerald-200,
+html.dark .border-emerald-200\/80 { border-color: rgba(52, 211, 153, 0.40) !important; }
+html.dark .bg-emerald-500\/10 { background-color: rgba(52, 211, 153, 0.18) !important; }
+html.dark .bg-emerald-500\/15 { background-color: rgba(52, 211, 153, 0.22) !important; }
+
+/* amber */
+html.dark .text-amber-700 { color: #fcd34d !important; }
+html.dark .text-amber-600 { color: #fbbf24 !important; }
+html.dark .border-amber-200,
+html.dark .border-amber-200\/80 { border-color: rgba(251, 191, 36, 0.40) !important; }
+html.dark .bg-amber-500\/10 { background-color: rgba(251, 191, 36, 0.18) !important; }
+html.dark .bg-amber-500\/15 { background-color: rgba(251, 191, 36, 0.22) !important; }
+
+/* rose */
+html.dark .text-rose-700 { color: #fda4af !important; }
+html.dark .text-rose-600 { color: #fb7185 !important; }
+html.dark .text-rose-500 { color: #fb7185 !important; }
+html.dark .border-rose-200,
+html.dark .border-rose-200\/80 { border-color: rgba(251, 113, 133, 0.45) !important; }
+html.dark .bg-rose-500\/10 { background-color: rgba(251, 113, 133, 0.20) !important; }
+html.dark .bg-rose-500\/15 { background-color: rgba(251, 113, 133, 0.25) !important; }
+
+/* violet / indigo */
+html.dark .text-violet-600 { color: #c4b5fd !important; }
+html.dark .text-violet-100 { color: #ede9fe !important; }
+html.dark .bg-violet-500\/15 { background-color: rgba(167, 139, 250, 0.22) !important; }
+html.dark .bg-violet-500\/25 { background-color: rgba(167, 139, 250, 0.30) !important; }
+html.dark .border-violet-300\/30 { border-color: rgba(167, 139, 250, 0.35) !important; }
+html.dark .hover\:bg-violet-500\/25:hover { background-color: rgba(167, 139, 250, 0.32) !important; }
+
+/* green / red (退货/同比文字) */
+html.dark .text-green-600 { color: #4ade80 !important; }
+html.dark .text-red-500 { color: #f87171 !important; }
+
+/* ---------- 交互态：hover（GitHub 风格的极淡白色 tint） ---------- */
+html.dark .hover\:bg-slate-50:hover { background-color: rgba(177, 186, 196, 0.08) !important; }
+html.dark .hover\:bg-slate-100:hover { background-color: rgba(177, 186, 196, 0.12) !important; }
+html.dark .hover\:bg-slate-200:hover { background-color: rgba(177, 186, 196, 0.16) !important; }
+html.dark .hover\:bg-slate-700:hover { background-color: #2d333b !important; }
+html.dark .hover\:bg-blue-50:hover { background-color: rgba(56, 139, 253, 0.18) !important; }
+html.dark .hover\:bg-blue-50\/30:hover { background-color: rgba(56, 139, 253, 0.10) !important; }
+
+/* ---------- 蓝色强调（柔和 GitHub 蓝） ---------- */
+html.dark .bg-blue-50 { background-color: rgba(56, 139, 253, 0.15) !important; }
+html.dark .bg-blue-50\/30 { background-color: rgba(56, 139, 253, 0.10) !important; }
+html.dark .text-blue-700,
+html.dark .text-blue-600 { color: #58a6ff !important; }
+html.dark .border-blue-200,
+html.dark .border-blue-300,
+html.dark .border-blue-400,
+html.dark .border-blue-500 { border-color: rgba(56, 139, 253, 0.45) !important; }
+
+/* ---------- 主页面三大表格的深色「条带」头部—— 颜色加暖一点，避免和卡片粘连 ---------- */
+html.dark .bg-\[linear-gradient\(135deg\2c \#0f172a_0\%\2c \#172554_100\%\)\] {
+    background-image: linear-gradient(135deg, #161b22 0%, #1d2434 100%) !important;
+}
+
+/* ---------- 滚动条（与暗底协调） ---------- */
+html.dark .custom-scroll::-webkit-scrollbar-track { background: #0d1117; }
+html.dark .custom-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+html.dark .custom-scroll::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+/* ---------- 输入框：保证文字与占位符可见 ---------- */
+html.dark input,
+html.dark textarea,
+html.dark select { color: #e6edf3; }
+html.dark input::placeholder,
+html.dark textarea::placeholder { color: #6e7681 !important; }
+
+/* 阴影在暗色下几乎不可见且会形成「灰雾」，弱化全局 shadow */
+html.dark [class*="shadow-"] {
+    --tw-shadow-color: rgba(0, 0, 0, 0.55);
+    --tw-shadow: 0 0 #0000;
+}
+
+/* ---------- 主题切换按钮动效 ---------- */
+.theme-toggle-btn { transition: background-color .2s ease, color .2s ease, transform .15s ease; }
+.theme-toggle-btn:active { transform: scale(0.96); }
