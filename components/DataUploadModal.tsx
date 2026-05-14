@@ -4,6 +4,7 @@ import { Upload, FileSpreadsheet, X, CheckCircle, AlertCircle, Info, HelpCircle,
 import { DataSourceDebugInfo } from '../types';
 import { PERFORMANCE_ALIASES, COLUMN_DISPLAY_NAMES } from '../dataLoader';
 import { assignFilesToSlots, UploadSlots, UPLOAD_SLOT_LABELS, UploadSlotKey, listMissingOptionalSlots } from '../uploadFileClassifier';
+import { useEscClose } from './useEscClose';
 
 export type DataUploadResult = {
     reports: DataSourceDebugInfo[];
@@ -58,6 +59,8 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
             return () => clearTimeout(timer);
         }
     }, [isOpen]);
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 

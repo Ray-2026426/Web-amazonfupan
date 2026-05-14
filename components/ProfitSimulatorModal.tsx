@@ -5,6 +5,7 @@ import { X, Calculator, Search, AlertCircle, ChevronDown, Check, ArrowRight, Lay
 import { DataRow, FilterState } from '../types';
 // Fixed: Add missing formatPrice import
 import { formatMoney, formatPercent, formatNumber, formatMoneyNoDecimals, getCurrencySymbol, formatPrice } from '../utils';
+import { useEscClose } from './useEscClose';
 
 interface ProfitSimulatorModalProps {
     isOpen: boolean;
@@ -26,10 +27,10 @@ const SearchableSelect = ({ options, value, onChange, placeholder, icon }: { opt
 
     useEffect(() => {
         const handleClick = (e: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
                 setIsOpen(false);
             }
-        }
+        };
         document.addEventListener('mousedown', handleClick);
         return () => document.removeEventListener('mousedown', handleClick);
     }, []);
@@ -505,6 +506,8 @@ export const ProfitSimulatorModal: React.FC<ProfitSimulatorModalProps> = ({ isOp
             </div>
         </div>
     );
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 

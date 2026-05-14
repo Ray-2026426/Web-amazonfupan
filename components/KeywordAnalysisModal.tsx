@@ -6,6 +6,7 @@ import { SearchTermRow } from '../types';
 import { formatNumber, formatMoney, formatPercent, formatMoneyNoDecimals } from '../utils';
 import { PromptSettingsModal, getActivePromptSettings } from './PromptSettingsModal';
 import { hasConfiguredAiApi, unifiedGenerateContent } from './aiUnifiedGenerate';
+import { useEscClose } from './useEscClose';
 
 interface KeywordAnalysisModalProps {
     isOpen: boolean;
@@ -175,6 +176,8 @@ const SettingsPanel = ({
     const [localSettings, setLocalSettings] = useState(settings);
 
     useEffect(() => { setLocalSettings(settings); }, [settings, isOpen]);
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 
@@ -605,6 +608,8 @@ export const KeywordAnalysisModal: React.FC<KeywordAnalysisModalProps> = ({ isOp
         if (sortConfig.key !== colKey) return <div className="flex flex-col opacity-20"><ArrowUp className="w-2 h-2"/><ArrowDown className="w-2 h-2"/></div>;
         return sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 text-indigo-600"/> : <ArrowDown className="w-3 h-3 text-indigo-600"/>;
     };
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 

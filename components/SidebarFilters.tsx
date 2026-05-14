@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FilterState, DataRow, InventoryRow, TargetRow } from '../types';
 import { Filter, User, Tag, Layers, Box, Hash, Globe, ChevronDown, Check, Search, XCircle, Store, ShoppingBag, CalendarRange, AlertCircle, CalendarClock, Calendar, BookOpen, X, CalendarDays, History, Square } from 'lucide-react';
 import { getISOWeekDateRange, formatDate, formatBusinessWeekFromDateStr, getBusinessWeekRangeFromYearWeek } from '../utils';
+import { useEscClose } from './useEscClose';
 
 interface SidebarProps {
   data: DataRow[];
@@ -16,6 +17,7 @@ interface SidebarProps {
 
 // --- User Guide Modal (Unchanged) ---
 const UserGuideModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+    useEscClose(isOpen, onClose);
     if (!isOpen) return null;
     const steps = [
         { title: "1. 数据接入", icon: <Layers className="w-5 h-5 text-blue-500" />, content: "点击右上角的 '导入数据源'。支持业绩报告、库存报告、退货及评论报告。" },

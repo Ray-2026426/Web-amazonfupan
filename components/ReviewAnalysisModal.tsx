@@ -9,6 +9,7 @@ import { ReviewRow, DataRow, FilterState } from '../types';
 import { formatNumber, formatPercent } from '../utils';
 import { PromptSettingsModal, getActivePromptSettings } from './PromptSettingsModal';
 import { hasConfiguredAiApi, unifiedGenerateContent, AI_API_SETUP_HINT } from './aiUnifiedGenerate';
+import { useEscClose } from './useEscClose';
 
 interface ReviewAnalysisModalProps {
     isOpen: boolean;
@@ -442,6 +443,8 @@ const ClusteringSettingsModal = ({ isOpen, onClose, onSave, initialRules }: any)
         }
     }
 
+    useEscClose(isOpen, onClose);
+
     if (!isOpen) return null;
 
     return (
@@ -533,8 +536,9 @@ const PainPointBarChart = ({ data, colorClass, onBarClick, activeLabel }: { data
 
 // --- Expert Report Overlay ---
 const ExpertReportOverlay = ({ isOpen, onClose, onGenerate, report, isGenerating, onReset }: any) => {
-    if (!isOpen) return null;
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    useEscClose(isOpen, onClose);
+    if (!isOpen) return null;
     return (
         <div className="fixed inset-0 z-[150] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
             <div className="bg-white w-full max-w-2xl max-h-[80vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
@@ -797,6 +801,8 @@ export const ReviewAnalysisModal: React.FC<ReviewAnalysisModalProps> = ({ isOpen
             setIsExporting(false);
         }
     };
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 

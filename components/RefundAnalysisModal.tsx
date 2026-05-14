@@ -9,6 +9,7 @@ import { RefundRow, DataRow, FilterState } from '../types';
 import { formatNumber, formatPercent, formatMoney, formatMoneyNoDecimals } from '../utils';
 import { PromptSettingsModal, getActivePromptSettings } from './PromptSettingsModal';
 import { hasConfiguredAiApi, unifiedGenerateContent, AI_API_SETUP_HINT } from './aiUnifiedGenerate';
+import { useEscClose } from './useEscClose';
 
 interface RefundAnalysisModalProps {
     isOpen: boolean;
@@ -189,6 +190,8 @@ const ClusteringSettingsModal = ({ isOpen, onClose, onSave, initialRules }: any)
         }
     }
 
+    useEscClose(isOpen, onClose);
+
     if (!isOpen) return null;
 
     return (
@@ -251,9 +254,10 @@ const ClusteringSettingsModal = ({ isOpen, onClose, onSave, initialRules }: any)
 };
 
 const ExpertReportOverlay = ({ isOpen, onClose, onGenerate, report, isGenerating, onReset }: any) => {
-    if (!isOpen) return null;
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [copied, setCopied] = useState(false);
+    useEscClose(isOpen, onClose);
+    if (!isOpen) return null;
 
     const handleCopyMarkdown = async () => {
         if (!report) return;
@@ -954,6 +958,8 @@ export const RefundAnalysisModal: React.FC<RefundAnalysisModalProps> = ({ isOpen
             setIsExporting(false);
         }
     };
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 

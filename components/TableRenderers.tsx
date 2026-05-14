@@ -31,13 +31,27 @@ const ComparisonLine = ({
     type: 'percent' | 'absolute_val' | 'absolute_percent'
 }) => {
     if (baseline === undefined || baseline === null) return null;
-    
-    let pct = 0;
-    if (type === 'absolute_percent') {
-        pct = current - baseline;
-    } else {
-        pct = baseline !== 0 ? (current - baseline) / baseline : 0;
+
+    // 「基期为 0」语义化展示：
+    //  - 当前期 > 0：标记为「New」（从无到有，新增业务）
+    //  - 当前期 = 0：标记为「—」（两期都为 0，不可比）
+    //  - 仅 percent 类型才会涉及除以基期，absolute_val / absolute_percent 仍按差值显示
+    const isRelative = type === 'percent';
+    if (isRelative && baseline === 0) {
+        const tone = current > 0
+            ? 'text-emerald-600 bg-emerald-500/10 border-emerald-200'
+            : 'text-slate-400 bg-slate-100 border-slate-200';
+        const label2 = current > 0 ? 'New' : '—';
+        return (
+            <div className="mt-1.5 flex items-center justify-end gap-1.5 whitespace-nowrap text-[10px] font-mono text-slate-400">
+                <span className="uppercase tracking-[0.2em] opacity-70">{label}</span>
+                <span>{formatter(baseline)}</span>
+                <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 font-semibold ${tone}`}>{label2}</span>
+            </div>
+        );
     }
+
+    const pct = type === 'absolute_percent' ? (current - baseline) : ((current - baseline) / baseline);
 
     const isPositive = pct > 0;
     const isZero = pct === 0;

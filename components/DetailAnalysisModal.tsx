@@ -12,6 +12,7 @@ import {
     loadSubtableDiagnosisSettings,
 } from './subtableDiagnosis';
 import { SubtableDiagnosisSettingsModal } from './SubtableDiagnosisSettingsModal';
+import { useEscClose } from './useEscClose';
 
 interface DetailAnalysisModalProps {
     isOpen: boolean;
@@ -590,10 +591,17 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
 
     const renderDiff = (curr: number, base: number | undefined, type: string) => {
         if (base === undefined || base === null) return <span className="text-slate-300">-</span>;
-        let val = 0;
-        if (type === 'absolute_percent' || type === 'absolute_val') val = curr - base;
-        else val = base !== 0 ? (curr - base) / base : 0;
-        
+
+        // 基期为 0 时：percent 类型用「New / —」替代 0.00%，避免误读为「无变化」
+        if (type === 'percent' && base === 0) {
+            if (curr > 0) return <span className="text-green-600 font-mono ml-1">New</span>;
+            return <span className="text-slate-400 font-mono ml-1">—</span>;
+        }
+
+        const val = (type === 'absolute_percent' || type === 'absolute_val')
+            ? curr - base
+            : (curr - base) / base;
+
         const isPos = val > 0;
         const color = isPos ? 'text-green-600' : (val === 0 ? 'text-slate-400' : 'text-red-500');
         const txt = type === 'absolute_val' ? val.toFixed(2) : (val * 100).toFixed(2) + '%';
@@ -1084,9 +1092,13 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
 
     const formatDiffForCopy = (curr: number, base: number | undefined, diffType: string): string | null => {
         if (base === undefined || base === null) return null;
-        let val = 0;
-        if (diffType === 'absolute_percent' || diffType === 'absolute_val') val = curr - base;
-        else val = base !== 0 ? (curr - base) / base : 0;
+        // 复制到飞书/纯文本：基期为 0 时输出 New / — 而不是 0.00%
+        if (diffType === 'percent' && base === 0) {
+            return curr > 0 ? 'New' : '—';
+        }
+        const val = (diffType === 'absolute_percent' || diffType === 'absolute_val')
+            ? curr - base
+            : (curr - base) / base;
         const isPos = val > 0;
         const icon = isPos ? '↑' : (val === 0 ? '' : '↓');
         const txt = diffType === 'absolute_val' ? val.toFixed(2) : (val * 100).toFixed(2) + '%';
@@ -1126,9 +1138,15 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
 
     const diffHtmlFragment = (curr: number, base: number | undefined, diffType: string): string | null => {
         if (base === undefined || base === null) return null;
-        let val = 0;
-        if (diffType === 'absolute_percent' || diffType === 'absolute_val') val = curr - base;
-        else val = base !== 0 ? (curr - base) / base : 0;
+        // 复制到飞书的 HTML 片段：基期为 0 时同样使用 New / — 文案
+        if (diffType === 'percent' && base === 0) {
+            const color = curr > 0 ? COPY.green : COPY.slate400;
+            const label = curr > 0 ? 'New' : '—';
+            return `<span style="color:${color};font-family:ui-monospace,monospace;font-weight:600;">${escapeHtml(label)}</span>`;
+        }
+        const val = (diffType === 'absolute_percent' || diffType === 'absolute_val')
+            ? curr - base
+            : (curr - base) / base;
         const isPos = val > 0;
         const color = isPos ? COPY.green : val === 0 ? COPY.slate400 : COPY.red;
         const txt = diffType === 'absolute_val' ? val.toFixed(2) : (val * 100).toFixed(2) + '%';
@@ -1777,6 +1795,8 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             setTrendModalOpen(true);
         }
     };
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 

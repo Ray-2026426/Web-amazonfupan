@@ -9,6 +9,7 @@ import {
     loadChatApiSettings,
     saveChatApiSettings,
 } from './aiApiConfig';
+import { useEscClose } from './useEscClose';
 
 interface PromptSettingsModalProps {
     isOpen: boolean;
@@ -89,6 +90,8 @@ export const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({
             }
         }
     };
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 

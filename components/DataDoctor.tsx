@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { DataRow, TargetRow } from '../types';
 import { X, CheckCircle, AlertTriangle, Stethoscope, Target, FileText, BarChart3, Search } from 'lucide-react';
 import { formatNumber, formatMoney } from '../utils';
+import { useEscClose } from './useEscClose';
 
 interface DataDoctorProps {
     isOpen: boolean;
@@ -14,6 +15,8 @@ interface DataDoctorProps {
 
 export const DataDoctor: React.FC<DataDoctorProps> = ({ isOpen, onClose, monthlyData, weeklyData, targetData = [] }) => {
     const [activeTab, setActiveTab] = useState<'monthly' | 'weekly' | 'target'>('target'); // Default to target as user has issues there
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 

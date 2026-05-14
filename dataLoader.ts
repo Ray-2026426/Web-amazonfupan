@@ -375,17 +375,94 @@ export const SEARCH_TERM_ALIASES: Record<string, string[]> = {
 };
 
 // ... (Helper Functions like readExcel, mapHeaderToKey, parseNumber, formatExcelDate, synthesizeDate, synthesizeWeekDate, formatExcelMonth remain unchanged) ...
-const readExcel = (file: File): Promise<any[]> => {
+
+/**
+ * 读 Excel 的返回结构。
+ *  - rawData:     最终用来解析的二维数组（已选中的 Sheet 内容）
+ *  - sheetName:   实际选用的 Sheet 名
+ *  - allSheets:   工作簿里全部 Sheet 名（用于提示用户）
+ *  - sheetScores: 每个 Sheet 的"打分细节"（行数、匹配到的列数），便于在数据诊断面板里追溯
+ */
+type ReadExcelResult = {
+    rawData: any[];
+    sheetName: string;
+    allSheets: string[];
+    sheetScores: { name: string; rows: number; matchedHeaders: number }[];
+};
+
+/**
+ * 读 Excel：
+ * 1) 若只有 1 个 Sheet 或没传别名表 → 退回老逻辑，读第 1 张
+ * 2) 若多个 Sheet → 逐张试读，按"能匹配上几个标准列"打分，分高者胜出
+ *    打分公式：matchedHeaders * 10000 + rows（先比匹配列数，再比行数）
+ *    空 Sheet 直接排除；都为空时退回第 1 张
+ */
+const readExcel = (
+    file: File,
+    aliasMap?: Record<string, string[]>
+): Promise<ReadExcelResult> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
                 const data = e.target?.result;
                 const workbook = XLSX.read(data, { type: 'binary' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
-                resolve(jsonData);
+                const sheetNames = workbook.SheetNames;
+
+                if (sheetNames.length === 0) {
+                    return resolve({ rawData: [], sheetName: '', allSheets: [], sheetScores: [] });
+                }
+
+                if (!aliasMap || sheetNames.length === 1) {
+                    const sheetName = sheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+                    return resolve({
+                        rawData: jsonData,
+                        sheetName,
+                        allSheets: sheetNames,
+                        sheetScores: [{ name: sheetName, rows: jsonData.length, matchedHeaders: 0 }],
+                    });
+                }
+
+                // 多 Sheet：逐一打分
+                const cache: Record<string, any[]> = {};
+                const scores: { name: string; rows: number; matchedHeaders: number }[] = [];
+
+                for (const name of sheetNames) {
+                    const ws = workbook.Sheets[name];
+                    const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
+                    cache[name] = json;
+                    let matched = 0;
+                    if (json.length > 0) {
+                        const sample = json[0] as Record<string, any>;
+                        for (const h of Object.keys(sample)) {
+                            if (mapHeaderToKey(h, aliasMap)) matched++;
+                        }
+                    }
+                    scores.push({ name, rows: json.length, matchedHeaders: matched });
+                }
+
+                const candidates = scores.filter(s => s.rows > 0);
+                let bestName: string;
+                if (candidates.length === 0) {
+                    bestName = sheetNames[0];
+                } else {
+                    let best = candidates[0];
+                    for (const c of candidates) {
+                        const cScore = c.matchedHeaders * 10000 + c.rows;
+                        const bScore = best.matchedHeaders * 10000 + best.rows;
+                        if (cScore > bScore) best = c;
+                    }
+                    bestName = best.name;
+                }
+
+                resolve({
+                    rawData: cache[bestName] || [],
+                    sheetName: bestName,
+                    allSheets: sheetNames,
+                    sheetScores: scores,
+                });
             } catch (error) {
                 reject(error);
             }
@@ -393,6 +470,27 @@ const readExcel = (file: File): Promise<any[]> => {
         reader.onerror = (error) => reject(error);
         reader.readAsBinaryString(file);
     });
+};
+
+/**
+ * 给 debug 报告补充"已用哪张 Sheet / 其他 Sheet 是什么"的提示。
+ * 当文件只有 1 张表时不打扰；多张表时一律附上工作表清单，便于用户核对。
+ */
+const annotateSheetSelection = (
+    debug: DataSourceDebugInfo,
+    res: ReadExcelResult
+): void => {
+    if (res.allSheets.length <= 1) return;
+    debug.mappedColumns['__sheet_used__'] = `已使用工作表「${res.sheetName}」（共 ${res.allSheets.length} 张）`;
+    const others = res.sheetScores
+        .filter(s => s.name !== res.sheetName)
+        .map(s => `${s.name}（${s.rows} 行 / 匹配列 ${s.matchedHeaders}）`)
+        .join('、');
+    if (others) {
+        debug.errors.push(
+            `提示：本文件含多张工作表，已自动选用「${res.sheetName}」；其他工作表 → ${others}。若识别到的不是你想要的，请把目标数据放到首张表或单独保存。`
+        );
+    }
 };
 
 const mapHeaderToKey = (header: string, aliasMap: Record<string, string[]>): string | null => {
@@ -490,8 +588,10 @@ const formatExcelMonth = (val: any): string => {
 // ... (Existing parsers: parseMonthlyPerformance, parseWeeklyPerformance, parseInventoryData, parseTargetData, parseRefundData, parseReviewData remain unchanged) ...
 export const parseMonthlyPerformance = async (file: File): Promise<ParsedDataResult<DataRow>> => {
     // ... existing implementation
-    const rawData = await readExcel(file);
+    const sheetRes = await readExcel(file, PERFORMANCE_ALIASES);
+    const rawData = sheetRes.rawData;
     const debug: DataSourceDebugInfo = { filename: file.name, totalRows: rawData.length, validRows: 0, mappedColumns: {}, unmappedHeaders: [], errors: [] };
+    annotateSheetSelection(debug, sheetRes);
     if (rawData.length === 0) { debug.errors.push("表格内容为空"); return { data: [], debug }; }
     const sampleRow = rawData[0]; const rawHeaders = Object.keys(sampleRow); const headerMap: Record<string, string> = {};
     rawHeaders.forEach(header => { const matchedKey = mapHeaderToKey(header, PERFORMANCE_ALIASES); if (matchedKey) { headerMap[header] = matchedKey; debug.mappedColumns[matchedKey] = header; } else { debug.unmappedHeaders.push(header); } });
@@ -518,8 +618,10 @@ export const parseMonthlyPerformance = async (file: File): Promise<ParsedDataRes
 
 export const parseWeeklyPerformance = async (file: File): Promise<ParsedDataResult<DataRow>> => {
     // ... existing implementation
-    const rawData = await readExcel(file);
+    const sheetRes = await readExcel(file, PERFORMANCE_ALIASES);
+    const rawData = sheetRes.rawData;
     const debug: DataSourceDebugInfo = { filename: file.name, totalRows: rawData.length, validRows: 0, mappedColumns: {}, unmappedHeaders: [], errors: [] };
+    annotateSheetSelection(debug, sheetRes);
     if (rawData.length === 0) { debug.errors.push("表格内容为空"); return { data: [], debug }; }
     const sampleRow = rawData[0]; const rawHeaders = Object.keys(sampleRow); const headerMap: Record<string, string> = {};
     rawHeaders.forEach(header => { const matchedKey = mapHeaderToKey(header, PERFORMANCE_ALIASES); if (matchedKey) { headerMap[header] = matchedKey; debug.mappedColumns[matchedKey] = header; } else { debug.unmappedHeaders.push(header); } });
@@ -545,8 +647,10 @@ export const parseWeeklyPerformance = async (file: File): Promise<ParsedDataResu
 
 export const parseInventoryData = async (file: File): Promise<ParsedDataResult<InventoryRow>> => {
     // ... existing implementation
-    const rawData = await readExcel(file);
+    const sheetRes = await readExcel(file, INVENTORY_ALIASES);
+    const rawData = sheetRes.rawData;
     const debug: DataSourceDebugInfo = { filename: file.name, totalRows: rawData.length, validRows: 0, mappedColumns: {}, unmappedHeaders: [], errors: [] };
+    annotateSheetSelection(debug, sheetRes);
     if (rawData.length === 0) { debug.errors.push("表格内容为空"); return { data: [], debug }; }
     const sampleRow = rawData[0]; const rawHeaders = Object.keys(sampleRow); const headerMap: Record<string, string> = {};
     rawHeaders.forEach(header => { const matchedKey = mapHeaderToKey(header, INVENTORY_ALIASES); if (matchedKey) { headerMap[header] = matchedKey; debug.mappedColumns[matchedKey] = header; } else { debug.unmappedHeaders.push(header); } });
@@ -571,8 +675,10 @@ export const parseInventoryData = async (file: File): Promise<ParsedDataResult<I
 
 export const parseTargetData = async (file: File): Promise<ParsedDataResult<TargetRow>> => {
     // ... existing implementation
-    const rawData = await readExcel(file);
+    const sheetRes = await readExcel(file, TARGET_ALIASES);
+    const rawData = sheetRes.rawData;
     const debug: DataSourceDebugInfo = { filename: file.name, totalRows: rawData.length, validRows: 0, mappedColumns: {}, unmappedHeaders: [], errors: [] };
+    annotateSheetSelection(debug, sheetRes);
     if (rawData.length === 0) { debug.errors.push("目标表内容为空"); return { data: [], debug }; }
     const sampleRow = rawData[0]; const headers = Object.keys(sampleRow); const headerMap: Record<string, string> = {};
     headers.forEach(header => { const matchedKey = mapHeaderToKey(header, TARGET_ALIASES); if (matchedKey) { headerMap[header] = matchedKey; debug.mappedColumns[matchedKey] = header; } else { debug.unmappedHeaders.push(header); } });
@@ -615,8 +721,10 @@ export const parseTargetData = async (file: File): Promise<ParsedDataResult<Targ
 
 export const parseRefundData = async (file: File): Promise<ParsedDataResult<RefundRow>> => {
     // ... existing implementation
-    const rawData = await readExcel(file);
+    const sheetRes = await readExcel(file, REFUND_ALIASES);
+    const rawData = sheetRes.rawData;
     const debug: DataSourceDebugInfo = { filename: file.name, totalRows: rawData.length, validRows: 0, mappedColumns: {}, unmappedHeaders: [], errors: [] };
+    annotateSheetSelection(debug, sheetRes);
     if (rawData.length === 0) { debug.errors.push("退款表内容为空"); return { data: [], debug }; }
     const sampleRow = rawData[0]; const headers = Object.keys(sampleRow); const headerMap: Record<string, string> = {};
     headers.forEach(header => { const matchedKey = mapHeaderToKey(header, REFUND_ALIASES); if (matchedKey) { headerMap[header] = matchedKey; debug.mappedColumns[matchedKey] = header; } else { debug.unmappedHeaders.push(header); } });
@@ -638,8 +746,10 @@ export const parseRefundData = async (file: File): Promise<ParsedDataResult<Refu
 
 export const parseReviewData = async (file: File): Promise<ParsedDataResult<ReviewRow>> => {
     // ... existing implementation
-    const rawData = await readExcel(file);
+    const sheetRes = await readExcel(file, REVIEW_ALIASES);
+    const rawData = sheetRes.rawData;
     const debug: DataSourceDebugInfo = { filename: file.name, totalRows: rawData.length, validRows: 0, mappedColumns: {}, unmappedHeaders: [], errors: [] };
+    annotateSheetSelection(debug, sheetRes);
     if (rawData.length === 0) { debug.errors.push("评论表内容为空"); return { data: [], debug }; }
     const sampleRow = rawData[0]; const headers = Object.keys(sampleRow); const headerMap: Record<string, string> = {};
     headers.forEach(header => { const matchedKey = mapHeaderToKey(header, REVIEW_ALIASES); if (matchedKey) { headerMap[header] = matchedKey; debug.mappedColumns[matchedKey] = header; } else { debug.unmappedHeaders.push(header); } });
@@ -661,7 +771,8 @@ export const parseReviewData = async (file: File): Promise<ParsedDataResult<Revi
 
 // NEW: Search Term Parser
 export const parseSearchTermReport = async (file: File): Promise<ParsedDataResult<SearchTermRow>> => {
-    const rawData = await readExcel(file);
+    const sheetRes = await readExcel(file, SEARCH_TERM_ALIASES);
+    const rawData = sheetRes.rawData;
     const debug: DataSourceDebugInfo = {
         filename: file.name,
         totalRows: rawData.length,
@@ -670,6 +781,7 @@ export const parseSearchTermReport = async (file: File): Promise<ParsedDataResul
         unmappedHeaders: [],
         errors: []
     };
+    annotateSheetSelection(debug, sheetRes);
 
     if (rawData.length === 0) {
         debug.errors.push("搜索词报告为空");

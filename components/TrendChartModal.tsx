@@ -11,6 +11,7 @@ import {
     getBusinessWeekRangeFromYearWeek
 } from '../utils';
 import { Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart } from 'recharts';
+import { useEscClose } from './useEscClose';
 
 export interface TrendColumn {
     title: string;
@@ -256,6 +257,8 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
             };
         });
     }, [isOpen, baseRaw, scope, chartWeekly, sidebarWeeklyMode, columns, targetRows]);
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 

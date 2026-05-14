@@ -11,6 +11,7 @@ import {
     type SubtableDiagnosisType,
     type DiagnosisPhrases,
 } from './subtableDiagnosis';
+import { useEscClose } from './useEscClose';
 
 type Props = {
     isOpen: boolean;
@@ -71,6 +72,8 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
         setLabels(lab);
         setPhrases(mergeDiagnosisPhrases(s.phrases));
     }, [isOpen, subType]);
+
+    useEscClose(isOpen, onClose);
 
     if (!isOpen) return null;
 
