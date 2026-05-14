@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { X, Layers, Check, FileSearch, ExternalLink, Copy, ArrowUp, ArrowDown, Filter, Search as SearchIcon, Calculator, CheckSquare, Square, RefreshCcw, MessageSquare, TrendingUp, Bot, Sparkles, Loader2, Settings, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
+import { X, Layers, Check, FileSearch, ExternalLink, Copy, ArrowUp, ArrowDown, Filter, Search as SearchIcon, ListFilter, Calculator, CheckSquare, Square, RefreshCcw, MessageSquare, TrendingUp, Bot, Sparkles, Loader2, Settings, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
 import { DataRow, AggregatedData, TargetRow, InventoryRow, InventoryAggregated, FilterState } from '../types';
 import { groupDataByDimension, aggregateData, formatMoney, formatNumber, formatPercent, getPacingRatio, groupTargetsByDimension, initialAggregated, initialInventoryAggregated, getAmazonProductLink, formatPrice, groupInventoryByDimension, aggregateInventoryData, formatDate, formatMoneyNoDecimals, formatRMB, formatBusinessWeekFromDateStr, sumAggregatedData, sumInventoryAggregated } from '../utils';
 import { TrendChartModal, TrendColumn, TrendChartScope } from './TrendChartModal';
@@ -52,25 +52,85 @@ const titleMap: Record<string, string> = {
     'Inventory': 'FBA 库存深度分析'
 };
 
-/** 子表顶部：按品名 / 子ASIN / 父ASIN 关键词筛选（与列头筛选为 AND，作用于当前聚合行） */
-type SubtableQuickFilterKey = 'product_name' | 'child_asin' | 'parent_asin';
+/** 子表顶部：按选定维度字段做「包含」关键词筛选（与列头筛选为 AND，在聚合前先筛明细行） */
+type SubtableQuickFilterKey =
+    | 'product_name'
+    | 'manager'
+    | 'brand'
+    | 'country'
+    | 'child_asin'
+    | 'parent_asin'
+    | 'shop_name';
+
 const SUBTABLE_QUICK_FILTER_OPTIONS: { key: SubtableQuickFilterKey; label: string }[] = [
     { key: 'product_name', label: '品名' },
-    { key: 'child_asin', label: 'ASIN' },
+    { key: 'manager', label: '负责人' },
+    { key: 'brand', label: '品牌' },
+    { key: 'country', label: '国家' },
+    { key: 'child_asin', label: '子ASIN' },
     { key: 'parent_asin', label: '父ASIN' },
+    { key: 'shop_name', label: '店铺' },
 ];
 
-const subtableQuickGetField = (row: DataRow, key: SubtableQuickFilterKey) => {
-    if (key === 'product_name') return row.product_name;
-    if (key === 'child_asin') return row.child_asin;
-    return row.parent_asin;
+const subtableQuickGetField = (row: DataRow, key: SubtableQuickFilterKey): string => {
+    switch (key) {
+        case 'product_name':
+            return row.product_name;
+        case 'manager':
+            return row.manager;
+        case 'brand':
+            return row.brand;
+        case 'country':
+            return row.country;
+        case 'child_asin':
+            return row.child_asin;
+        case 'parent_asin':
+            return row.parent_asin;
+        case 'shop_name':
+            return row.shop_name;
+    }
 };
 
-const subtableQuickGetFieldInv = (row: InventoryRow, key: SubtableQuickFilterKey) => {
-    if (key === 'product_name') return row.product_name;
-    if (key === 'child_asin') return row.asin;
-    return row.parent_asin;
+const subtableQuickGetFieldInv = (row: InventoryRow, key: SubtableQuickFilterKey): string => {
+    switch (key) {
+        case 'product_name':
+            return row.product_name;
+        case 'manager':
+            return row.manager;
+        case 'brand':
+            return row.brand;
+        case 'country':
+            return row.country;
+        case 'child_asin':
+            return row.asin;
+        case 'parent_asin':
+            return row.parent_asin;
+        case 'shop_name':
+            return row.shop_name;
+    }
 };
+
+/** 多项精确搜索：一行一项，去重（忽略大小写），最多 MAX 条 */
+const SUBTABLE_BULK_EXACT_MAX = 200;
+function parseBulkExactInput(raw: string): { tokens: string[]; truncated: boolean } {
+    const lines = raw.split(/\r\n|\n|\r/);
+    const seen = new Set<string>();
+    const tokens: string[] = [];
+    let truncated = false;
+    for (const line of lines) {
+        const t = line.trim();
+        if (!t) continue;
+        const k = t.toLowerCase();
+        if (seen.has(k)) continue;
+        if (tokens.length >= SUBTABLE_BULK_EXACT_MAX) {
+            truncated = true;
+            break;
+        }
+        seen.add(k);
+        tokens.push(t);
+    }
+    return { tokens, truncated };
+}
 
 const SUBTABLE_PL_AI_KEY = 'detail_subtable_pl_ai';
 const SUBTABLE_TRAFFIC_AI_KEY = 'detail_subtable_traffic_ai';
@@ -275,7 +335,7 @@ const HeaderFilter = ({ dimKey, align = 'right', dimFilters, setDimFilters, sour
             
             {isOpen && (
                 <div 
-                    className={`absolute top-full mt-1 bg-white border border-slate-200 shadow-xl rounded-lg w-56 z-[60] text-left flex flex-col max-h-72 cursor-default
+                    className={`absolute top-full mt-1 bg-white border border-slate-200 shadow-xl rounded-lg w-56 z-[80] text-left flex flex-col max-h-72 cursor-default
                         ${align === 'left' ? 'left-0' : 'right-0'}
                     `} 
                     onClick={(e) => e.stopPropagation()}
@@ -363,6 +423,11 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
     const [subtableQuickText, setSubtableQuickText] = useState('');
     const [subtableQuickOpen, setSubtableQuickOpen] = useState(false);
     const subtableQuickRef = useRef<HTMLDivElement>(null);
+    const [subtableBulkOpen, setSubtableBulkOpen] = useState(false);
+    const [subtableBulkDraft, setSubtableBulkDraft] = useState('');
+    const [subtableBulkExactTokens, setSubtableBulkExactTokens] = useState<string[]>([]);
+    const [subtableBulkNotice, setSubtableBulkNotice] = useState<string | null>(null);
+    const subtableSearchBarRef = useRef<HTMLDivElement>(null);
 
     const [trendModalOpen, setTrendModalOpen] = useState(false);
     const [trendDimensions, setTrendDimensions] = useState<Record<string, string>>({});
@@ -415,13 +480,55 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         return () => document.removeEventListener('mousedown', close);
     }, [subtableQuickOpen]);
 
-    /** 顶部词筛：在按维度聚合之前，对原始业绩/库存行做「包含」匹配，不依赖是否勾选品名/ASIN 维度 */
+    useEffect(() => {
+        if (!subtableBulkNotice) return;
+        const t = window.setTimeout(() => setSubtableBulkNotice(null), 4500);
+        return () => window.clearTimeout(t);
+    }, [subtableBulkNotice]);
+
+    useEffect(() => {
+        if (!subtableBulkOpen) return;
+        const handle = (e: MouseEvent) => {
+            if (subtableSearchBarRef.current && !subtableSearchBarRef.current.contains(e.target as Node)) {
+                setSubtableBulkOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handle);
+        return () => document.removeEventListener('mousedown', handle);
+    }, [subtableBulkOpen]);
+
+    useEffect(() => {
+        setSubtableBulkExactTokens([]);
+        setSubtableBulkDraft('');
+        setSubtableBulkOpen(false);
+        setSubtableBulkNotice(null);
+    }, [subtableQuickKey]);
+
+    /** 顶部词筛集合（多项精确）：整字段精确匹配（trim 后不分大小写） */
+    const subtableBulkNormSet = useMemo(
+        () => new Set(subtableBulkExactTokens.map((t) => t.trim().toLowerCase()).filter(Boolean)),
+        [subtableBulkExactTokens]
+    );
+
+    /** 顶部词筛：在按维度聚合之前，对原始业绩/库存行做「包含」匹配；若启用了多项精确搜索，则仅做精确匹配且忽略单行关键词 */
     const subtableQuickQ = useMemo(
         () => subtableQuickText.trim().toLowerCase(),
         [subtableQuickText]
     );
 
     const plRowsForSubtable = useMemo(() => {
+        const bulkActive = subtableBulkNormSet.size > 0;
+        if (bulkActive) {
+            const match = (r: DataRow) => {
+                const v = String(subtableQuickGetField(r, subtableQuickKey) || '').trim().toLowerCase();
+                return subtableBulkNormSet.has(v);
+            };
+            return {
+                c: currentRows.filter(match),
+                l: lastRows.filter(match),
+                y: yearRows.filter(match)
+            };
+        }
         const q = subtableQuickQ;
         if (!q) {
             return { c: currentRows, l: lastRows, y: yearRows };
@@ -435,16 +542,35 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             l: lastRows.filter(match),
             y: yearRows.filter(match)
         };
-    }, [currentRows, lastRows, yearRows, subtableQuickKey, subtableQuickQ]);
+    }, [currentRows, lastRows, yearRows, subtableQuickKey, subtableQuickQ, subtableBulkNormSet]);
 
     const invRowsForSubtable = useMemo(() => {
+        const bulkActive = subtableBulkNormSet.size > 0;
+        if (bulkActive) {
+            return inventoryRows.filter((r) => {
+                const v = String(subtableQuickGetFieldInv(r, subtableQuickKey) || '').trim().toLowerCase();
+                return subtableBulkNormSet.has(v);
+            });
+        }
         const q = subtableQuickQ;
         if (!q) return inventoryRows;
         return inventoryRows.filter((r) => {
             const v = String(subtableQuickGetFieldInv(r, subtableQuickKey) || '');
             return v.toLowerCase().includes(q);
         });
-    }, [inventoryRows, subtableQuickKey, subtableQuickQ]);
+    }, [inventoryRows, subtableQuickKey, subtableQuickQ, subtableBulkNormSet]);
+
+    const applySubtableBulkExact = () => {
+        const { tokens, truncated } = parseBulkExactInput(subtableBulkDraft);
+        setSubtableBulkExactTokens(tokens);
+        setSubtableQuickText('');
+        setSubtableBulkOpen(false);
+        if (truncated) {
+            setSubtableBulkNotice(`已超出 ${SUBTABLE_BULK_EXACT_MAX} 条上限，仅保留前 ${SUBTABLE_BULK_EXACT_MAX} 项`);
+        } else {
+            setSubtableBulkNotice(null);
+        }
+    };
 
     const handleSort = (index: number) => {
         setSortConfig(prev => {
@@ -1397,7 +1523,13 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                     return `${lab} 仅保留: ${v.slice(0, 20).join('、')}${v.length > 20 ? ` 等共${v.length}项` : ''}`;
                 });
             scopeLines.push(filterParts.length > 0 ? `列头筛选: ${filterParts.join('；')}` : '列头筛选: 无（包含当前维度下全部聚合行）');
-            if (subtableQuickText.trim()) {
+            if (subtableBulkExactTokens.length > 0) {
+                const qLabel = SUBTABLE_QUICK_FILTER_OPTIONS.find((o) => o.key === subtableQuickKey)?.label || subtableQuickKey;
+                const sample = subtableBulkExactTokens.slice(0, 12).join('、');
+                scopeLines.push(
+                    `多项精确搜索(且，先筛明细再汇总): 字段=${qLabel}，共 ${subtableBulkExactTokens.length} 项；示例：${sample}${subtableBulkExactTokens.length > 12 ? '…' : ''}`
+                );
+            } else if (subtableQuickText.trim()) {
                 const qLabel = SUBTABLE_QUICK_FILTER_OPTIONS.find((o) => o.key === subtableQuickKey)?.label || subtableQuickKey;
                 scopeLines.push(`顶部词筛(且，先筛明细再汇总): ${qLabel} 含「${subtableQuickText.trim().slice(0, 80)}${subtableQuickText.trim().length > 80 ? '…' : ''}」`);
             }
@@ -1818,7 +1950,8 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                     </div>
                 </div>
                 
-                <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex flex-wrap gap-4 items-center">
+                {/* relative + z-index：避免「顶部词筛」下拉被下方表格区域（同列 flex 后兄弟）整块遮住 */}
+                <div className="relative z-40 bg-slate-50 border-b border-slate-200 px-6 py-3 flex flex-wrap gap-4 items-center">
                     <div className="flex items-center gap-2 text-sm text-slate-600 font-bold mr-2">
                         <Filter className="w-4 h-4" /> 维度拆解:
                     </div>
@@ -1844,56 +1977,143 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                     </div>
 
                     <div className="ml-0 flex w-full min-w-0 flex-col gap-0.5 sm:ml-1 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
-                        <div
-                            className="inline-flex h-8 w-full min-w-0 max-w-md items-stretch overflow-hidden rounded-lg border border-slate-200 bg-white text-xs shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500"
-                            title="先按品名/ASIN/父ASIN 在导入的明细行里做「包含」筛选，再按下面维度汇总；与「维度拆解」、表头漏斗为且(AND)。"
-                        >
-                            <div className="relative shrink-0" ref={subtableQuickRef}>
-                                <button
-                                    type="button"
-                                    onClick={() => setSubtableQuickOpen((o) => !o)}
-                                    className="flex h-full min-w-[4.5rem] items-center justify-center gap-0.5 border-r border-slate-200 bg-slate-50/80 px-2 font-medium text-slate-700 hover:bg-slate-100"
-                                >
-                                    {SUBTABLE_QUICK_FILTER_OPTIONS.find((o) => o.key === subtableQuickKey)?.label}
-                                    {subtableQuickOpen ? (
-                                        <ChevronUp className="h-3.5 w-3.5 shrink-0 text-blue-600" />
-                                    ) : (
-                                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                        <div className="relative w-full min-w-0 max-w-md" ref={subtableSearchBarRef}>
+                            <div
+                                className="inline-flex h-8 w-full min-w-0 items-stretch rounded-lg border border-slate-200 bg-white text-xs shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500"
+                                title="左侧选字段。右侧输入框为「包含」模糊筛选；列表图标打开「多项精确」面板（一行一项、整值精确匹配）。启用精确后暂时不使用模糊词；与维度拆解、表头漏斗为且(AND)。"
+                            >
+                                {/* 勿对整条搜索框设 overflow-hidden，否则会裁掉下方展开的下拉菜单 */}
+                                <div className="relative shrink-0 overflow-visible rounded-l-lg" ref={subtableQuickRef}>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSubtableBulkOpen(false);
+                                            setSubtableQuickOpen((o) => !o);
+                                        }}
+                                        className="flex h-full min-w-[4.5rem] items-center justify-center gap-0.5 rounded-l-lg border-r border-slate-200 bg-slate-50/80 px-2 font-medium text-slate-700 hover:bg-slate-100"
+                                    >
+                                        {SUBTABLE_QUICK_FILTER_OPTIONS.find((o) => o.key === subtableQuickKey)?.label}
+                                        {subtableQuickOpen ? (
+                                            <ChevronUp className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                                        ) : (
+                                            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                                        )}
+                                    </button>
+                                    {subtableQuickOpen && (
+                                        <div className="absolute left-0 top-full z-[200] mt-1 max-h-72 min-w-[6.5rem] overflow-y-auto rounded-lg border border-slate-200 bg-white py-0.5 shadow-xl">
+                                            {SUBTABLE_QUICK_FILTER_OPTIONS.map((opt) => (
+                                                <button
+                                                    key={opt.key}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSubtableQuickKey(opt.key);
+                                                        setSubtableQuickOpen(false);
+                                                    }}
+                                                    className={
+                                                        'block w-full px-2.5 py-1.5 text-left ' +
+                                                        (opt.key === subtableQuickKey
+                                                            ? 'bg-blue-50 text-blue-700'
+                                                            : 'text-slate-700 hover:bg-slate-50')
+                                                    }
+                                                >
+                                                    {opt.label}
+                                                </button>
+                                            ))}
+                                        </div>
                                     )}
-                                </button>
-                                {subtableQuickOpen && (
-                                    <div className="absolute left-0 top-full z-50 mt-1 min-w-[5.5rem] overflow-hidden rounded-lg border border-slate-200 bg-white py-0.5 shadow-xl">
-                                        {SUBTABLE_QUICK_FILTER_OPTIONS.map((opt) => (
+                                </div>
+                                <div className="relative min-w-0 flex-1 overflow-hidden rounded-r-lg">
+                                    <input
+                                        type="search"
+                                        value={subtableQuickText}
+                                        onChange={(e) => setSubtableQuickText(e.target.value)}
+                                        placeholder={subtableBulkNormSet.size > 0 ? '已启用精确匹配，请先清除' : '输入关键词筛选'}
+                                        disabled={subtableBulkNormSet.size > 0}
+                                        title={subtableBulkNormSet.size > 0 ? '已启用多项精确搜索时不再使用模糊关键词；可点下方「清除」恢复' : undefined}
+                                        className={
+                                            'h-full w-full min-w-0 rounded-r-lg border-0 py-1.5 pl-2 pr-16 text-slate-800 outline-none ' +
+                                            (subtableBulkNormSet.size > 0
+                                                ? 'cursor-not-allowed bg-slate-50 text-slate-500 placeholder:text-slate-400'
+                                                : 'bg-white placeholder:text-slate-400')
+                                        }
+                                    />
+                                    <button
+                                        type="button"
+                                        title="多项精确搜索"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (!subtableBulkOpen) {
+                                                setSubtableBulkDraft(subtableBulkExactTokens.join('\n'));
+                                            }
+                                            setSubtableQuickOpen(false);
+                                            setSubtableBulkOpen((o) => !o);
+                                        }}
+                                        className={
+                                            'absolute right-8 top-1/2 -translate-y-1/2 rounded p-0.5 transition-colors ' +
+                                            (subtableBulkNormSet.size > 0 || subtableBulkOpen
+                                                ? 'text-blue-600 hover:bg-blue-50'
+                                                : 'text-slate-400 hover:bg-slate-100 hover:text-blue-600')
+                                        }
+                                    >
+                                        <ListFilter className="h-3.5 w-3.5" />
+                                    </button>
+                                    <SearchIcon className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                                </div>
+                            </div>
+                            {subtableBulkNotice && (
+                                <p className="mt-1 text-[11px] leading-snug text-amber-800">{subtableBulkNotice}</p>
+                            )}
+                            {subtableBulkExactTokens.length > 0 && (
+                                <p className="mt-1 text-[11px] leading-snug text-slate-600">
+                                    已启用精确匹配 {subtableBulkExactTokens.length} 项 ·{' '}
+                                    <button
+                                        type="button"
+                                        className="font-medium text-blue-600 hover:underline"
+                                        onClick={() => {
+                                            setSubtableBulkExactTokens([]);
+                                            setSubtableBulkNotice(null);
+                                        }}
+                                    >
+                                        清除
+                                    </button>
+                                </p>
+                            )}
+                            {subtableBulkOpen && (
+                                <div className="absolute left-0 right-0 top-full z-[220] mt-1 rounded-lg border border-slate-200 bg-white p-3 shadow-xl">
+                                    <textarea
+                                        value={subtableBulkDraft}
+                                        onChange={(e) => setSubtableBulkDraft(e.target.value)}
+                                        rows={8}
+                                        placeholder={`精确搜索，一行一项，最多支持 ${SUBTABLE_BULK_EXACT_MAX} 项（与左侧字段整段内容一致；空白行忽略）`}
+                                        className="min-h-[140px] w-full resize-y rounded border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30"
+                                    />
+                                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setSubtableBulkDraft('')}
+                                            className="text-xs text-slate-500 hover:text-slate-800"
+                                        >
+                                            清空
+                                        </button>
+                                        <div className="flex gap-2">
                                             <button
-                                                key={opt.key}
                                                 type="button"
-                                                onClick={() => {
-                                                    setSubtableQuickKey(opt.key);
-                                                    setSubtableQuickOpen(false);
-                                                }}
-                                                className={
-                                                    'block w-full px-2.5 py-1.5 text-left ' +
-                                                    (opt.key === subtableQuickKey
-                                                        ? 'bg-blue-50 text-blue-700'
-                                                        : 'text-slate-700 hover:bg-slate-50')
-                                                }
+                                                onClick={() => setSubtableBulkOpen(false)}
+                                                className="rounded border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
                                             >
-                                                {opt.label}
+                                                关闭
                                             </button>
-                                        ))}
+                                            <button
+                                                type="button"
+                                                onClick={applySubtableBulkExact}
+                                                className="rounded border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                                            >
+                                                搜索
+                                            </button>
+                                        </div>
                                     </div>
-                                )}
-                            </div>
-                            <div className="relative min-w-0 flex-1">
-                                <input
-                                    type="search"
-                                    value={subtableQuickText}
-                                    onChange={(e) => setSubtableQuickText(e.target.value)}
-                                    placeholder="输入关键词筛选"
-                                    className="h-full w-full min-w-0 border-0 bg-white py-1.5 pl-2 pr-7 text-slate-800 placeholder:text-slate-400 outline-none"
-                                />
-                                <SearchIcon className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                            </div>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1923,14 +2143,14 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                     )}
                 </div>
 
-                <div className="flex min-h-0 flex-1 overflow-hidden">
+                <div className="relative z-0 flex min-h-0 flex-1 overflow-hidden">
                     <div
                         className="relative min-w-0 flex-1 overflow-auto custom-scroll"
                         ref={tableContainerRef}
                         onScroll={handleScroll}
                     >
                         <table className="w-full text-left border-collapse min-w-[1200px]">
-                            <thead className="bg-slate-100 text-slate-600 sticky top-0 z-20 shadow-sm">
+                            <thead className="bg-slate-100 text-slate-600 sticky top-0 z-[55] shadow-sm">
                                 <tr>
                                     {selectedDimensions.map((dimKey, i) => {
                                         const label = dimKey === 'year_month' ? timeLabel : (DIMENSION_OPTIONS.find(d => d.key === dimKey)?.label || dimKey);
@@ -1942,7 +2162,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                                         return (
                                             <th 
                                                 key={dimKey} 
-                                                className="p-3 font-bold text-xs border-b border-r border-slate-200 min-w-[120px] bg-slate-100 hover:bg-slate-200 cursor-pointer transition-colors sticky left-0 z-30 group"
+                                                className="p-3 font-bold text-xs border-b border-r border-slate-200 min-w-[120px] bg-slate-100 hover:bg-slate-200 cursor-pointer transition-colors sticky left-0 z-[56] group"
                                             >
                                                 <div className="flex items-center gap-1" onClick={() => handleSort(sortIdx)}>
                                                     {label}
@@ -2232,9 +2452,9 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                                 )}
                             </tbody>
                             {sortedData.length > 0 && subtableViewFlat.length > 0 && totalData && (
-                                <tfoot className="bg-slate-50 border-t-2 border-slate-200 sticky bottom-0 z-40 shadow-inner">
+                                <tfoot className="bg-slate-50 border-t-2 border-slate-200 sticky bottom-0 z-30 shadow-inner">
                                     <tr>
-                                        <td colSpan={selectedDimensions.length} className="p-3 border-r border-slate-200 font-bold text-slate-800 text-right bg-slate-50 sticky left-0 z-50">
+                                        <td colSpan={selectedDimensions.length} className="p-3 border-r border-slate-200 font-bold text-slate-800 text-right bg-slate-50 sticky left-0 z-[35]">
                                             总计 (Total)
                                         </td>
                                         {columnConfig.map((col: any, colIdx) => {
