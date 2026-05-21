@@ -300,14 +300,21 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
             targetByMonth[t.month] = cur;
         });
 
+        /** 仅当勾选了「目标」类指标时，才把有目标但尚无业绩的月份/周补进横轴 */
+        const extendAxisForTargets = selectedMetrics.some(title =>
+            columns.some(c => c.title === title && c.metricGroup === 'target')
+        );
+
         const allTimeKeys = new Set(Object.keys(timeGroups));
-        Object.keys(targetByMonth).forEach(monthKey => {
-            if (chartWeekly) {
-                weekKeysForMonth(monthKey).forEach(wk => allTimeKeys.add(wk));
-            } else {
-                allTimeKeys.add(monthKey);
-            }
-        });
+        if (extendAxisForTargets) {
+            Object.keys(targetByMonth).forEach(monthKey => {
+                if (chartWeekly) {
+                    weekKeysForMonth(monthKey).forEach(wk => allTimeKeys.add(wk));
+                } else {
+                    allTimeKeys.add(monthKey);
+                }
+            });
+        }
 
         const aggregated = Array.from(allTimeKeys).sort().map(timeKey => {
             const agg = aggregateData(timeGroups[timeKey] || []);
@@ -341,7 +348,7 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
                 tg_ad_ratio: ar
             };
         });
-    }, [isOpen, baseRaw, scope, chartWeekly, sidebarWeeklyMode, columns, targetRows]);
+    }, [isOpen, baseRaw, scope, chartWeekly, sidebarWeeklyMode, columns, targetRows, selectedMetrics]);
 
     useEscClose(isOpen, onClose);
 
