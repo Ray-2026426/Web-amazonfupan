@@ -58,7 +58,7 @@ const titleMap: Record<string, string> = {
     'Inventory': 'FBA 库存深度分析'
 };
 
-/** 子表顶部：按选定维度字段做「包含」关键词筛选（与列头筛选为 AND，在聚合前先筛明细行） */
+/** 子表顶部：按选定维度字段做关键词筛选，支持「包含」或「排除」（与列头筛选为 AND，在聚合前先筛明细行） */
 type SubtableQuickFilterKey =
     | 'product_name'
     | 'manager'
@@ -466,6 +466,8 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
     const [dimFilters, setDimFilters] = useState<Record<string, string[]>>({});
     const [subtableQuickKey, setSubtableQuickKey] = useState<SubtableQuickFilterKey>('product_name');
     const [subtableQuickText, setSubtableQuickText] = useState('');
+    /** false=包含关键词的行；true=排除（不含关键词的行） */
+    const [subtableQuickExclude, setSubtableQuickExclude] = useState(false);
     const [subtableQuickOpen, setSubtableQuickOpen] = useState(false);
     const subtableQuickRef = useRef<HTMLDivElement>(null);
     const [subtableBulkOpen, setSubtableBulkOpen] = useState(false);
@@ -555,7 +557,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         [subtableBulkExactTokens]
     );
 
-    /** 顶部词筛：在按维度聚合之前，对原始业绩/库存行做「包含」匹配；若启用了多项精确搜索，则仅做精确匹配且忽略单行关键词 */
+    /** 顶部词筛：在按维度聚合之前筛明细行；多项精确时整段匹配；exclude 为反选（剔除匹配项） */
     const subtableQuickQ = useMemo(
         () => subtableQuickText.trim().toLowerCase(),
         [subtableQuickText]
@@ -566,7 +568,8 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         if (bulkActive) {
             const match = (r: DataRow) => {
                 const v = String(subtableQuickGetField(r, subtableQuickKey) || '').trim().toLowerCase();
-                return subtableBulkNormSet.has(v);
+                const hit = subtableBulkNormSet.has(v);
+                return subtableQuickExclude ? !hit : hit;
             };
             return {
                 c: currentRows.filter(match),
@@ -580,30 +583,33 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         }
         const match = (r: DataRow) => {
             const v = String(subtableQuickGetField(r, subtableQuickKey) || '');
-            return v.toLowerCase().includes(q);
+            const hit = v.toLowerCase().includes(q);
+            return subtableQuickExclude ? !hit : hit;
         };
         return {
             c: currentRows.filter(match),
             l: lastRows.filter(match),
             y: yearRows.filter(match)
         };
-    }, [currentRows, lastRows, yearRows, subtableQuickKey, subtableQuickQ, subtableBulkNormSet]);
+    }, [currentRows, lastRows, yearRows, subtableQuickKey, subtableQuickQ, subtableBulkNormSet, subtableQuickExclude]);
 
     const invRowsForSubtable = useMemo(() => {
         const bulkActive = subtableBulkNormSet.size > 0;
         if (bulkActive) {
             return inventoryRows.filter((r) => {
                 const v = String(subtableQuickGetFieldInv(r, subtableQuickKey) || '').trim().toLowerCase();
-                return subtableBulkNormSet.has(v);
+                const hit = subtableBulkNormSet.has(v);
+                return subtableQuickExclude ? !hit : hit;
             });
         }
         const q = subtableQuickQ;
         if (!q) return inventoryRows;
         return inventoryRows.filter((r) => {
             const v = String(subtableQuickGetFieldInv(r, subtableQuickKey) || '');
-            return v.toLowerCase().includes(q);
+            const hit = v.toLowerCase().includes(q);
+            return subtableQuickExclude ? !hit : hit;
         });
-    }, [inventoryRows, subtableQuickKey, subtableQuickQ, subtableBulkNormSet]);
+    }, [inventoryRows, subtableQuickKey, subtableQuickQ, subtableBulkNormSet, subtableQuickExclude]);
 
     const applySubtableBulkExact = () => {
         const { tokens, truncated } = parseBulkExactInput(subtableBulkDraft);
@@ -1588,12 +1594,14 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             if (subtableBulkExactTokens.length > 0) {
                 const qLabel = SUBTABLE_QUICK_FILTER_OPTIONS.find((o) => o.key === subtableQuickKey)?.label || subtableQuickKey;
                 const sample = subtableBulkExactTokens.slice(0, 12).join('、');
+                const mode = subtableQuickExclude ? '排除' : '保留';
                 scopeLines.push(
-                    `多项精确搜索(且，先筛明细再汇总): 字段=${qLabel}，共 ${subtableBulkExactTokens.length} 项；示例：${sample}${subtableBulkExactTokens.length > 12 ? '…' : ''}`
+                    `多项精确搜索(且，先筛明细再汇总): 字段=${qLabel}，${mode}共 ${subtableBulkExactTokens.length} 项；示例：${sample}${subtableBulkExactTokens.length > 12 ? '…' : ''}`
                 );
             } else if (subtableQuickText.trim()) {
                 const qLabel = SUBTABLE_QUICK_FILTER_OPTIONS.find((o) => o.key === subtableQuickKey)?.label || subtableQuickKey;
-                scopeLines.push(`顶部词筛(且，先筛明细再汇总): ${qLabel} 含「${subtableQuickText.trim().slice(0, 80)}${subtableQuickText.trim().length > 80 ? '…' : ''}」`);
+                const verb = subtableQuickExclude ? '不含' : '含';
+                scopeLines.push(`顶部词筛(且，先筛明细再汇总): ${qLabel} ${verb}「${subtableQuickText.trim().slice(0, 80)}${subtableQuickText.trim().length > 80 ? '…' : ''}」`);
             }
             scopeLines.push(`参与分析的行数（筛选并排序后）: ${sortedData.length}`);
 
@@ -2044,7 +2052,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                         <div className="relative w-full min-w-0 max-w-md" ref={subtableSearchBarRef}>
                             <div
                                 className="inline-flex h-8 w-full min-w-0 items-stretch rounded-lg border border-slate-200 bg-white text-xs shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500"
-                                title="左侧选字段。右侧输入框为「包含」模糊筛选；列表图标打开「多项精确」面板（一行一项、整值精确匹配）。启用精确后暂时不使用模糊词；与维度拆解、表头漏斗为且(AND)。"
+                                title="左侧选字段；「包含/排除」切换反选。输入框为模糊筛选；列表图标为多项精确（一行一项）。与维度拆解、表头漏斗为且(AND)。"
                             >
                                 {/* 勿对整条搜索框设 overflow-hidden，否则会裁掉下方展开的下拉菜单 */}
                                 <div className="relative shrink-0 overflow-visible rounded-l-lg" ref={subtableQuickRef}>
@@ -2086,12 +2094,46 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                                         </div>
                                     )}
                                 </div>
+                                <div className="flex shrink-0 flex-col border-r border-slate-200">
+                                    <button
+                                        type="button"
+                                        title="保留字段中包含关键词的行"
+                                        onClick={() => setSubtableQuickExclude(false)}
+                                        className={
+                                            'flex-1 px-2 text-[10px] font-semibold leading-none transition-colors ' +
+                                            (!subtableQuickExclude
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-slate-50 text-slate-500 hover:bg-slate-100')
+                                        }
+                                    >
+                                        包含
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="剔除字段中包含关键词的行（反选）"
+                                        onClick={() => setSubtableQuickExclude(true)}
+                                        className={
+                                            'flex-1 border-t border-slate-200 px-2 text-[10px] font-semibold leading-none transition-colors ' +
+                                            (subtableQuickExclude
+                                                ? 'bg-rose-600 text-white'
+                                                : 'bg-slate-50 text-slate-500 hover:bg-slate-100')
+                                        }
+                                    >
+                                        排除
+                                    </button>
+                                </div>
                                 <div className="relative min-w-0 flex-1 overflow-hidden rounded-r-lg">
                                     <input
                                         type="search"
                                         value={subtableQuickText}
                                         onChange={(e) => setSubtableQuickText(e.target.value)}
-                                        placeholder={subtableBulkNormSet.size > 0 ? '已启用精确匹配，请先清除' : '输入关键词筛选'}
+                                        placeholder={
+                                            subtableBulkNormSet.size > 0
+                                                ? '已启用精确匹配，请先清除'
+                                                : subtableQuickExclude
+                                                  ? '输入关键词，排除匹配的行'
+                                                  : '输入关键词筛选'
+                                        }
                                         disabled={subtableBulkNormSet.size > 0}
                                         title={subtableBulkNormSet.size > 0 ? '已启用多项精确搜索时不再使用模糊关键词；可点下方「清除」恢复' : undefined}
                                         className={
@@ -2129,7 +2171,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                             )}
                             {subtableBulkExactTokens.length > 0 && (
                                 <p className="mt-1 text-[11px] leading-snug text-slate-600">
-                                    已启用精确匹配 {subtableBulkExactTokens.length} 项 ·{' '}
+                                    已启用精确匹配 {subtableBulkExactTokens.length} 项（{subtableQuickExclude ? '排除' : '保留'}） ·{' '}
                                     <button
                                         type="button"
                                         className="font-medium text-blue-600 hover:underline"
@@ -2148,7 +2190,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                                         value={subtableBulkDraft}
                                         onChange={(e) => setSubtableBulkDraft(e.target.value)}
                                         rows={8}
-                                        placeholder={`精确搜索，一行一项，最多支持 ${SUBTABLE_BULK_EXACT_MAX} 项（与左侧字段整段内容一致；空白行忽略）`}
+                                        placeholder={`精确搜索，一行一项，最多 ${SUBTABLE_BULK_EXACT_MAX} 项（与左侧字段整段一致；当前为「${subtableQuickExclude ? '排除' : '包含'}」模式）`}
                                         className="min-h-[140px] w-full resize-y rounded border border-slate-200 bg-slate-50/60 px-2 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30"
                                     />
                                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
