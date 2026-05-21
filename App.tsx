@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow } from './types';
+import { DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow } from './types';
 import { 
   calculatePeriodDates, 
   filterData, 
@@ -14,13 +14,16 @@ import {
   analyzeTargetCompleteness,
   getISOWeekDateRange,
   formatDate,
-  getCurrentWeekInfo
+  getCurrentWeekInfo,
+  buildProductImageLookup,
+  type ProductImageLookup,
 } from './utils';
 import { SidebarFilters } from './components/SidebarFilters';
 import { DashboardOverview } from './components/DashboardOverview';
 import { PLTable, TrafficTable } from './components/TableRenderers';
 import { InventoryTable } from './components/InventoryTable';
 import { DataUploadModal, type DataUploadResult } from './components/DataUploadModal';
+import { resetTrendChartMetricsSelection } from './components/TrendChartModal';
 import { UploadSlots, listMissingOptionalSlots } from './uploadFileClassifier';
 import { DetailAnalysisModal } from './components/DetailAnalysisModal';
 import { RefundAnalysisModal } from './components/RefundAnalysisModal';
@@ -29,7 +32,7 @@ import { ReviewAnalysisModal } from './components/ReviewAnalysisModal';
 import { KeywordAnalysisModal } from './components/KeywordAnalysisModal'; 
 import { ChatBot } from './components/ChatBot';
 import { ThemeToggle } from './components/ThemeToggle';
-import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData } from './dataLoader';
+import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard } from 'lucide-react';
 import { saveToDB, loadFromDB, clearDB } from './db';
 
@@ -118,6 +121,12 @@ const App: React.FC = () => {
   const [refundData, setRefundData] = useState<RefundRow[]>([]);
   const [reviewData, setReviewData] = useState<ReviewRow[]>([]);
   const [searchTermData, setSearchTermData] = useState<SearchTermRow[]>([]); 
+  const [productImageData, setProductImageData] = useState<ProductImageRow[]>([]);
+
+  const productImageLookup = useMemo<ProductImageLookup | null>(() => {
+      if (productImageData.length === 0) return null;
+      return buildProductImageLookup(productImageData);
+  }, [productImageData]);
 
   // UI States
   const [filters, setFilters] = useState<FilterState>(initialFilters);
@@ -142,13 +151,14 @@ const App: React.FC = () => {
       const restoreData = async () => {
           setIsRestoringData(true);
           try {
-              const [monthly, weekly, targets, inv, refunds, reviews, savedFilters] = await Promise.all([
+              const [monthly, weekly, targets, inv, refunds, reviews, productImages, savedFilters] = await Promise.all([
                   loadFromDB('monthly'),
                   loadFromDB('weekly'),
                   loadFromDB('targets'),
                   loadFromDB('inventory'),
                   loadFromDB('refunds'),
                   loadFromDB('reviews'),
+                  loadFromDB('product_images'),
                   loadFromDB('meta')
               ]);
 
@@ -158,6 +168,7 @@ const App: React.FC = () => {
               if (inv) setInventoryData(inv);
               if (refunds) setRefundData(refunds);
               if (reviews) setReviewData(reviews);
+              if (productImages?.length) setProductImageData(productImages);
               
               if (savedFilters && savedFilters.startDate) {
                   setFilters(savedFilters);
@@ -197,6 +208,7 @@ const App: React.FC = () => {
   const handleDataUpload = async (slots: UploadSlots): Promise<DataUploadResult | undefined> => {
     if (!slots.monthly) return undefined;
     await clearDB();
+    resetTrendChartMetricsSelection();
     setSearchTermData([]);
 
     const debugs: DataUploadResult['reports'] = [];
@@ -258,6 +270,17 @@ const App: React.FC = () => {
     } else {
         setReviewData([]);
         saveToDB('reviews', []);
+    }
+
+    if (slots.productImages) {
+        const imgRes = await parseProductImageData(slots.productImages);
+        setProductImageData(imgRes.data);
+        saveToDB('product_images', imgRes.data);
+        debugs.push(imgRes.debug);
+    } else {
+        // 用户这次没上传图片表 → 清空图片，不保留上次
+        setProductImageData([]);
+        saveToDB('product_images', []);
     }
 
     if (monthlyRes.data.length > 0) {
@@ -516,6 +539,7 @@ const App: React.FC = () => {
                 rawPerformance={isWeeklyMode ? weeklyData : performanceData}
                 performanceMonthly={performanceData}
                 performanceWeekly={weeklyData}
+                productImageLookup={productImageLookup}
             />
         )}
 

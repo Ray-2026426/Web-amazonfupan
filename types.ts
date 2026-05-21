@@ -200,6 +200,13 @@ export interface InventoryRow {
     awd_total_cost: number;         // 109
 }
 
+/** 商品图片对照表（用户上传：SKU、品名、图片链接） */
+export interface ProductImageRow {
+  sku: string;
+  product_name: string;
+  image_url: string;
+}
+
 export interface FilterState {
   startDate: string;
   endDate: string;

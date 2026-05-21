@@ -1,5 +1,66 @@
 
-import { DataRow, TargetRow, FilterState, AggregatedData, InventoryRow, InventoryAggregated } from './types';
+import { DataRow, TargetRow, FilterState, AggregatedData, InventoryRow, InventoryAggregated, ProductImageRow } from './types';
+
+/** SKU / 品名 → 图片链接 对照表（由用户上传的商品图片表构建） */
+export interface ProductImageLookup {
+    bySku: Map<string, string>;
+    byProductName: Map<string, string>;
+}
+
+/** 统一键：去空格、小写、全角转半角，便于品名/SKU 对齐 */
+export const normImageKey = (s: string): string => {
+    let t = s.trim().toLowerCase().replace(/\s+/g, ' ');
+    t = t.replace(/[\uff01-\uff5e]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
+    return t;
+};
+
+export const buildProductImageLookup = (rows: ProductImageRow[]): ProductImageLookup => {
+    const bySku = new Map<string, string>();
+    const byProductName = new Map<string, string>();
+    for (const row of rows) {
+        const url = row.image_url?.trim();
+        if (!url) continue;
+        if (row.sku) bySku.set(normImageKey(row.sku), url);
+        if (row.product_name) byProductName.set(normImageKey(row.product_name), url);
+    }
+    return { bySku, byProductName };
+};
+
+/** 按 SKU/ASIN 优先，再按品名匹配图片 */
+export const resolveProductImage = (
+    lookup: ProductImageLookup | null | undefined,
+    opts: { sku?: string; asin?: string; productName?: string }
+): string | null => {
+    if (!lookup) return null;
+    const skuKeys = [opts.sku, opts.asin].filter(Boolean) as string[];
+    for (const k of skuKeys) {
+        const hit = lookup.bySku.get(normImageKey(k));
+        if (hit) return hit;
+    }
+    if (opts.productName) {
+        const pn = normImageKey(opts.productName);
+        if (pn && pn !== 'unknown' && pn !== '-') {
+            const byName = lookup.byProductName.get(pn);
+            if (byName) return byName;
+            const bySkuAsName = lookup.bySku.get(pn);
+            if (bySkuAsName) return bySkuAsName;
+        }
+    }
+    return null;
+};
+
+/** 从子表一行维度里解析图片（品名 / 子ASIN / 父ASIN 依次尝试） */
+export const resolveProductImageFromDimensions = (
+    lookup: ProductImageLookup | null | undefined,
+    dimensions: Record<string, string>
+): string | null => {
+    if (!lookup) return null;
+    return resolveProductImage(lookup, {
+        productName: dimensions.product_name,
+        sku: dimensions.child_asin,
+        asin: dimensions.child_asin || dimensions.parent_asin,
+    });
+};
 
 // --- Date Utilities ---
 

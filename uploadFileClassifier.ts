@@ -1,5 +1,5 @@
 
-export type UploadSlotKey = 'monthly' | 'weekly' | 'target' | 'inventory' | 'refund' | 'review';
+export type UploadSlotKey = 'monthly' | 'weekly' | 'target' | 'inventory' | 'refund' | 'review' | 'productImages';
 
 export type UploadSlots = Record<UploadSlotKey, File | null>;
 
@@ -10,6 +10,7 @@ export const UPLOAD_SLOT_LABELS: Record<UploadSlotKey, string> = {
     inventory: 'FBA 库存表',
     refund: '退货报告',
     review: '评论报告',
+    productImages: '商品图片表',
 };
 
 /**
@@ -21,6 +22,15 @@ export function classifyUploadFileName(fileName: string): UploadSlotKey | null {
     const base = raw.replace(/\.(xlsx|xls|csv)$/i, '');
 
     const hit = (re: RegExp) => re.test(raw) || re.test(base) || re.test(s);
+
+    // 0. 商品图片对照表（SKU + 品名 + 图片；领星常见：导出产品-按SKU）
+    if (
+        hit(
+            /导出产品[-_\s]*按\s*sku|导出产品.*sku|商品图片|产品图片|主图表|图片对照|sku.*图|品名.*图|product.*image|image.*map|图片映射/i
+        )
+    ) {
+        return 'productImages';
+    }
 
     // 1. 退货 / 退款（含亚马逊常见命名，且优先于含 FBA 的其它文件）
     if (
@@ -85,6 +95,7 @@ export function assignFilesToSlots(files: File[]): { slots: UploadSlots; unrecog
         inventory: null,
         refund: null,
         review: null,
+        productImages: null,
     };
     const unrecognized: File[] = [];
     for (const file of files) {
@@ -99,6 +110,6 @@ export function assignFilesToSlots(files: File[]): { slots: UploadSlots; unrecog
 }
 
 export function listMissingOptionalSlots(slots: UploadSlots): string[] {
-    const optional: UploadSlotKey[] = ['weekly', 'target', 'inventory', 'refund', 'review'];
+    const optional: UploadSlotKey[] = ['weekly', 'target', 'inventory', 'refund', 'review', 'productImages'];
     return optional.filter(k => !slots[k]).map(k => UPLOAD_SLOT_LABELS[k]);
 }

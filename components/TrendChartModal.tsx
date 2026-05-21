@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { X, TrendingUp } from 'lucide-react';
 import { DataRow, TargetRow } from '../types';
 import {
@@ -49,6 +49,40 @@ const COLORS = [
     '#0ea5e9', '#f43f5e', '#6366f1', '#14b8a6', '#f97316'
 ];
 
+const DEFAULT_METRIC_TITLES = ['销量', '毛利率', '广告占比', '退款占比', '头程占比'];
+
+/** 跨趋势图共享的指标选择，仅在用户手动切换后写入；更新数据源时重置 */
+let persistedTrendMetrics: string[] | null = null;
+
+export function resetTrendChartMetricsSelection() {
+    persistedTrendMetrics = null;
+}
+
+const getDefaultMetrics = (columns: TrendColumn[]): string[] => {
+    const preferred = DEFAULT_METRIC_TITLES.filter(t => columns.some(c => c.title === t));
+    return preferred.length > 0 ? preferred : columns.slice(0, Math.min(5, columns.length)).map(c => c.title);
+};
+
+const resolveInitialMetrics = (columns: TrendColumn[]): string[] => {
+    if (persistedTrendMetrics) {
+        const valid = persistedTrendMetrics.filter(t => columns.some(c => c.title === t));
+        if (valid.length > 0) return valid;
+    }
+    return getDefaultMetrics(columns);
+};
+
+const weekKeysForMonth = (monthKey: string): string[] => {
+    const [y, m] = monthKey.split('-').map(Number);
+    if (!y || !m) return [];
+    const dim = daysInCalendarMonth(y, m - 1);
+    const keys = new Set<string>();
+    for (let d = 1; d <= dim; d++) {
+        const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        keys.add(formatBusinessWeekFromDateStr(dateStr));
+    }
+    return Array.from(keys);
+};
+
 const rowPassesDimFilters = (row: DataRow, dimFilters: Record<string, string[]>, sidebarWeekly: boolean) => {
     return Object.entries(dimFilters).every(([dimKey, selectedVals]) => {
         const vals = selectedVals as string[];
@@ -91,6 +125,37 @@ const targetRowPassesDimFilters = (t: TargetRow, dimFilters: Record<string, stri
         }
         return vals.includes(rowVal);
     });
+
+/** 列头筛选里对「年月/年周」的过滤只作用于业绩行；目标行按其它维度筛，避免未来月目标被挡掉 */
+const dimFiltersForTargets = (dimFilters: Record<string, string[]>): Record<string, string[]> => {
+    const { year_month: _ym, ...rest } = dimFilters;
+    return rest;
+};
+
+/** 子表按「时间+其它维度」拆行时：业绩仍按可见行；目标则匹配「同一组非时间维度」下所有月份/周的目标 */
+const targetMatchesVisibleGroupLoose = (
+    t: TargetRow,
+    scope: Extract<TrendChartScope, { mode: 'total' }>,
+    sidebarWeekly: boolean
+): boolean => {
+    const dims = scope.selectedDimensions;
+    const ymIdx = dims.indexOf('year_month');
+    if (ymIdx < 0) {
+        const k = compositeKeyForTargetRow(t, dims, sidebarWeekly);
+        return scope.visibleGroupKeys.includes(k);
+    }
+    const tParts = compositeKeyForTargetRow(t, dims, sidebarWeekly).split('|||');
+    if (tParts.length !== dims.length) return false;
+    return scope.visibleGroupKeys.some(vk => {
+        const vParts = vk.split('|||');
+        if (vParts.length !== tParts.length) return false;
+        for (let i = 0; i < tParts.length; i++) {
+            if (i === ymIdx) continue;
+            if (vParts[i] !== tParts[i]) return false;
+        }
+        return true;
+    });
+};
 
 type TgAcc = { sq: number; sa: number; gp: number; ad: number };
 
@@ -142,27 +207,34 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
 }) => {
     const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
     const [chartWeekly, setChartWeekly] = useState(false);
+    const wasTrendOpenRef = useRef(false);
 
+    /** 仅在趋势弹窗从关→开时同步指标，避免父组件重渲染导致 columns 引用变化而把已选指标冲掉 */
     useEffect(() => {
-        if (isOpen) {
-            setChartWeekly(sidebarWeeklyMode);
-            const preferred = ['销量', '毛利率', '广告占比', '退款占比', '头程占比'].filter(t =>
-                columns.some(c => c.title === t)
-            );
-            setSelectedMetrics(
-                preferred.length > 0 ? preferred : columns.slice(0, Math.min(5, columns.length)).map(c => c.title)
-            );
+        if (isOpen && !wasTrendOpenRef.current) {
+            setSelectedMetrics(resolveInitialMetrics(columns));
         }
-    }, [isOpen, sidebarWeeklyMode, columns]);
+        wasTrendOpenRef.current = isOpen;
+    }, [isOpen, columns]);
+
+    /** 弹窗打开期间跟随侧栏月/周切换 */
+    useEffect(() => {
+        if (isOpen) setChartWeekly(sidebarWeeklyMode);
+    }, [isOpen, sidebarWeeklyMode]);
 
     const toggleMetric = (title: string) => {
         setSelectedMetrics(prev => {
+            let next: string[];
             if (prev.includes(title)) {
-                if (prev.length === 1) return prev; // Keep at least one
-                return prev.filter(m => m !== title);
+                if (prev.length === 1) return prev;
+                next = prev.filter(m => m !== title);
+            } else if (prev.length >= 7) {
+                return prev;
+            } else {
+                next = [...prev, title];
             }
-            if (prev.length >= 7) return prev; // Max 7 metrics to avoid clutter
-            return [...prev, title];
+            persistedTrendMetrics = next;
+            return next;
         });
     };
 
@@ -207,8 +279,12 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
             );
         } else {
             const keySet = new Set(scope.visibleGroupKeys);
+            const tgtDimFilters = dimFiltersForTargets(scope.dimFilters);
             filteredTargets = targetRows.filter(t => {
-                if (!targetRowPassesDimFilters(t, scope.dimFilters, sidebarWeeklyMode)) return false;
+                if (!targetRowPassesDimFilters(t, tgtDimFilters, sidebarWeeklyMode)) return false;
+                if (scope.selectedDimensions.includes('year_month')) {
+                    return targetMatchesVisibleGroupLoose(t, scope, sidebarWeeklyMode);
+                }
                 const k = compositeKeyForTargetRow(t, scope.selectedDimensions, sidebarWeeklyMode);
                 return keySet.has(k);
             });
@@ -224,8 +300,17 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
             targetByMonth[t.month] = cur;
         });
 
-        const aggregated = Object.keys(timeGroups).sort().map(timeKey => {
-            const agg = aggregateData(timeGroups[timeKey]);
+        const allTimeKeys = new Set(Object.keys(timeGroups));
+        Object.keys(targetByMonth).forEach(monthKey => {
+            if (chartWeekly) {
+                weekKeysForMonth(monthKey).forEach(wk => allTimeKeys.add(wk));
+            } else {
+                allTimeKeys.add(monthKey);
+            }
+        });
+
+        const aggregated = Array.from(allTimeKeys).sort().map(timeKey => {
+            const agg = aggregateData(timeGroups[timeKey] || []);
             const rowData: any = { time: timeKey };
 
             columns.forEach(col => {

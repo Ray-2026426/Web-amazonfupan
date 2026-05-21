@@ -5,7 +5,7 @@ import { DataRow, InventoryRow, RefundRow, ReviewRow, TargetRow, FilterState } f
 // Removed 'idb' import as we are implementing the wrapper manually below.
 
 const DB_NAME = 'AmazonDashboardDB';
-const DB_VERSION = 2; // Bumped version to ensure object stores are created if missing
+const DB_VERSION = 4;
 
 const openDatabase = (): Promise<IDBDatabase> => {
     return new Promise((resolve, reject) => {
@@ -28,7 +28,7 @@ const openDatabase = (): Promise<IDBDatabase> => {
 
         request.onupgradeneeded = (event) => {
             const db = (event.target as IDBOpenDBRequest).result;
-            const stores = ['monthly', 'weekly', 'targets', 'inventory', 'refunds', 'reviews', 'meta'];
+            const stores = ['monthly', 'weekly', 'targets', 'inventory', 'refunds', 'reviews', 'product_images', 'meta'];
             
             stores.forEach(storeName => {
                 if (!db.objectStoreNames.contains(storeName)) {
@@ -75,10 +75,10 @@ export const loadFromDB = async (storeName: string): Promise<any | null> => {
 export const clearDB = async () => {
     try {
         const db = await openDatabase();
-        const stores = ['monthly', 'weekly', 'targets', 'inventory', 'refunds', 'reviews', 'meta'];
-        const transaction = db.transaction(stores, 'readwrite');
+        const dataStores = ['monthly', 'weekly', 'targets', 'inventory', 'refunds', 'reviews', 'product_images', 'meta'];
+        const transaction = db.transaction(dataStores, 'readwrite');
         
-        stores.forEach(name => {
+        dataStores.forEach(name => {
             if (db.objectStoreNames.contains(name)) {
                 transaction.objectStore(name).clear();
             }

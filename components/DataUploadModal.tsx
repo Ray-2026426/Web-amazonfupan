@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileSpreadsheet, X, CheckCircle, AlertCircle, Info, HelpCircle, PackageSearch, Target, FileText, MessageSquare, FolderOpen } from 'lucide-react';
+import { Upload, FileSpreadsheet, X, CheckCircle, AlertCircle, Info, HelpCircle, PackageSearch, Target, FileText, MessageSquare, FolderOpen, Image } from 'lucide-react';
 import { DataSourceDebugInfo } from '../types';
 import { PERFORMANCE_ALIASES, COLUMN_DISPLAY_NAMES } from '../dataLoader';
 import { assignFilesToSlots, UploadSlots, UPLOAD_SLOT_LABELS, UploadSlotKey, listMissingOptionalSlots } from '../uploadFileClassifier';
@@ -18,7 +18,7 @@ interface DataUploadModalProps {
     onUpload: (slots: UploadSlots) => Promise<DataUploadResult | undefined>;
 }
 
-const SLOT_ORDER: UploadSlotKey[] = ['monthly', 'weekly', 'target', 'inventory', 'refund', 'review'];
+const SLOT_ORDER: UploadSlotKey[] = ['monthly', 'weekly', 'target', 'inventory', 'refund', 'review', 'productImages'];
 
 const emptySlots = (): UploadSlots => ({
     monthly: null,
@@ -27,6 +27,7 @@ const emptySlots = (): UploadSlots => ({
     inventory: null,
     refund: null,
     review: null,
+    productImages: null,
 });
 
 export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClose, onUpload }) => {
@@ -45,6 +46,7 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
         inventory: null,
         refund: null,
         review: null,
+        productImages: null,
     });
 
     useEffect(() => {
@@ -119,6 +121,7 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
         if (key === 'inventory') return <PackageSearch className="h-6 w-6 text-indigo-400" />;
         if (key === 'refund') return <FileText className="h-6 w-6 text-orange-400" />;
         if (key === 'review') return <MessageSquare className="h-6 w-6 text-yellow-400" />;
+        if (key === 'productImages') return <Image className="h-6 w-6 text-pink-400" />;
         return <FileSpreadsheet className="h-6 w-6 text-slate-400" />;
     };
 
@@ -349,7 +352,7 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
                     )}
 
                     <div className="flex items-center justify-between rounded border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
-                        <span>支持 .xlsx / .xls / .csv；导入后可在结果页查看缺表自检。</span>
+                        <span>支持 .xlsx / .xls / .csv。商品图片表：SKU、品名、第三列可为嵌入图片或 http 链接（嵌入图请用 .xlsx）。</span>
                         <button type="button" onClick={() => setShowGuide(true)} className="flex items-center gap-1 font-medium whitespace-nowrap text-blue-600 hover:underline">
                             <Info className="h-3 w-3" /> 表头规范
                         </button>

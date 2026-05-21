@@ -1,8 +1,9 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { X, Layers, Check, FileSearch, ExternalLink, Copy, ArrowUp, ArrowDown, Filter, Search as SearchIcon, ListFilter, Calculator, CheckSquare, Square, RefreshCcw, MessageSquare, TrendingUp, Bot, Sparkles, Loader2, Settings, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
+import { ProductImageThumb, ImageLightbox } from './ProductImageThumb';
 import { DataRow, AggregatedData, TargetRow, InventoryRow, InventoryAggregated, FilterState } from '../types';
-import { groupDataByDimension, aggregateData, formatMoney, formatNumber, formatPercent, getPacingRatio, groupTargetsByDimension, initialAggregated, initialInventoryAggregated, getAmazonProductLink, formatPrice, groupInventoryByDimension, aggregateInventoryData, formatDate, formatMoneyNoDecimals, formatRMB, formatBusinessWeekFromDateStr, sumAggregatedData, sumInventoryAggregated } from '../utils';
+import { groupDataByDimension, aggregateData, formatMoney, formatNumber, formatPercent, getPacingRatio, groupTargetsByDimension, initialAggregated, initialInventoryAggregated, getAmazonProductLink, formatPrice, groupInventoryByDimension, aggregateInventoryData, formatDate, formatMoneyNoDecimals, formatRMB, formatBusinessWeekFromDateStr, sumAggregatedData, sumInventoryAggregated, resolveProductImage, type ProductImageLookup } from '../utils';
 import { TrendChartModal, TrendColumn, TrendChartScope } from './TrendChartModal';
 import { PromptSettingsModal, getActivePromptSettings } from './PromptSettingsModal';
 import { hasConfiguredAiApi, unifiedGenerateContent, AI_API_SETUP_HINT } from './aiUnifiedGenerate';
@@ -31,9 +32,13 @@ interface DetailAnalysisModalProps {
     rawPerformance?: DataRow[];
     performanceMonthly?: DataRow[];
     performanceWeekly?: DataRow[];
+    /** 用户上传的 SKU/品名 → 图片 对照表 */
+    productImageLookup?: ProductImageLookup | null;
 }
 
 type GroupDimension = 'product_name' | 'parent_asin' | 'child_asin' | 'shop_name' | 'manager' | 'brand' | 'country' | 'year_month' | 'sub_category';
+
+const IMAGE_DIM_KEYS = new Set<GroupDimension>(['parent_asin', 'child_asin', 'product_name']);
 
 const DIMENSION_OPTIONS: { key: GroupDimension, label: string }[] = [
     { key: 'country', label: '国家' },
@@ -412,9 +417,48 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
     isWeeklyMode,
     rawPerformance = [],
     performanceMonthly = [],
-    performanceWeekly = []
+    performanceWeekly = [],
+    productImageLookup = null,
 }) => {
+    const resolveDimImage = (dimKey: string, dimensions: Record<string, string>, displayVal: string): string | null => {
+        if (!productImageLookup || !displayVal || displayVal.startsWith('共 ')) return null;
+        if (dimKey === 'product_name') {
+            return resolveProductImage(productImageLookup, {
+                productName: displayVal,
+                sku: dimensions.child_asin,
+                asin: dimensions.child_asin || dimensions.parent_asin,
+            });
+        }
+        if (dimKey === 'child_asin' || dimKey === 'parent_asin') {
+            return resolveProductImage(productImageLookup, {
+                sku: displayVal,
+                asin: displayVal,
+                productName: dimensions.product_name,
+            });
+        }
+        return null;
+    };
+
+    const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
     const [selectedDimensions, setSelectedDimensions] = useState<GroupDimension[]>(['manager']);
+
+    /** 图片显示在：若第一列拆解是 ASIN/品名则用第一列，否则用左侧第一个 ASIN/品名列 */
+    const thumbDimKey = useMemo(() => {
+        const first = selectedDimensions[0];
+        if (first && IMAGE_DIM_KEYS.has(first)) return first;
+        return selectedDimensions.find((d) => IMAGE_DIM_KEYS.has(d)) ?? null;
+    }, [selectedDimensions]);
+
+    const renderInlineThumb = (
+        dimKey: string,
+        dimensions: Record<string, string>,
+        displayVal: string
+    ): React.ReactNode => {
+        if (!thumbDimKey || dimKey !== thumbDimKey || !productImageLookup) return null;
+        const url = resolveDimImage(dimKey, dimensions, displayVal);
+        if (!url) return null;
+        return <ProductImageThumb url={url} onEnlarge={setLightboxUrl} />;
+    };
     const [showStructure, setShowStructure] = useState(false); 
     const [visibleCount, setVisibleCount] = useState(50);
     const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -2282,9 +2326,10 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                                                 return (
                                                     <td
                                                         key={dimKey}
-                                                        className={`p-3 border-r border-slate-100 font-medium text-slate-700 sticky left-0 z-10 group-hover:bg-blue-50/30 truncate max-w-[200px] ${dimCellBg}`}
+                                                        className={`p-3 border-r border-slate-100 font-medium text-slate-700 sticky left-0 z-10 group-hover:bg-blue-50/30 max-w-[260px] ${dimCellBg}`}
                                                     >
-                                                        <div className="flex min-w-0 items-center gap-0.5">
+                                                        <div className="flex min-w-0 items-center gap-1.5">
+                                                            {renderInlineThumb(dimKey, row.dimensions, val)}
                                                             <button
                                                                 type="button"
                                                                 className="shrink-0 rounded p-0.5 text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-800"
@@ -2326,23 +2371,24 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                                                 return (
                                                     <td
                                                         key={dimKey}
-                                                        className={`p-3 border-r border-slate-100 font-medium text-slate-700 sticky left-0 z-10 max-w-[200px] group-hover:bg-slate-100/80 ${dimCellBg} truncate`}
+                                                        className={`p-3 border-r border-slate-100 font-medium text-slate-700 sticky left-0 z-10 max-w-[260px] group-hover:bg-slate-100/80 ${dimCellBg}`}
                                                     >
-                                                        <span className="block border-l-2 border-slate-200 pl-2">
+                                                        <div className="flex min-w-0 items-center gap-1.5 border-l-2 border-slate-200 pl-2">
+                                                            {renderInlineThumb(dimKey, row.dimensions, val)}
                                                             {isLink && val !== 'Unknown' ? (
                                                                 <a
                                                                     href={linkUrl!}
                                                                     target="_blank"
                                                                     rel="noopener noreferrer"
-                                                                    className="inline-flex items-center gap-0.5 text-blue-600 hover:underline"
+                                                                    className="inline-flex min-w-0 items-center gap-0.5 truncate text-blue-600 hover:underline"
                                                                     onClick={e => e.stopPropagation()}
                                                                 >
-                                                                    {val} <ExternalLink className="h-3 w-3 opacity-50" />
+                                                                    {val} <ExternalLink className="h-3 w-3 shrink-0 opacity-50" />
                                                                 </a>
                                                             ) : (
-                                                                val
+                                                                <span className="truncate" title={val}>{val}</span>
                                                             )}
-                                                        </span>
+                                                        </div>
                                                     </td>
                                                 );
                                             }
@@ -2351,14 +2397,15 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                                                 return (
                                                     <td
                                                         key={dimKey}
-                                                        className={`p-3 border-r border-slate-100 font-medium text-slate-700 sticky left-0 z-10 max-w-[220px] group-hover:bg-slate-100/80 ${dimCellBg} truncate`}
+                                                        className={`p-3 border-r border-slate-100 font-medium text-slate-700 sticky left-0 z-10 max-w-[260px] group-hover:bg-slate-100/80 ${dimCellBg}`}
                                                     >
-                                                        <span
-                                                            className="block border-l-2 border-slate-200 pl-2"
+                                                        <div
+                                                            className="flex min-w-0 items-center gap-1.5 border-l-2 border-slate-200 pl-2"
                                                             title={val}
                                                         >
-                                                            {val}
-                                                        </span>
+                                                            {renderInlineThumb(dimKey, row.dimensions, val)}
+                                                            <span className="truncate">{val}</span>
+                                                        </div>
                                                     </td>
                                                 );
                                             }
@@ -2366,23 +2413,26 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                                             return (
                                                 <td
                                                     key={dimKey}
-                                                    className={`p-3 border-r border-slate-100 font-medium text-slate-700 sticky left-0 z-10 group-hover:bg-blue-50/30 truncate max-w-[200px] ${dimCellBg}`}
+                                                    className={`p-3 border-r border-slate-100 font-medium text-slate-700 sticky left-0 z-10 group-hover:bg-blue-50/30 max-w-[260px] ${dimCellBg}`}
                                                 >
-                                                    {isLink && val !== 'Unknown' ? (
-                                                        <a
-                                                            href={linkUrl!}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="text-blue-600 hover:underline flex items-center gap-1"
-                                                            onClick={e => e.stopPropagation()}
-                                                        >
-                                                            {val} <ExternalLink className="h-3 w-3 opacity-50" />
-                                                        </a>
-                                                    ) : (
-                                                        <span className="truncate" title={val}>
-                                                            {val}
-                                                        </span>
-                                                    )}
+                                                    <div className="flex min-w-0 items-center gap-1.5">
+                                                        {renderInlineThumb(dimKey, row.dimensions, val)}
+                                                        {isLink && val !== 'Unknown' ? (
+                                                            <a
+                                                                href={linkUrl!}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="flex min-w-0 items-center gap-1 truncate text-blue-600 hover:underline"
+                                                                onClick={e => e.stopPropagation()}
+                                                            >
+                                                                {val} <ExternalLink className="h-3 w-3 shrink-0 opacity-50" />
+                                                            </a>
+                                                        ) : (
+                                                            <span className="truncate" title={val}>
+                                                                {val}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </td>
                                             );
                                         })}
@@ -2592,6 +2642,8 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                      onSaved={() => setDiagnosisSettings(loadSubtableDiagnosisSettings())}
                  />
              )}
+
+             <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
         </div>
     );
 };

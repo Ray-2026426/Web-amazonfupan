@@ -1,7 +1,8 @@
 
 import * as XLSX from 'xlsx';
-import { DataRow, TargetRow, RefundRow, InventoryRow, ReviewRow, SearchTermRow, ParsedDataResult, DataSourceDebugInfo } from './types';
+import { DataRow, TargetRow, RefundRow, InventoryRow, ReviewRow, SearchTermRow, ProductImageRow, ParsedDataResult, DataSourceDebugInfo } from './types';
 import { getBusinessWeekRangeFromYearWeek, formatDate } from './utils';
+import { compressDataUrlMapInBatches, compressProductImageRows } from './utils/productImageCompress';
 
 // --- Header Matching Logic ---
 
@@ -356,6 +357,105 @@ export const REVIEW_ALIASES: Record<string, string[]> = {
     'country': ['marketplace', 'country', '站点', '国家'], 
     'helpful_votes': ['helpful', 'votes', 'helpful votes', '点赞', '有用', '点赞数'], 
     'review_link': ['评论链接', 'review link', 'link', 'url', 'permalink', 'review url'] 
+};
+
+/** 商品图片对照表：SKU、品名、图片链接 */
+export const PRODUCT_IMAGE_ALIASES: Record<string, string[]> = {
+    'sku': ['sku', 'msku', 'seller-sku', 'seller sku', '子asin', 'asin', '子sku', '本地sku', 'seller sku', 'msku/sku'],
+    'product_name': ['品名', 'product_name', 'product name', '产品名称', '商品名称', '产品名', '商品名', 'title', 'listing名称'],
+    'image_url': [
+        '图片', '图片链接', '图片url', '图片地址', '主图', '主图链接', '主图url', '商品图片', '产品图片', '产品主图',
+        'image', 'image url', 'image_url', 'pic', 'picture', 'url', '链接', 'thumbnail', 'img',
+    ],
+};
+
+type EmbeddedImageExtract = {
+    byRow: Map<number, string>;
+    imageCol: number | null;
+    count: number;
+};
+
+const bufferToDataUrl = (buffer: Buffer | Uint8Array | ArrayBuffer, extRaw?: string): string => {
+    const ext = (extRaw || 'png').toLowerCase();
+    const mime =
+        ext === 'jpg' || ext === 'jpeg'
+            ? 'image/jpeg'
+            : ext === 'png'
+              ? 'image/png'
+              : ext === 'gif'
+                ? 'image/gif'
+                : 'image/png';
+    const bytes =
+        buffer instanceof Uint8Array
+            ? buffer
+            : buffer instanceof ArrayBuffer
+              ? new Uint8Array(buffer)
+              : new Uint8Array(buffer);
+    let binary = '';
+    const step = 0x8000;
+    for (let i = 0; i < bytes.length; i += step) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + step));
+    }
+    return `data:${mime};base64,${btoa(binary)}`;
+};
+
+/** 从 .xlsx 工作表中按行号提取嵌入图片（领星导出常见） */
+const extractEmbeddedImagesByRow = async (
+    buffer: ArrayBuffer,
+    sheetName: string
+): Promise<EmbeddedImageExtract> => {
+    const byRow = new Map<number, string>();
+    const colCounts = new Map<number, number>();
+    let imageCol: number | null = null;
+
+    try {
+        const ExcelJS = (await import('exceljs')).default;
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buffer);
+        const ws = wb.getWorksheet(sheetName) ?? wb.worksheets[0];
+        if (!ws?.getImages) return { byRow, imageCol: null, count: 0 };
+
+        for (const item of ws.getImages()) {
+            const imageId = (item as { imageId?: number }).imageId;
+            if (imageId == null) continue;
+            const meta = wb.getImage(imageId);
+            if (!meta?.buffer) continue;
+
+            const tl = (item as { range?: { tl?: { nativeRow?: number; nativeCol?: number } } }).range?.tl;
+            const row = tl?.nativeRow;
+            const col = tl?.nativeCol;
+            if (row == null) continue;
+
+            const dataUrl = bufferToDataUrl(meta.buffer, meta.extension);
+            if (!byRow.has(row)) byRow.set(row, dataUrl);
+            if (col != null) colCounts.set(col, (colCounts.get(col) ?? 0) + 1);
+        }
+
+        let max = 0;
+        colCounts.forEach((n, c) => {
+            if (n > max) {
+                max = n;
+                imageCol = c;
+            }
+        });
+    } catch {
+        // 旧版 .xls 或无嵌入图时忽略
+    }
+
+    return { byRow, imageCol, count: byRow.size };
+};
+
+/** 从单元格文本或公式中提取可访问的图片 URL */
+export const extractImageUrl = (raw: unknown): string => {
+    if (raw == null) return '';
+    const s = String(raw).trim();
+    if (!s || s.toLowerCase() === 'undefined') return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    const inline = s.match(/https?:\/\/[^\s"'<>)\]]+/i);
+    if (inline) return inline[0];
+    const hyperlink = s.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+    if (hyperlink) return extractImageUrl(hyperlink[1]);
+    return '';
 };
 
 // NEW: Search Term Aliases
@@ -767,6 +867,162 @@ export const parseReviewData = async (file: File): Promise<ParsedDataResult<Revi
     if (!debug.mappedColumns['rating']) debug.errors.push("警告: 未找到 '评分' 列。");
     if (!debug.mappedColumns['content'] && !debug.mappedColumns['title']) debug.errors.push("警告: 未找到 '评论内容' 或 '标题' 列。");
     return { data: validRows, debug };
+};
+
+export const parseProductImageData = async (file: File): Promise<ParsedDataResult<ProductImageRow>> => {
+    const debug: DataSourceDebugInfo = {
+        filename: file.name,
+        totalRows: 0,
+        validRows: 0,
+        mappedColumns: {},
+        unmappedHeaders: [],
+        errors: [],
+    };
+
+    try {
+        const buf = await file.arrayBuffer();
+        const workbook = XLSX.read(buf, { type: 'array' });
+        const sheetNames = workbook.SheetNames;
+        if (sheetNames.length === 0) {
+            debug.errors.push('商品图片表内容为空');
+            return { data: [], debug };
+        }
+
+        let bestName = sheetNames[0];
+        let bestWs = workbook.Sheets[bestName];
+        let bestScore = -1;
+        for (const name of sheetNames) {
+            const ws = workbook.Sheets[name];
+            const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][];
+            if (!grid.length) continue;
+            let matched = 0;
+            for (const h of grid[0] as unknown[]) {
+                if (mapHeaderToKey(String(h), PRODUCT_IMAGE_ALIASES)) matched++;
+            }
+            const score = matched * 10000 + grid.length;
+            if (score > bestScore) {
+                bestScore = score;
+                bestName = name;
+                bestWs = ws;
+            }
+        }
+
+        if (sheetNames.length > 1) {
+            debug.mappedColumns['__sheet_used__'] = `已使用工作表「${bestName}」（共 ${sheetNames.length} 张）`;
+        }
+
+        const grid = XLSX.utils.sheet_to_json(bestWs, { header: 1, defval: '' }) as unknown[][];
+        if (grid.length < 2) {
+            debug.errors.push('商品图片表无数据行');
+            return { data: [], debug };
+        }
+
+        const headerRow = (grid[0] as unknown[]).map(h => String(h ?? '').trim());
+        const colKeys: (string | null)[] = headerRow.map(h => {
+            const key = h ? mapHeaderToKey(h, PRODUCT_IMAGE_ALIASES) : null;
+            if (key) debug.mappedColumns[key] = h;
+            else if (h) debug.unmappedHeaders.push(h);
+            return key;
+        });
+
+        // 未识别「图片」列时：自动找 URL 最多的列
+        if (!colKeys.includes('image_url')) {
+            let bestCol = -1;
+            let bestHits = 0;
+            for (let c = 0; c < headerRow.length; c++) {
+                if (colKeys[c]) continue;
+                let hits = 0;
+                for (let r = 1; r < Math.min(grid.length, 40); r++) {
+                    const ref = XLSX.utils.encode_cell({ c, r });
+                    const cell = bestWs[ref] as { v?: unknown; l?: { Target?: string; target?: string } } | undefined;
+                    const link = cell?.l?.Target || cell?.l?.target;
+                    const raw = link ?? cell?.v ?? (grid[r] as unknown[])?.[c];
+                    if (extractImageUrl(raw)) hits++;
+                }
+                if (hits > bestHits) {
+                    bestHits = hits;
+                    bestCol = c;
+                }
+            }
+            if (bestCol >= 0 && bestHits > 0) {
+                colKeys[bestCol] = 'image_url';
+                debug.mappedColumns['image_url'] = `(自动识别) ${headerRow[bestCol] || `第${bestCol + 1}列`}`;
+                debug.errors.push(`已自动将「${headerRow[bestCol] || `第${bestCol + 1}列`}」识别为图片链接列（${bestHits} 行含链接）。`);
+            }
+        }
+
+        const embedded = await extractEmbeddedImagesByRow(buf, bestName);
+        if (embedded.count > 0) {
+            await compressDataUrlMapInBatches(embedded.byRow);
+            debug.mappedColumns['__embedded_images__'] = `已从 Excel 嵌入图读取 ${embedded.count} 张（已压缩为小图，按行匹配）`;
+            if (!colKeys.includes('image_url') && embedded.imageCol != null) {
+                colKeys[embedded.imageCol] = 'image_url';
+                debug.mappedColumns['image_url'] =
+                    headerRow[embedded.imageCol] || `第 ${embedded.imageCol + 1} 列（嵌入图片）`;
+            } else if (!debug.mappedColumns['image_url']) {
+                debug.mappedColumns['image_url'] = '（嵌入图片，按行匹配）';
+            }
+        }
+
+        const parsedRows: ProductImageRow[] = [];
+        for (let r = 1; r < grid.length; r++) {
+            const newRow: ProductImageRow = { sku: '', product_name: '', image_url: '' };
+            for (let c = 0; c < colKeys.length; c++) {
+                const key = colKeys[c];
+                if (!key) continue;
+                const ref = XLSX.utils.encode_cell({ c, r });
+                const cell = bestWs[ref] as { v?: unknown; l?: { Target?: string; target?: string } } | undefined;
+                const link = cell?.l?.Target || cell?.l?.target;
+                const raw = link ?? cell?.v ?? (grid[r] as unknown[])?.[c];
+                if (key === 'image_url') {
+                    newRow.image_url = extractImageUrl(raw);
+                } else {
+                    const s = String(raw ?? '').trim();
+                    if (s && s.toLowerCase() !== 'undefined') newRow[key] = s;
+                }
+            }
+            if (!newRow.image_url && embedded.byRow.has(r)) {
+                newRow.image_url = embedded.byRow.get(r)!;
+            }
+            parsedRows.push(newRow);
+        }
+
+        await compressProductImageRows(parsedRows);
+
+        debug.totalRows = parsedRows.length;
+        const validRows = parsedRows.filter(row => row.image_url && (row.sku || row.product_name));
+        debug.validRows = validRows.length;
+
+        if (!debug.mappedColumns['image_url'] && embedded.count === 0) {
+            debug.errors.push(
+                '未找到图片：请用 .xlsx 格式，第三列放嵌入图片或 http 链接；.xls 旧格式不支持嵌入图。'
+            );
+        }
+        if (!debug.mappedColumns['sku'] && !debug.mappedColumns['product_name']) {
+            debug.errors.push('未找到 SKU 或品名列，请至少提供其中一列。');
+        }
+        if (validRows.length === 0) {
+            if (embedded.count > 0) {
+                debug.errors.push(
+                    '已读到嵌入图，但没有有效行：请确保每行图片与 SKU/品名在同一行，且品名列有文字。'
+                );
+            } else {
+                debug.errors.push(
+                    '没有有效图片行。请确认：① 文件为 .xlsx；② 图片在单元格内（非浮动在表外）；③ 品名/SKU 列有内容。'
+                );
+            }
+        }
+        if (validRows.length > 300) {
+            debug.errors.push(
+                `提示：已导入 ${validRows.length} 张嵌入图，数据较大，首次加载可能稍慢；建议仅保留当前在售 SKU。`
+            );
+        }
+
+        return { data: validRows, debug };
+    } catch (e) {
+        debug.errors.push(`解析商品图片表失败：${e instanceof Error ? e.message : String(e)}`);
+        return { data: [], debug };
+    }
 };
 
 // NEW: Search Term Parser
