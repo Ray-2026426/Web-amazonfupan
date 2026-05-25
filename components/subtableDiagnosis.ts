@@ -64,7 +64,7 @@ export type SubtableDiagnosisSettings = {
 };
 
 export const DEFAULT_SUBTABLE_DIAGNOSIS: SubtableDiagnosisSettings = {
-    redThreshold: 0.1,
+    redThreshold: 0.3,
     greenThreshold: 0.3,
     enabled: {},
     metricLabels: {},

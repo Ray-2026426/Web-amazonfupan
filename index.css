@@ -221,3 +221,17 @@ html.dark [class*="shadow-"] {
 /* ---------- 主题切换按钮动效 ---------- */
 .theme-toggle-btn { transition: background-color .2s ease, color .2s ease, transform .15s ease; }
 .theme-toggle-btn:active { transform: scale(0.96); }
+
+/* ---------- 表格字号（总控设置） ---------- */
+html[data-table-font="sm"] table { font-size: 12px !important; }
+html[data-table-font="md"] table { font-size: 14px !important; }
+html[data-table-font="lg"] table { font-size: 16px !important; }
+
+html[data-table-font="sm"] table th,
+html[data-table-font="sm"] table td { font-size: 12px !important; }
+html[data-table-font="md"] table th,
+html[data-table-font="md"] table td { font-size: 14px !important; }
+html[data-table-font="lg"] table th,
+html[data-table-font="lg"] table td { font-size: 16px !important; }
+
+html:not([data-table-font]) table { font-size: 14px; }

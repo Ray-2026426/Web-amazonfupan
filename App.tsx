@@ -31,7 +31,7 @@ import { ProfitSimulatorModal } from './components/ProfitSimulatorModal';
 import { ReviewAnalysisModal } from './components/ReviewAnalysisModal';
 import { KeywordAnalysisModal } from './components/KeywordAnalysisModal'; 
 import { ChatBot } from './components/ChatBot';
-import { ThemeToggle } from './components/ThemeToggle';
+import { AppSettingsButton } from './components/AppSettingsButton';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard } from 'lucide-react';
 import { saveToDB, loadFromDB, clearDB } from './db';
@@ -434,7 +434,7 @@ const App: React.FC = () => {
                 <WorldClock />
                 <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block"></div>
 
-                <ThemeToggle />
+                <AppSettingsButton />
 
                 <button 
                     onClick={() => setShowUploadModal(true)}

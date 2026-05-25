@@ -31,19 +31,19 @@ function ratioToPct(r: number): string {
 }
 
 const PHRASE_ROWS: { key: keyof DiagnosisPhrases; label: string }[] = [
-    { key: 'badBothDownHi', label: '红·越高越好·环+同均变差（合并）' },
-    { key: 'badMomDownHi', label: '红·越高越好·仅环比变差' },
-    { key: 'badYoyDownHi', label: '红·越高越好·仅同比变差' },
-    { key: 'badBothUpLo', label: '红·越低越好·环+同均变差（合并）' },
-    { key: 'badMomUpLo', label: '红·越低越好·仅环比变差' },
-    { key: 'badYoyUpLo', label: '红·越低越好·仅同比变差' },
-    { key: 'goodBothUpHi', label: '绿·越高越好·环+同均向好（合并）' },
-    { key: 'goodMomUpHi', label: '绿·越高越好·仅环比向好' },
-    { key: 'goodYoyUpHi', label: '绿·越高越好·仅同比向好' },
-    { key: 'goodBothDownLo', label: '绿·越低越好·环+同均向好（合并）' },
-    { key: 'goodMomDownLo', label: '绿·越低越好·仅环比向好' },
-    { key: 'goodYoyDownLo', label: '绿·越低越好·仅同比向好' },
-    { key: 'targetMiss', label: '红·相对目标未达成（含超预算）' },
+    { key: 'badBothDownHi', label: '环+同变差（高为好）' },
+    { key: 'badMomDownHi', label: '环比变差（高为好）' },
+    { key: 'badYoyDownHi', label: '同比变差（高为好）' },
+    { key: 'badBothUpLo', label: '环+同变差（低为好）' },
+    { key: 'badMomUpLo', label: '环比变差（低为好）' },
+    { key: 'badYoyUpLo', label: '同比变差（低为好）' },
+    { key: 'goodBothUpHi', label: '环+同向好（高为好）' },
+    { key: 'goodMomUpHi', label: '环比向好（高为好）' },
+    { key: 'goodYoyUpHi', label: '同比向好（高为好）' },
+    { key: 'goodBothDownLo', label: '环+同向好（低为好）' },
+    { key: 'goodMomDownLo', label: '环比向好（低为好）' },
+    { key: 'goodYoyDownLo', label: '同比向好（低为好）' },
+    { key: 'targetMiss', label: '未达目标' },
 ];
 
 export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClose, subType, onSaved }) => {
@@ -114,10 +114,6 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
 
     const save = () => {
         const n = buildSettings();
-        if (n.greenThreshold <= n.redThreshold) {
-            window.alert('绿色阈值应大于「变差红」阈值，请调整。');
-            return;
-        }
         saveSubtableDiagnosisSettings(n);
         onSaved();
         onClose();
@@ -169,16 +165,8 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
                             onChange={(e) => setShowTagCol(e.target.checked)}
                             className="h-3.5 w-3.5 rounded border-slate-300"
                         />
-                        在子表中显示「标签」列（默认不显示；开启后，复制表格也会带上该列）
+                        显示「标签」列
                     </label>
-                    <p className="text-xs leading-relaxed text-slate-500">
-                        不调用 AI。相对变化 = (当前 − 基期) ÷ |基期|。环、同均触发且方向一致时合并为一条（如「同环比异常下降」）。占位符：{' '}
-                        <code className="rounded bg-slate-100 px-1">{'{metric}'}</code>、
-                        <code className="rounded bg-slate-100 px-1">{'{双期}'}</code>、
-                        <code className="rounded bg-slate-100 px-1">{'{环比}'}</code>、
-                        <code className="rounded bg-slate-100 px-1">{'{同比}'}</code>
-                        （周度下自动变为周同环比、周环比、周同比）。
-                    </p>
                     <div className="grid grid-cols-2 gap-3">
                         <label className="flex flex-col gap-1">
                             <span className="text-xs font-semibold text-slate-600">环/同 变差(红) ≥</span>
@@ -208,7 +196,7 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
 
                     <div>
                         <div className="mb-2 flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-700">参与哪些指标 · 显示名称</span>
+                            <span className="text-xs font-bold text-slate-700">参与指标</span>
                             <div className="flex gap-2">
                                 <button type="button" className="text-xs text-blue-600 hover:underline" onClick={() => allOn(true)}>
                                     全选
@@ -234,20 +222,17 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
                                     <input
                                         type="text"
                                         className="min-w-[8rem] flex-1 rounded border border-slate-200 px-2 py-1 text-xs"
-                                        placeholder={`显示名（默认：${o.short}）`}
+                                        placeholder={`默认：${o.short}`}
                                         value={labels[o.id] ?? ''}
                                         onChange={(e) => setLabels((prev) => ({ ...prev, [o.id]: e.target.value }))}
                                     />
-                                    <span className="hidden text-slate-400 sm:inline sm:max-w-[140px] sm:truncate" title={o.hint}>
-                                        {o.hint}
-                                    </span>
                                 </li>
                             ))}
                         </ul>
                     </div>
 
                     <details className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-                        <summary className="cursor-pointer select-none text-xs font-bold text-slate-700">自定义标签用词（模板）</summary>
+                        <summary className="cursor-pointer select-none text-xs font-bold text-slate-700">标签用词模板</summary>
                         <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
                             {PHRASE_ROWS.map(({ key, label }) => (
                                 <label key={key} className="block text-xs">

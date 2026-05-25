@@ -1,6 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { applyAppSettings, loadAppSettings } from './components/appSettings';
+
+applyAppSettings(loadAppSettings());
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
