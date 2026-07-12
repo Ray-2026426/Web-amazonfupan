@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { FilterState, DataRow, InventoryRow, TargetRow } from '../types';
-import { Filter, User, Tag, Layers, Box, Hash, Globe, ChevronDown, Check, Search, XCircle, Store, ShoppingBag, CalendarRange, AlertCircle, CalendarClock, Calendar, BookOpen, X, CalendarDays, History, Square } from 'lucide-react';
+import { FilterState, DataRow, InventoryRow, TargetRow, FilterSnapshot } from '../types';
+import { Filter, User, Tag, Layers, Box, Hash, Globe, ChevronDown, Check, Search, XCircle, Store, ShoppingBag, CalendarRange, AlertCircle, CalendarClock, Calendar, BookOpen, X, CalendarDays, History, Square, Save, Bookmark, Trash2, MoreHorizontal } from 'lucide-react';
 import { getISOWeekDateRange, formatDate, formatBusinessWeekFromDateStr, getBusinessWeekRangeFromYearWeek } from '../utils';
 import { useEscClose } from './useEscClose';
+import { saveSnapshot, loadSnapshots, deleteSnapshot, renameSnapshot } from '../utils/filterSnapshots';
 
 interface SidebarProps {
   data: DataRow[];
@@ -12,7 +13,8 @@ interface SidebarProps {
   filters: FilterState;
   setFilters: React.Dispatch<React.SetStateAction<FilterState>>;
   warnings?: string[]; 
-  isWeeklyMode?: boolean; 
+  isWeeklyMode?: boolean;
+  onLoadSnapshot?: (snapshot: FilterSnapshot) => void;
 }
 
 // --- User Guide Modal (Unchanged) ---
@@ -177,11 +179,56 @@ const EnhancedDropdown = ({ title, icon, options, selected, onToggle, onBulkSet 
     );
 };
 
-export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [], targetData = [], filters, setFilters, warnings = [], isWeeklyMode = false }) => {
+export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [], targetData = [], filters, setFilters, warnings = [], isWeeklyMode = false, onLoadSnapshot }) => {
     
     const [startVal, setStartVal] = useState('');
     const [endVal, setEndVal] = useState('');
     const [isGuideOpen, setIsGuideOpen] = useState(false);
+    
+    // --- Snapshot State ---
+    const [snapshots, setSnapshots] = useState<FilterSnapshot[]>([]);
+    const [showSaveInput, setShowSaveInput] = useState(false);
+    const [snapshotName, setSnapshotName] = useState('');
+    const [snapshotMenuOpen, setSnapshotMenuOpen] = useState<string | null>(null); // id of open menu
+    const [renamingId, setRenamingId] = useState<string | null>(null);
+    const [renameText, setRenameText] = useState('');
+
+    // 初始化加载快照列表
+    useEffect(() => {
+        setSnapshots(loadSnapshots());
+    }, []);
+    
+    // --- Snapshot Handlers ---
+    const handleSaveSnapshot = () => {
+        const name = snapshotName.trim();
+        if (!name || name.length > 12) return;
+        const updated = saveSnapshot(name, filters, isWeeklyMode);
+        setSnapshots(updated);
+        setSnapshotName('');
+        setShowSaveInput(false);
+    };
+
+    const handleLoadSnapshot = (snap: FilterSnapshot) => {
+        if (onLoadSnapshot) {
+            onLoadSnapshot(snap);
+        }
+    };
+
+    const handleDeleteSnapshot = (id: string) => {
+        const updated = deleteSnapshot(id);
+        setSnapshots(updated);
+        setSnapshotMenuOpen(null);
+    };
+
+    const handleRenameSnapshot = (id: string) => {
+        const newName = renameText.trim();
+        if (!newName || newName.length > 12) return;
+        const updated = renameSnapshot(id, newName);
+        setSnapshots(updated);
+        setRenamingId(null);
+        setRenameText('');
+        setSnapshotMenuOpen(null);
+    };
 
     const getWeekStringFromDate = (dateStr: string) => formatBusinessWeekFromDateStr(dateStr);
 
@@ -490,6 +537,106 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
             </div>
 
             <div className="flex-1 overflow-y-auto custom-scroll px-5 pb-5 pt-4">
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">筛选快照</div>
+                <div className="mb-4 space-y-1.5">
+                    {/* 已保存的快照列表 */}
+                    {snapshots.length > 0 && (
+                        <div className="space-y-1 mb-2">
+                            {snapshots.map(snap => (
+                                <div key={snap.id} className="relative group">
+                                    {renamingId === snap.id ? (
+                                        <div className="flex items-center gap-1 rounded-xl border border-sky-400/50 bg-sky-500/10 px-2 py-1.5">
+                                            <input
+                                                type="text"
+                                                value={renameText}
+                                                onChange={e => setRenameText(e.target.value)}
+                                                onKeyDown={e => {
+                                                    if (e.key === 'Enter') handleRenameSnapshot(snap.id);
+                                                    if (e.key === 'Escape') { setRenamingId(null); setRenameText(''); }
+                                                }}
+                                                className="flex-1 bg-transparent text-xs text-slate-200 outline-none"
+                                                maxLength={12}
+                                                autoFocus
+                                                placeholder={snap.name}
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1.5 rounded-xl border border-slate-700/60 bg-slate-800/40 px-2.5 py-1.5 text-xs text-slate-300 transition-colors hover:border-slate-500 hover:bg-slate-800/80 cursor-pointer group/snap">
+                                            <Bookmark className="w-3 h-3 flex-shrink-0 text-sky-400/70" />
+                                            <span
+                                                className="flex-1 truncate font-medium"
+                                                onClick={() => handleLoadSnapshot(snap)}
+                                                title={`${snap.name}（${snap.isWeeklyMode ? '周度' : '月度'}）`}
+                                            >
+                                                {snap.name}
+                                            </span>
+                                            <span className="text-[9px] text-slate-500 flex-shrink-0 bg-slate-700/50 rounded px-1">{snap.isWeeklyMode ? '周' : '月'}</span>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); setSnapshotMenuOpen(snapshotMenuOpen === snap.id ? null : snap.id); }}
+                                                className="p-0.5 rounded opacity-0 group-hover/snap:opacity-100 transition-opacity text-slate-500 hover:text-slate-300"
+                                            >
+                                                <MoreHorizontal className="w-3 h-3" />
+                                            </button>
+
+                                            {/* 右键菜单 */}
+                                            {snapshotMenuOpen === snap.id && (
+                                                <div className="absolute right-0 top-full mt-1 z-[60] w-28 rounded-xl border border-slate-600/80 bg-slate-800/95 py-1 shadow-xl backdrop-blur-lg">
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); setRenamingId(snap.id); setRenameText(snap.name); setSnapshotMenuOpen(null); }}
+                                                        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-slate-300 hover:bg-slate-700/80 hover:text-white transition-colors"
+                                                    >
+                                                        重命名
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleDeleteSnapshot(snap.id); }}
+                                                        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-rose-400 hover:bg-slate-700/80 hover:text-rose-300 transition-colors"
+                                                    >
+                                                        <Trash2 className="w-3 h-3" /> 删除
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* 保存快照按钮 */}
+                    {showSaveInput ? (
+                        <div className="flex items-center gap-1 rounded-xl border border-sky-400/50 bg-sky-500/10 px-2.5 py-1.5">
+                            <Save className="w-3 h-3 text-sky-400 flex-shrink-0" />
+                            <input
+                                type="text"
+                                value={snapshotName}
+                                onChange={e => setSnapshotName(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') handleSaveSnapshot();
+                                    if (e.key === 'Escape') { setShowSaveInput(false); setSnapshotName(''); }
+                                }}
+                                placeholder={snapshots.length >= 6 ? '已达上限(6个)' : '快照名称...'}
+                                className="flex-1 bg-transparent text-xs text-slate-200 outline-none placeholder:text-slate-500"
+                                maxLength={12}
+                                autoFocus
+                                disabled={snapshots.length >= 6}
+                            />
+                            <button onClick={() => { setShowSaveInput(false); setSnapshotName(''); }} className="text-slate-500 hover:text-slate-300">
+                                <X className="w-3 h-3" />
+                            </button>
+                        </div>
+                    ) : (
+                        <button
+                            onClick={() => { setShowSaveInput(true); setSnapshotName(''); }}
+                            disabled={snapshots.length >= 6}
+                            className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-600/60 bg-slate-800/30 px-2.5 py-1.5 text-[11px] text-slate-400 transition-colors hover:border-sky-500/40 hover:text-sky-300 hover:bg-sky-500/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                            title={snapshots.length >= 6 ? '最多保存 6 个快照' : '保存当前筛选条件为快照'}
+                        >
+                            <Save className="w-3 h-3" />
+                            <span>保存当前筛选</span>
+                        </button>
+                    )}
+                </div>
+
                 <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">筛选维度</div>
                 <div className="space-y-1">
                     <EnhancedDropdown title="国家" icon={<Globe className="w-3 h-3"/>} options={availableOptions.countries} selected={filters.countries} onToggle={(v, all) => toggleFilter('countries', v, all)} onBulkSet={(vs) => setBulkFilter('countries', vs)} />

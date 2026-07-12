@@ -226,8 +226,9 @@ export const ChatBot: React.FC<ChatBotProps> = ({ data, inventory, refunds, filt
         `;
     };
 
-    const handleSend = async () => {
-        if (!input.trim()) return;
+    const sendMessage = async (text?: string) => {
+        const msg = (text || input).trim();
+        if (!msg) return;
 
         const apiCfg = loadChatApiSettings();
         const apiKey = getKeyForProvider(apiCfg, apiCfg.provider);
@@ -244,9 +245,9 @@ export const ChatBot: React.FC<ChatBotProps> = ({ data, inventory, refunds, filt
             return;
         }
 
-        const userMsg: Message = { id: Date.now().toString(), role: 'user', text: input };
+        const userText = msg;
+        const userMsg: Message = { id: Date.now().toString(), role: 'user', text: userText };
         setMessages(prev => [...prev, userMsg]);
-        const userText = input;
         setInput('');
         setIsLoading(true);
 
@@ -344,6 +345,15 @@ export const ChatBot: React.FC<ChatBotProps> = ({ data, inventory, refunds, filt
         }
     };
 
+    const QUICK_QUESTIONS = [
+        { label: '诊断大盘', question: '请对当前筛选条件下的整体表现做全面诊断：销量、毛利、广告效率各自与目标的差距有多大？最大的风险点是什么？' },
+        { label: '找出问题ASIN', question: '找出当前范围内销量环比下降最明显的5个产品（按品名），分析各自可能的原因，并给出行动建议。' },
+        { label: '广告效率', question: '分析广告投放效率：ACoS 最高的是哪些产品/品类？ASOAS 广告订单占比是否健康？哪些广告类型的ROI最低？' },
+        { label: '库存风险', question: '检查库存健康状况：有哪些产品库龄超过180天？金额有多大？建议如何处理（清货/促销/移除）？' },
+        { label: '退款根因', question: '退款金额最高的产品是哪些？退款原因集中在什么问题？对比行业正常水平，给出改善建议。' },
+        { label: '负责人总结', question: '按负责人维度汇总核心数据（销售额、毛利率、广告占比），找出各自亮点和需要关注的问题。' },
+    ];
+
     return (
         <>
             {/* FAB Button */}
@@ -414,6 +424,23 @@ export const ChatBot: React.FC<ChatBotProps> = ({ data, inventory, refunds, filt
                         <div ref={messagesEndRef} />
                     </div>
 
+                    {/* Quick Questions */}
+                    <div className="px-3 py-2 border-t border-gray-100 bg-slate-50">
+                        <div className="flex flex-wrap gap-1.5">
+                            {QUICK_QUESTIONS.map((q) => (
+                                <button
+                                    key={q.label}
+                                    type="button"
+                                    onClick={() => sendMessage(q.question)}
+                                    disabled={isLoading}
+                                    className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 transition-colors hover:bg-blue-100 hover:border-blue-300 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    {q.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
                     {/* Input Area */}
                     <div className="p-4 bg-white border-t border-gray-100">
                         <div className="relative flex items-center">
@@ -421,13 +448,13 @@ export const ChatBot: React.FC<ChatBotProps> = ({ data, inventory, refunds, filt
                                 type="text"
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && !isLoading && handleSend()}
-                                placeholder="输入您的问题 (例如: 张三负责的美国站产品表现?)..."
+                                onKeyDown={(e) => e.key === 'Enter' && !isLoading && sendMessage()}
+                                placeholder="输入您的问题，或点击上方快捷提问..."
                                 className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-full pl-4 pr-12 py-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                                 disabled={isLoading}
                             />
                             <button
-                                onClick={handleSend}
+                                onClick={() => sendMessage()}
                                 disabled={isLoading || !input.trim()}
                                 className="absolute right-2 p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors"
                             >

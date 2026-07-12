@@ -220,6 +220,14 @@ export interface FilterState {
   productNames: string[]; // New
 }
 
+export interface FilterSnapshot {
+  id: string;
+  name: string;
+  filters: FilterState;
+  isWeeklyMode: boolean;
+  createdAt: number; // timestamp ms
+}
+
 export type TimePeriod = 'current' | 'last_period' | 'same_period_last_year';
 
 export interface AggregatedData {

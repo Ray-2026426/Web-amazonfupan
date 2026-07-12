@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow } from './types';
+import { DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot } from './types';
 import { 
   calculatePeriodDates, 
   filterData, 
@@ -319,6 +319,12 @@ const App: React.FC = () => {
       setRefundModalOpen(true);
   };
 
+  const handleLoadSnapshot = (snapshot: FilterSnapshot) => {
+      setIsWeeklyMode(snapshot.isWeeklyMode);
+      // 用 setTimeout 确保 mode 切换已生效再设 filters
+      setFilters(snapshot.filters);
+  };
+
   const handleSetWeeklyMode = (enable: boolean) => {
       setIsWeeklyMode(enable);
       if (enable) {
@@ -403,6 +409,7 @@ const App: React.FC = () => {
         setFilters={setFilters} 
         warnings={processedData?.warnings}
         isWeeklyMode={isWeeklyMode}
+        onLoadSnapshot={handleLoadSnapshot}
       />
       
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
@@ -463,6 +470,9 @@ const App: React.FC = () => {
                             current={processedData.current} 
                             target={processedData.target} 
                             isWeeklyMode={isWeeklyMode}
+                            rawData={isWeeklyMode ? weeklyData : performanceData}
+                            filters={filters}
+                            targetRows={targetData}
                         />
                     )}
 
