@@ -8,7 +8,7 @@ import {
     formatNumber,
     formatPercent,
     formatBusinessWeekFromDateStr,
-    getBusinessWeekRangeFromYearWeek
+    allocateWeeklyTargetsLegacy,
 } from '../utils';
 import { Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart } from 'recharts';
 import { useEscClose } from './useEscClose';
@@ -74,7 +74,7 @@ const resolveInitialMetrics = (columns: TrendColumn[]): string[] => {
 const weekKeysForMonth = (monthKey: string): string[] => {
     const [y, m] = monthKey.split('-').map(Number);
     if (!y || !m) return [];
-    const dim = daysInCalendarMonth(y, m - 1);
+    const dim = new Date(y, m, 0).getDate();
     const keys = new Set<string>();
     for (let d = 1; d <= dim; d++) {
         const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -158,42 +158,6 @@ const targetMatchesVisibleGroupLoose = (
 };
 
 type TgAcc = { sq: number; sa: number; gp: number; ad: number };
-
-const daysInCalendarMonth = (year: number, monthIndex0: number) =>
-    new Date(year, monthIndex0 + 1, 0).getDate();
-
-const monthKeyFromDate = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-
-/** 周度目标：周内每一天取「该自然月目标 ÷ 当月天数」，再按天相加（跨月周则多月分段相加） */
-const allocateWeeklyTargetsFromMonths = (weekKey: string, targetByMonth: Record<string, TgAcc>): TgAcc => {
-    const m = weekKey.match(/^(\d{4})-W(\d{1,2})$/i);
-    if (!m) return { sq: 0, sa: 0, gp: 0, ad: 0 };
-    const y = parseInt(m[1], 10);
-    const w = parseInt(m[2], 10);
-    const { start, end } = getBusinessWeekRangeFromYearWeek(y, w);
-    let sq = 0;
-    let sa = 0;
-    let gp = 0;
-    let ad = 0;
-    const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-    const endTime = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
-    while (cursor.getTime() <= endTime) {
-        const yk = cursor.getFullYear();
-        const mi = cursor.getMonth();
-        const mk = monthKeyFromDate(cursor);
-        const dim = daysInCalendarMonth(yk, mi);
-        const tg = targetByMonth[mk] || { sq: 0, sa: 0, gp: 0, ad: 0 };
-        if (dim > 0) {
-            sq += tg.sq / dim;
-            sa += tg.sa / dim;
-            gp += tg.gp / dim;
-            ad += tg.ad / dim;
-        }
-        cursor.setDate(cursor.getDate() + 1);
-    }
-    return { sq, sa, gp, ad };
-};
 
 export const TrendChartModal: React.FC<TrendChartModalProps> = ({
     isOpen,
@@ -334,7 +298,7 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
 
         return aggregated.map(row => {
             const tg = chartWeekly
-                ? allocateWeeklyTargetsFromMonths(row.time, targetByMonth)
+                ? allocateWeeklyTargetsLegacy(row.time, targetByMonth)
                 : targetByMonth[row.time] || { sq: 0, sa: 0, gp: 0, ad: 0 };
             const gm = tg.sa > 0 ? tg.gp / tg.sa : 0;
             const ar = tg.sa > 0 ? tg.ad / tg.sa : 0;

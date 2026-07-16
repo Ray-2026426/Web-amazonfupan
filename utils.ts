@@ -222,12 +222,223 @@ export const calculatePeriodDates = (startStr: string, endStr: string) => {
   };
 };
 
-export const getPacingRatio = (start: Date, end: Date): number => {
-  const endOfMonth = new Date(end.getFullYear(), end.getMonth() + 1, 0);
-  // Simple check: if end date matches end of month, ratio is 1. 
-  // Otherwise could return day fraction. For now returning 1 as per legacy code structure.
-  if (formatDate(end) === formatDate(endOfMonth)) return 1;
-  return 1; 
+/**
+ * 时间进度（序时分母用）= 数据截止日当天 / 分析月总天数。
+ * - 截止日 ≥ 分析月最后一天 → 1（整月，UI 不显示序时）
+ * - 截止日落在分析月内 → day / daysInMonth
+ * - 无截止日 / 其他边界 → 1
+ * 注意：此比值只用于「序时达成率」展示，不要拿去缩小目标金额。
+ */
+export const getPacingRatio = (
+  periodStart: Date,
+  periodEnd: Date,
+  dataEndDate?: string | null
+): number => {
+  if (!dataEndDate) return 1;
+
+  const cutoffParts = dataEndDate.split('-').map(Number);
+  if (cutoffParts.length < 3 || cutoffParts.some(n => Number.isNaN(n))) return 1;
+  const [cy, cm, cd] = cutoffParts;
+  const cutoff = new Date(cy, cm - 1, cd);
+  const cutoffStr = formatDate(cutoff);
+
+  const monthEnd = new Date(periodEnd.getFullYear(), periodEnd.getMonth() + 1, 0);
+  const monthEndStr = formatDate(monthEnd);
+
+  // 截止日已覆盖完整分析月（含之后）→ 整月
+  if (cutoffStr >= monthEndStr) return 1;
+
+  const periodMonth = formatDate(periodStart).substring(0, 7);
+  const cutoffMonth = cutoffStr.substring(0, 7);
+
+  // 截止日早于分析月 → 无有效序时
+  if (cutoffMonth < periodMonth) return 1;
+
+  // 截止日落在分析月内
+  if (
+    cutoff.getFullYear() === periodEnd.getFullYear() &&
+    cutoff.getMonth() === periodEnd.getMonth()
+  ) {
+    const daysInMonth = monthEnd.getDate();
+    if (daysInMonth <= 0) return 1;
+    return Math.min(1, Math.max(0, cd / daysInMonth));
+  }
+
+  return 1;
+};
+
+/** 序时达成率 = 全月完成度 / 时间进度；时间进度为 1 时返回 null（不展示） */
+export const getPacingCompletionRatio = (
+  actual: number,
+  fullTarget: number,
+  pacingRatio: number
+): number | null => {
+  if (!pacingRatio || pacingRatio >= 1) return null;
+  if (!fullTarget) return null;
+  return (actual / fullTarget) / pacingRatio;
+};
+
+/** 比率指标距目标（百分点），如 actual=0.28 target=0.30 → "-2.0%" */
+export const formatTargetGapPctPoints = (actual: number, target: number): string => {
+  const gap = (actual - target) * 100;
+  const sign = gap > 0 ? '+' : '';
+  return `${sign}${gap.toFixed(1)}%`;
+};
+
+/** 按月汇总的目标桶（用于按天拆到周） */
+export type MonthlyTargetBucket = {
+  sales_quantity: number;
+  sales_amount: number;
+  gross_profit: number;
+  ad_spend: number;
+};
+
+export const emptyMonthlyTargetBucket = (): MonthlyTargetBucket => ({
+  sales_quantity: 0,
+  sales_amount: 0,
+  gross_profit: 0,
+  ad_spend: 0,
+});
+
+const monthKeyFromDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+const daysInCalendarMonth = (year: number, monthIndex0: number) =>
+  new Date(year, monthIndex0 + 1, 0).getDate();
+
+/** 区间内每一天取「该自然月目标 ÷ 当月天数」再累加（跨月则分段） */
+export const allocateTargetsForDateRange = (
+  start: Date,
+  end: Date,
+  targetByMonth: Record<string, MonthlyTargetBucket>
+): AggregatedData => {
+  const agg = { ...initialAggregated };
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const endTime = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+  while (cursor.getTime() <= endTime) {
+    const mk = monthKeyFromDate(cursor);
+    const dim = daysInCalendarMonth(cursor.getFullYear(), cursor.getMonth());
+    const tg = targetByMonth[mk] || emptyMonthlyTargetBucket();
+    if (dim > 0) {
+      agg.sales_quantity += tg.sales_quantity / dim;
+      agg.sales_amount += tg.sales_amount / dim;
+      agg.gross_profit += tg.gross_profit / dim;
+      agg.ad_spend += tg.ad_spend / dim;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  agg.gross_margin = agg.sales_amount > 0 ? agg.gross_profit / agg.sales_amount : 0;
+  return agg;
+};
+
+/** 周度目标：按业务周键（如 2026-W28）从月目标按天拆分 */
+export const allocateWeeklyTargetsFromMonths = (
+  weekKey: string,
+  targetByMonth: Record<string, MonthlyTargetBucket>
+): AggregatedData => {
+  const m = weekKey.match(/^(\d{4})-W(\d{1,2})$/i);
+  if (!m) return { ...initialAggregated };
+  const y = parseInt(m[1], 10);
+  const w = parseInt(m[2], 10);
+  const { start, end } = getBusinessWeekRangeFromYearWeek(y, w);
+  return allocateTargetsForDateRange(start, end, targetByMonth);
+};
+
+/** 兼容趋势图旧字段名 {sq,sa,gp,ad} */
+export const allocateWeeklyTargetsLegacy = (
+  weekKey: string,
+  targetByMonth: Record<string, { sq: number; sa: number; gp: number; ad: number }>
+): { sq: number; sa: number; gp: number; ad: number } => {
+  const mapped: Record<string, MonthlyTargetBucket> = {};
+  Object.keys(targetByMonth).forEach((mk) => {
+    const t = targetByMonth[mk];
+    mapped[mk] = {
+      sales_quantity: t.sq,
+      sales_amount: t.sa,
+      gross_profit: t.gp,
+      ad_spend: t.ad,
+    };
+  });
+  const a = allocateWeeklyTargetsFromMonths(weekKey, mapped);
+  return {
+    sq: a.sales_quantity,
+    sa: a.sales_amount,
+    gp: a.gross_profit,
+    ad: a.ad_spend,
+  };
+};
+
+const collectMonthsInRange = (start: Date, end: Date): Set<string> => {
+  const set = new Set<string>();
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const endTime = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+  while (cursor.getTime() <= endTime) {
+    set.add(monthKeyFromDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return set;
+};
+
+const targetMatchesFilters = (t: TargetRow, filters: FilterState): boolean => {
+  if (filters.countries.includes('__NONE__')) return false;
+  if (filters.countries.length > 0 && !filters.countries.includes(t.country)) return false;
+
+  if (filters.brands.includes('__NONE__')) return false;
+  if (filters.brands.length > 0) {
+    const tBrand = (t.brand || '').toLowerCase();
+    if (!filters.brands.some((f) => f.toLowerCase() === tBrand)) return false;
+  }
+
+  if (filters.managers.includes('__NONE__')) return false;
+  if (filters.managers.length > 0) {
+    const tVal = (t.manager || '').toLowerCase();
+    if (!filters.managers.some((f) => f.toLowerCase() === tVal)) return false;
+  }
+
+  if (filters.shops.includes('__NONE__')) return false;
+  if (filters.shops.length > 0) {
+    const tVal = (t.shop_name || '').toLowerCase();
+    if (!filters.shops.some((f) => f.toLowerCase() === tVal)) return false;
+  }
+
+  if (filters.subCategories.includes('__NONE__')) return false;
+  if (filters.subCategories.length > 0 && !filters.subCategories.includes(t.sub_category)) return false;
+
+  if (filters.parentAsins.includes('__NONE__')) return false;
+  if (filters.parentAsins.length > 0 && !filters.parentAsins.includes(t.parent_asin)) return false;
+
+  if (filters.childAsins.includes('__NONE__')) return false;
+  if (filters.childAsins.length > 0 && !filters.childAsins.includes(t.child_asin)) return false;
+
+  if (filters.productNames.includes('__NONE__')) return false;
+  if (filters.productNames.length > 0) {
+    const tVal = (t.product_name || '').toLowerCase();
+    if (!filters.productNames.some((f) => f.toLowerCase() === tVal)) return false;
+  }
+
+  return true;
+};
+
+/** 周度看板：当前筛选周的「周分摊月目标」 */
+export const getWeeklyAllocatedTarget = (
+  targets: TargetRow[],
+  start: Date,
+  end: Date,
+  filters: FilterState
+): AggregatedData => {
+  const months = collectMonthsInRange(start, end);
+  const byMonth: Record<string, MonthlyTargetBucket> = {};
+  targets.forEach((t) => {
+    if (!months.has(t.month)) return;
+    if (!targetMatchesFilters(t, filters)) return;
+    const cur = byMonth[t.month] || emptyMonthlyTargetBucket();
+    cur.sales_quantity += t.sales_quantity_target;
+    cur.sales_amount += t.sales_amount_target;
+    cur.gross_profit += t.gross_profit_target;
+    cur.ad_spend += t.ad_spend_target;
+    byMonth[t.month] = cur;
+  });
+  return allocateTargetsForDateRange(start, end, byMonth);
 };
 
 // --- Currency Utilities ---
@@ -900,6 +1111,79 @@ export const groupTargetsByDimension = (
             val.gross_margin = val.sales_amount > 0 ? val.gross_profit / val.sales_amount : 0;
         }
     }
+
+    return map;
+};
+
+/** 周度子表：按维度匹配月目标后，再按当前周期（或行内年周）按天拆成周目标 */
+export const groupWeeklyTargetsByDimension = (
+    targets: TargetRow[],
+    dimensions: (keyof TargetRow | 'year_month')[],
+    start: Date,
+    end: Date
+): Map<string, AggregatedData> => {
+    const map = new Map<string, AggregatedData>();
+    const months = collectMonthsInRange(start, end);
+    const hasWeekDim = dimensions.includes('year_month');
+    const otherDims = dimensions.filter((d) => d !== 'year_month');
+
+    // otherKey -> month -> bucket
+    const byOtherKeyMonth = new Map<string, Record<string, MonthlyTargetBucket>>();
+
+    targets.forEach((t) => {
+        if (!months.has(t.month) && !hasWeekDim) return;
+        // 含年周拆解时，目标月需覆盖周期内月份；行级周可能跨月，仍用 months 过滤够用（当前侧栏通常一周）
+        if (!months.has(t.month)) return;
+
+        const otherKey = otherDims.map((d) => String((t as any)[d] || 'Unknown')).join('|||');
+        let monthMap = byOtherKeyMonth.get(otherKey);
+        if (!monthMap) {
+            monthMap = {};
+            byOtherKeyMonth.set(otherKey, monthMap);
+        }
+        const cur = monthMap[t.month] || emptyMonthlyTargetBucket();
+        cur.sales_quantity += t.sales_quantity_target;
+        cur.sales_amount += t.sales_amount_target;
+        cur.gross_profit += t.gross_profit_target;
+        cur.ad_spend += t.ad_spend_target;
+        monthMap[t.month] = cur;
+    });
+
+    const weekKeysInPeriod: string[] = [];
+    if (hasWeekDim) {
+        const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        const endTime = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
+        const seen = new Set<string>();
+        while (cursor.getTime() <= endTime) {
+            const wk = formatBusinessWeekFromDateStr(formatDate(cursor));
+            if (!seen.has(wk)) {
+                seen.add(wk);
+                weekKeysInPeriod.push(wk);
+            }
+            cursor.setDate(cursor.getDate() + 1);
+        }
+    }
+
+    byOtherKeyMonth.forEach((monthMap, otherKey) => {
+        if (!hasWeekDim) {
+            const allocated = allocateTargetsForDateRange(start, end, monthMap);
+            const key = otherKey; // dimensions 不含 year_month 时 otherKey 即 compositeKey
+            // 若 dimensions 为空，otherKey 为 ''
+            map.set(key, allocated);
+            return;
+        }
+
+        weekKeysInPeriod.forEach((weekKey) => {
+            const allocated = allocateWeeklyTargetsFromMonths(weekKey, monthMap);
+            const parts = dimensions.map((d) => {
+                if (d === 'year_month') return weekKey;
+                // otherKey 按 otherDims 顺序拼接
+                const idx = otherDims.indexOf(d);
+                return idx >= 0 ? otherKey.split('|||')[idx] : 'Unknown';
+            });
+            map.set(parts.join('|||'), allocated);
+        });
+    });
 
     return map;
 };

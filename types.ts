@@ -220,6 +220,19 @@ export interface FilterState {
   productNames: string[]; // New
 }
 
+/** 导入时填写的数据覆盖区间；序时只用 dataEndDate */
+export interface DataCoverage {
+  dataStartDate: string; // YYYY-MM-DD，默认 2025-01-01
+  dataEndDate: string;   // YYYY-MM-DD，数据截止日
+}
+
+/** IndexedDB meta 存储结构（兼容旧版直接存 FilterState） */
+export interface AppMeta {
+  filters: FilterState;
+  dataStartDate?: string;
+  dataEndDate?: string;
+}
+
 export interface FilterSnapshot {
   id: string;
   name: string;

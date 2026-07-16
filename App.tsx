@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot } from './types';
+import { DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot, DataCoverage, AppMeta } from './types';
 import { 
   calculatePeriodDates, 
   filterData, 
@@ -11,6 +11,7 @@ import {
   aggregateInventoryData, 
   enrichTargetData, 
   getPacingRatio,
+  getWeeklyAllocatedTarget,
   analyzeTargetCompleteness,
   getISOWeekDateRange,
   formatDate,
@@ -35,6 +36,8 @@ import { AppSettingsButton } from './components/AppSettingsButton';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard } from 'lucide-react';
 import { saveToDB, loadFromDB, clearDB } from './db';
+
+const DEFAULT_DATA_START = '2025-01-01';
 
 const initialFilters: FilterState = {
   startDate: '',
@@ -130,6 +133,8 @@ const App: React.FC = () => {
 
   // UI States
   const [filters, setFilters] = useState<FilterState>(initialFilters);
+  const [dataStartDate, setDataStartDate] = useState(DEFAULT_DATA_START);
+  const [dataEndDate, setDataEndDate] = useState('');
   const [isWeeklyMode, setIsWeeklyMode] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isRestoringData, setIsRestoringData] = useState(true);
@@ -170,8 +175,31 @@ const App: React.FC = () => {
               if (reviews) setReviewData(reviews);
               if (productImages?.length) setProductImageData(productImages);
               
-              if (savedFilters && savedFilters.startDate) {
-                  setFilters(savedFilters);
+              const savedMeta = savedFilters as AppMeta | FilterState | null;
+              if (savedMeta) {
+                  const isNewMeta = 'filters' in savedMeta && (savedMeta as AppMeta).filters?.startDate;
+                  if (isNewMeta) {
+                      const meta = savedMeta as AppMeta;
+                      setFilters(meta.filters);
+                      if (meta.dataStartDate) setDataStartDate(meta.dataStartDate);
+                      if (meta.dataEndDate) setDataEndDate(meta.dataEndDate);
+                  } else if ((savedMeta as FilterState).startDate) {
+                      setFilters(savedMeta as FilterState);
+                  } else if (monthly && monthly.length > 0) {
+                      const dates = monthly.map((d: DataRow) => d.date).sort();
+                      const lastDate = dates[dates.length - 1];
+                      const [y, m] = lastDate.split('-').map(Number);
+                      const lastMonthStart = new Date(y, m - 1, 1);
+                      const lastMonthEnd = new Date(y, m, 0);
+                      
+                      const fmt = (d: Date) => `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
+                      
+                      setFilters({
+                          ...initialFilters,
+                          startDate: fmt(lastMonthStart),
+                          endDate: fmt(lastMonthEnd)
+                      });
+                  }
               } else if (monthly && monthly.length > 0) {
                   const dates = monthly.map((d: DataRow) => d.date).sort();
                   const lastDate = dates[dates.length - 1];
@@ -197,19 +225,27 @@ const App: React.FC = () => {
       restoreData();
   }, []);
 
-  // --- 2. Save Filters when they change ---
+  // --- 2. Save Filters + data coverage when they change ---
   useEffect(() => {
       if (!isRestoringData && performanceData.length > 0 && filters.startDate) {
-          saveToDB('meta', filters);
+          const meta: AppMeta = {
+              filters,
+              dataStartDate,
+              dataEndDate,
+          };
+          saveToDB('meta', meta);
       }
-  }, [filters, isRestoringData, performanceData]);
+  }, [filters, dataStartDate, dataEndDate, isRestoringData, performanceData]);
 
   // --- Handlers ---
-  const handleDataUpload = async (slots: UploadSlots): Promise<DataUploadResult | undefined> => {
+  const handleDataUpload = async (slots: UploadSlots, coverage: DataCoverage): Promise<DataUploadResult | undefined> => {
     if (!slots.monthly) return undefined;
     await clearDB();
     resetTrendChartMetricsSelection();
     setSearchTermData([]);
+
+    setDataStartDate(coverage.dataStartDate || DEFAULT_DATA_START);
+    setDataEndDate(coverage.dataEndDate);
 
     const debugs: DataUploadResult['reports'] = [];
 
@@ -298,7 +334,12 @@ const App: React.FC = () => {
             endDate: fmt(lastMonthEnd)
         };
         setFilters(newFilters);
-        saveToDB('meta', newFilters);
+        const meta: AppMeta = {
+            filters: newFilters,
+            dataStartDate: coverage.dataStartDate || DEFAULT_DATA_START,
+            dataEndDate: coverage.dataEndDate,
+        };
+        saveToDB('meta', meta);
     }
 
     // 不在此处关弹窗：先展示解析结果，用户点「开始分析」再关，避免与子表状态更新不同步
@@ -370,9 +411,13 @@ const App: React.FC = () => {
       const last = lastRows.length > 0 ? aggregateData(lastRows) : null;
       const year = yearRows.length > 0 ? aggregateData(yearRows) : null;
 
-      // Targets
-      const pacing = getPacingRatio(periods.current.start, periods.current.end);
-      const target = getTargetForSelection(targetData, periods.current.start, periods.current.end, filters, pacing);
+      // Targets：月度取全月目标；周度按天拆成「周分摊月目标」。序时仅月度展示用。
+      const pacingRatio = isWeeklyMode
+          ? 1
+          : getPacingRatio(periods.current.start, periods.current.end, dataEndDate);
+      const target = isWeeklyMode
+          ? getWeeklyAllocatedTarget(targetData, periods.current.start, periods.current.end, filters)
+          : getTargetForSelection(targetData, periods.current.start, periods.current.end, filters, 1);
 
       // Inventory (Snapshot logic usually, here simplified filter)
       const invRows = filterInventoryData(inventoryData, filters);
@@ -395,9 +440,10 @@ const App: React.FC = () => {
           currentRows,
           lastRows,
           yearRows,
-          invRows
+          invRows,
+          pacingRatio,
       };
-  }, [performanceData, weeklyData, targetData, inventoryData, filters, isWeeklyMode]);
+  }, [performanceData, weeklyData, targetData, inventoryData, filters, isWeeklyMode, dataEndDate]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#e0f2fe_0%,#eff6ff_22%,#f8fafc_52%,#f8fafc_100%)] font-sans text-slate-900">
@@ -473,6 +519,7 @@ const App: React.FC = () => {
                             rawData={isWeeklyMode ? weeklyData : performanceData}
                             filters={filters}
                             targetRows={targetData}
+                            pacingRatio={processedData.pacingRatio}
                         />
                     )}
 
@@ -529,6 +576,10 @@ const App: React.FC = () => {
             isOpen={showUploadModal} 
             onClose={() => setShowUploadModal(false)}
             onUpload={handleDataUpload}
+            initialCoverage={{
+                dataStartDate: dataStartDate || DEFAULT_DATA_START,
+                dataEndDate,
+            }}
         />
 
         {processedData && (
@@ -550,6 +601,7 @@ const App: React.FC = () => {
                 performanceMonthly={performanceData}
                 performanceWeekly={weeklyData}
                 productImageLookup={productImageLookup}
+                dataEndDate={dataEndDate}
             />
         )}
 

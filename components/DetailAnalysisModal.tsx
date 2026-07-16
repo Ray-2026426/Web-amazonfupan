@@ -3,7 +3,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { X, Layers, Check, FileSearch, ExternalLink, Copy, ArrowUp, ArrowDown, Filter, Search as SearchIcon, ListFilter, Calculator, CheckSquare, Square, RefreshCcw, MessageSquare, TrendingUp, Bot, Sparkles, Loader2, Settings, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
 import { ProductImageThumb, ImageLightbox } from './ProductImageThumb';
 import { DataRow, AggregatedData, TargetRow, InventoryRow, InventoryAggregated, FilterState } from '../types';
-import { groupDataByDimension, aggregateData, formatMoney, formatNumber, formatPercent, getPacingRatio, groupTargetsByDimension, initialAggregated, initialInventoryAggregated, getAmazonProductLink, formatPrice, groupInventoryByDimension, aggregateInventoryData, formatDate, formatMoneyNoDecimals, formatRMB, formatBusinessWeekFromDateStr, sumAggregatedData, sumInventoryAggregated, resolveProductImage, type ProductImageLookup } from '../utils';
+import { groupDataByDimension, aggregateData, formatMoney, formatNumber, formatPercent, getPacingRatio, getPacingCompletionRatio, formatTargetGapPctPoints, groupTargetsByDimension, groupWeeklyTargetsByDimension, initialAggregated, initialInventoryAggregated, getAmazonProductLink, formatPrice, groupInventoryByDimension, aggregateInventoryData, formatDate, formatMoneyNoDecimals, formatRMB, formatBusinessWeekFromDateStr, sumAggregatedData, sumInventoryAggregated, resolveProductImage, type ProductImageLookup } from '../utils';
 import { TrendChartModal, TrendColumn, TrendChartScope } from './TrendChartModal';
 import { PromptSettingsModal, getActivePromptSettings } from './PromptSettingsModal';
 import { hasConfiguredAiApi, unifiedGenerateContent, AI_API_SETUP_HINT } from './aiUnifiedGenerate';
@@ -34,6 +34,8 @@ interface DetailAnalysisModalProps {
     performanceWeekly?: DataRow[];
     /** 用户上传的 SKU/品名 → 图片 对照表 */
     productImageLookup?: ProductImageLookup | null;
+    /** 数据截止日 YYYY-MM-DD，用于序时达成率 */
+    dataEndDate?: string;
 }
 
 type GroupDimension = 'product_name' | 'parent_asin' | 'child_asin' | 'shop_name' | 'manager' | 'brand' | 'country' | 'year_month' | 'sub_category';
@@ -419,6 +421,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
     performanceMonthly = [],
     performanceWeekly = [],
     productImageLookup = null,
+    dataEndDate = '',
 }) => {
     const resolveDimImage = (dimKey: string, dimensions: Record<string, string>, displayVal: string): string | null => {
         if (!productImageLookup || !displayVal || displayVal.startsWith('共 ')) return null;
@@ -660,30 +663,76 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         return <span className={`${color} font-mono ml-1`}>{icon}{txt}</span>;
     };
 
+    const pacingRatio = useMemo(() => {
+        if (!period || !dataEndDate) return 1;
+        return getPacingRatio(period.start, period.end, dataEndDate);
+    }, [period, dataEndDate]);
+
     const renderTarget = (curr: number, target: number, config: any, fmt: any) => {
         if (!target && target !== 0) return null;
-        if (isWeeklyMode) return null; 
 
         const pct = target !== 0 ? curr / target : 0;
-        const isReverse = config.reverseColor; 
-        
+        const isReverse = config.reverseColor;
+        const isRate = !!config.isRateMetric;
+        const pacingPct = (!isWeeklyMode && !isRate)
+            ? getPacingCompletionRatio(curr, target, pacingRatio)
+            : null;
+
         let colorClass = 'text-slate-500';
         if (isReverse) {
             colorClass = pct > 1.05 ? 'text-red-500' : (pct > 0.9 ? 'text-orange-500' : 'text-blue-600');
+        } else if (isRate) {
+            colorClass = curr >= target ? 'text-green-600' : 'text-orange-500';
         } else {
             colorClass = pct >= 1 ? 'text-green-600' : 'text-orange-500';
         }
 
-        const label = config.targetLabel || '目标';
+        let pacingColorClass = colorClass;
+        if (pacingPct !== null) {
+            if (isReverse) {
+                pacingColorClass = pacingPct > 1.05 ? 'text-red-500' : (pacingPct > 0.9 ? 'text-orange-500' : 'text-blue-600');
+            } else {
+                pacingColorClass = pacingPct >= 1 ? 'text-green-600' : 'text-orange-500';
+            }
+        }
+
+        const label = isWeeklyMode
+            ? (isReverse ? '周预算' : (isRate ? '目标' : '周目标'))
+            : (config.targetLabel || '目标');
         const valStr = fmt(target);
         const pctStr = (pct * 100).toFixed(0) + '%';
+        const pacingStr = pacingPct !== null ? (pacingPct * 100).toFixed(0) + '%' : null;
+        const gapStr = isRate ? formatTargetGapPctPoints(curr, target) : null;
+        const gapColorClass = isRate
+            ? (curr >= target ? 'text-green-600' : 'text-orange-500')
+            : colorClass;
+
+        if (isRate) {
+            return (
+                <div className="flex justify-end items-center text-[10px] text-slate-500 whitespace-nowrap gap-1">
+                    <span>{label}:</span>
+                    <span className="text-slate-400">{valStr}</span>
+                    <span className="font-mono ml-0.5 font-medium">
+                        <span className={colorClass}>({pctStr}</span>
+                        {gapStr && <span className={gapColorClass}>; 距目标{gapStr}</span>}
+                        <span className={colorClass}>)</span>
+                    </span>
+                </div>
+            );
+        }
 
         if (config.targetDisplayMode === 'both') {
              return (
                 <div className="flex justify-end items-center text-[10px] text-slate-500 whitespace-nowrap gap-1">
                     <span>{label}:</span>
                     <span className="text-slate-400">{valStr}</span>
-                    <span className={`${colorClass} font-mono ml-0.5 font-medium`}>({pctStr})</span>
+                    <span className="font-mono ml-0.5 font-medium">
+                        <span className={colorClass}>({pctStr}</span>
+                        {pacingStr && (
+                            <span className={pacingColorClass}>; 序时{pacingStr}</span>
+                        )}
+                        <span className={colorClass}>)</span>
+                    </span>
                 </div>
             );
         } else if (config.targetDisplayMode === 'value') {
@@ -697,7 +746,10 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             return (
                 <div className="flex justify-end items-center text-[10px] text-slate-500 whitespace-nowrap">
                     <span>{label}:</span>
-                    <span className={`${colorClass} font-mono ml-1`}>{pctStr}</span>
+                    <span className={`${colorClass} font-mono ml-1`}>
+                        {pctStr}
+                        {pacingStr && <span className={pacingColorClass}>; 序时{pacingStr}</span>}
+                    </span>
                 </div>
             );
         }
@@ -807,13 +859,17 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
 
     const groupedTargetsMap = useMemo<Map<string, AggregatedData>>(() => {
         if (!isOpen || !period || targetRows.length === 0 || type === 'Inventory') return new Map<string, AggregatedData>();
-        const pacing = getPacingRatio(period.start, period.end);
-        
-        if (isWeeklyMode && selectedDimensions.includes('year_month')) {
-            return new Map<string, AggregatedData>();
+
+        if (isWeeklyMode) {
+            return groupWeeklyTargetsByDimension(
+                targetRows,
+                selectedDimensions as (keyof TargetRow | 'year_month')[],
+                period.start,
+                period.end
+            );
         }
 
-        return groupTargetsByDimension(targetRows, selectedDimensions as (keyof TargetRow | 'year_month')[], period.start, period.end, pacing);
+        return groupTargetsByDimension(targetRows, selectedDimensions as (keyof TargetRow | 'year_month')[], period.start, period.end, 1);
     }, [isOpen, type, targetRows, period, selectedDimensions, isWeeklyMode]);
 
     // --- 2. Inventory Logic ---
@@ -971,7 +1027,8 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                     formatter: formatPercent, 
                     diffType: 'absolute_percent', 
                     hasTarget: true, 
-                    targetDisplayMode: 'value', 
+                    targetDisplayMode: 'value',
+                    isRateMetric: true,
                     isInteractive: true, 
                     triggerCalculator: true 
                 },
@@ -1157,15 +1214,25 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
 
     const formatTargetForCopy = (curr: number, target: number, config: any): string | null => {
         if (!target && target !== 0) return null;
-        if (isWeeklyMode) return null;
         const fmt = config.formatter;
         const pct = target !== 0 ? curr / target : 0;
-        const label = config.targetLabel || '目标';
+        const isRate = !!config.isRateMetric;
+        const defaultLabel = isWeeklyMode
+            ? (config.reverseColor ? '周预算' : (isRate ? '目标' : '周目标'))
+            : '目标';
+        const label = config.targetLabel || defaultLabel;
         const valStr = fmt(target);
         const pctStr = (pct * 100).toFixed(0) + '%';
-        if (config.targetDisplayMode === 'both') return `${label}: ${valStr} (${pctStr})`;
+        if (isRate) {
+            return `${label}: ${valStr} (${pctStr}; 距目标${formatTargetGapPctPoints(curr, target)})`;
+        }
+        const pacingPct = (!isWeeklyMode)
+            ? getPacingCompletionRatio(curr, target, pacingRatio)
+            : null;
+        const pacingExtra = pacingPct !== null ? `; 序时${(pacingPct * 100).toFixed(0)}%` : '';
+        if (config.targetDisplayMode === 'both') return `${label}: ${valStr} (${pctStr}${pacingExtra})`;
         if (config.targetDisplayMode === 'value') return `${label}: ${valStr}`;
-        return `${label}: ${pctStr}`;
+        return `${label}: ${pctStr}${pacingExtra}`;
     };
 
     /** 飞书/Word 粘贴：用行内样式保留涨跌颜色（与 renderDiff / renderTarget 一致） */
@@ -1206,28 +1273,48 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
 
     const targetBlockHtml = (curr: number, target: number, config: any, isTotalRow: boolean): string | null => {
         if (!target && target !== 0) return null;
-        if (isWeeklyMode) return null;
         const fmt = config.formatter;
         const pct = target !== 0 ? curr / target : 0;
         const isReverse = !!config.reverseColor;
-        let pctColor = COPY.slate500;
+        const isRate = !!config.isRateMetric;
+        let pctColor: string = COPY.slate500;
         if (isReverse) {
             pctColor = pct > 1.05 ? COPY.red : pct > 0.9 ? COPY.orange : COPY.blue;
+        } else if (isRate) {
+            pctColor = curr >= target ? COPY.green : COPY.orange;
         } else {
             pctColor = pct >= 1 ? COPY.green : COPY.orange;
         }
-        const label = config.targetLabel || '目标';
+        const defaultLabel = isWeeklyMode
+            ? (isReverse ? '周预算' : (isRate ? '目标' : '周目标'))
+            : '目标';
+        const label = config.targetLabel || defaultLabel;
         const valStr = escapeHtml(fmt(target));
         const pctStr = escapeHtml((pct * 100).toFixed(0) + '%');
         const borderColor = isTotalRow ? COPY.slate300 : COPY.border;
         const tgtBase =
             `display:block;margin:0;padding:4px 0 0 0;border-top:1px solid ${borderColor};font-size:11px;color:${COPY.slate500};white-space:nowrap;text-align:center;line-height:1.45;`;
 
+        if (isRate) {
+            const gap = escapeHtml(formatTargetGapPctPoints(curr, target));
+            return `<div style="${tgtBase}">` +
+                `<span>${escapeHtml(label)}:</span> ` +
+                `<span style="color:${COPY.slate400};">${valStr}</span> ` +
+                `<span style="color:${pctColor};font-weight:700;font-family:ui-monospace,monospace;">(${pctStr}; 距目标${gap})</span></div>`;
+        }
+
+        const pacingPct = (!isWeeklyMode)
+            ? getPacingCompletionRatio(curr, target, pacingRatio)
+            : null;
+        const pacingHtml = pacingPct !== null
+            ? escapeHtml(`; 序时${(pacingPct * 100).toFixed(0)}%`)
+            : '';
+
         if (config.targetDisplayMode === 'both') {
             return `<div style="${tgtBase}">` +
                 `<span>${escapeHtml(label)}:</span> ` +
                 `<span style="color:${COPY.slate400};">${valStr}</span> ` +
-                `<span style="color:${pctColor};font-weight:700;font-family:ui-monospace,monospace;">(${pctStr})</span></div>`;
+                `<span style="color:${pctColor};font-weight:700;font-family:ui-monospace,monospace;">(${pctStr}${pacingHtml})</span></div>`;
         }
         if (config.targetDisplayMode === 'value') {
             return `<div style="${tgtBase}">` +
@@ -1236,7 +1323,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         }
         return `<div style="${tgtBase}">` +
             `<span>${escapeHtml(label)}:</span> ` +
-            `<span style="color:${pctColor};font-family:ui-monospace,monospace;font-weight:600;">${pctStr}</span></div>`;
+            `<span style="color:${pctColor};font-family:ui-monospace,monospace;font-weight:600;">${pctStr}${pacingHtml}</span></div>`;
     };
 
     /** 与界面单元格信息一致，生成多行文案；剪贴板 HTML 用 <br> 拼接，TSV 用「 | 」压成一行避免列错位 */

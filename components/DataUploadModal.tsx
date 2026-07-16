@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FileSpreadsheet, X, CheckCircle, AlertCircle, Info, HelpCircle, PackageSearch, Target, FileText, MessageSquare, FolderOpen, Image } from 'lucide-react';
-import { DataSourceDebugInfo } from '../types';
+import { DataCoverage, DataSourceDebugInfo } from '../types';
 import { PERFORMANCE_ALIASES, COLUMN_DISPLAY_NAMES } from '../dataLoader';
 import { assignFilesToSlots, UploadSlots, UPLOAD_SLOT_LABELS, UploadSlotKey, listMissingOptionalSlots } from '../uploadFileClassifier';
 import { useEscClose } from './useEscClose';
@@ -15,8 +15,12 @@ export type DataUploadResult = {
 interface DataUploadModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onUpload: (slots: UploadSlots) => Promise<DataUploadResult | undefined>;
+    onUpload: (slots: UploadSlots, coverage: DataCoverage) => Promise<DataUploadResult | undefined>;
+    /** 再次导入时回填上次填写的起止日 */
+    initialCoverage?: DataCoverage;
 }
+
+const DEFAULT_DATA_START = '2025-01-01';
 
 const SLOT_ORDER: UploadSlotKey[] = ['monthly', 'weekly', 'target', 'inventory', 'refund', 'review', 'productImages'];
 
@@ -30,13 +34,15 @@ const emptySlots = (): UploadSlots => ({
     productImages: null,
 });
 
-export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClose, onUpload }) => {
+export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClose, onUpload, initialCoverage }) => {
     const [slots, setSlots] = useState<UploadSlots>(emptySlots);
     const [unrecognized, setUnrecognized] = useState<File[]>([]);
     const [error, setError] = useState<string>('');
     const [isUploading, setIsUploading] = useState(false);
     const [result, setResult] = useState<DataUploadResult | null>(null);
     const [showGuide, setShowGuide] = useState(false);
+    const [dataStartDate, setDataStartDate] = useState(DEFAULT_DATA_START);
+    const [dataEndDate, setDataEndDate] = useState('');
 
     const batchInputRef = useRef<HTMLInputElement>(null);
     const slotInputRefs = useRef<Record<UploadSlotKey, HTMLInputElement | null>>({
@@ -60,7 +66,9 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
             }, 200);
             return () => clearTimeout(timer);
         }
-    }, [isOpen]);
+        setDataStartDate(initialCoverage?.dataStartDate || DEFAULT_DATA_START);
+        setDataEndDate(initialCoverage?.dataEndDate || '');
+    }, [isOpen, initialCoverage?.dataStartDate, initialCoverage?.dataEndDate]);
 
     useEscClose(isOpen, onClose);
 
@@ -97,10 +105,21 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
             setError('【月度业绩表】为必填项：请一键上传或点选对应格子添加文件。');
             return;
         }
+        if (!dataEndDate) {
+            setError('请填写【数据截止日】：例如导入的是 7.1–7.13 的数据，截止日选 2026-07-13。');
+            return;
+        }
+        if (dataStartDate && dataEndDate < dataStartDate) {
+            setError('数据截止日不能早于起始日。');
+            return;
+        }
         setIsUploading(true);
         setError('');
         try {
-            const uploadResult = await onUpload(slots);
+            const uploadResult = await onUpload(slots, {
+                dataStartDate: dataStartDate || DEFAULT_DATA_START,
+                dataEndDate,
+            });
             setIsUploading(false);
             if (uploadResult) {
                 setResult({
@@ -343,6 +362,35 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
                             {missingPreview.join('、')}
                         </div>
                     )}
+
+                    <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-4">
+                        <div className="mb-2 text-sm font-bold text-slate-800">数据覆盖日期（算序时用）</div>
+                        <p className="mb-3 text-xs text-slate-500">
+                            填写本次导入数据实际覆盖的起止日。例如 7.1–7.13 的数据，截止日选 13 号；系统会用「截止日当天 ÷ 当月天数」算序时进度。整月数据（截止日=月末）则不额外显示序时。
+                        </p>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <label className="flex flex-col gap-1 text-xs text-slate-600">
+                                <span className="font-medium">起始日</span>
+                                <input
+                                    type="date"
+                                    value={dataStartDate}
+                                    onChange={e => setDataStartDate(e.target.value)}
+                                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                                />
+                            </label>
+                            <label className="flex flex-col gap-1 text-xs text-slate-600">
+                                <span className="font-medium">
+                                    截止日 <span className="text-red-500">*</span>
+                                </span>
+                                <input
+                                    type="date"
+                                    value={dataEndDate}
+                                    onChange={e => setDataEndDate(e.target.value)}
+                                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                                />
+                            </label>
+                        </div>
+                    </div>
 
                     {error && (
                         <div className="flex items-center gap-2 rounded border border-red-100 bg-red-50 p-3 text-sm text-red-600">
