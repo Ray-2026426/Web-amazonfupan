@@ -3,6 +3,7 @@ import {
     AlertTriangle,
     ArrowRight,
     BookOpen,
+    Bot,
     CalendarClock,
     Check,
     ChevronDown,
@@ -10,9 +11,13 @@ import {
     Filter,
     Gauge,
     ListChecks,
+    Loader2,
+    Minimize2,
+    Sparkles,
     UserRound,
 } from 'lucide-react';
 import { ActionItem, ActionStatus, BusinessIssue, BusinessIssueCategory, BusinessRule } from '../types';
+import { AI_API_SETUP_HINT, hasConfiguredAiApi, unifiedGenerateContent } from './aiUnifiedGenerate';
 
 interface BusinessCommandCenterProps {
     issues: BusinessIssue[];
@@ -58,6 +63,68 @@ const statusClass: Record<ActionStatus, string> = {
 const getIssueAction = (actions: ActionItem[], issueId: string) =>
     actions.find(action => action.issueId === issueId && action.status !== 'ignored');
 
+const RADAR_COLLAPSED_KEY = 'business_command_center_collapsed';
+
+const loadInitialCollapsed = () => {
+    if (typeof window === 'undefined') return false;
+    try {
+        return window.localStorage.getItem(RADAR_COLLAPSED_KEY) === '1';
+    } catch {
+        return false;
+    }
+};
+
+const saveCollapsed = (collapsed: boolean) => {
+    if (typeof window === 'undefined') return;
+    try {
+        window.localStorage.setItem(RADAR_COLLAPSED_KEY, collapsed ? '1' : '0');
+    } catch {}
+};
+
+const buildAiPrompt = (issue: BusinessIssue, issues: BusinessIssue[], actions: ActionItem[], rules: BusinessRule[]) => {
+    const issueLines = issues.map((item, index) => (
+        `${index + 1}. [${item.severity}/${categoryLabel[item.category]}] ${item.title}：${item.evidence}；建议：${item.recommendation}`
+    )).join('\n');
+    const chainLines = issue.diagnosticChain.map((step, index) => (
+        `${index + 1}. ${step.label}（${step.status}）：${step.evidence}；下一步：${step.nextAction}`
+    )).join('\n');
+    const actionLines = actions.length
+        ? actions.map(action => `- ${action.title}｜负责人：${action.owner}｜截止：${action.dueDate}｜状态：${statusLabel[action.status]}`).join('\n')
+        : '- 暂无已生成动作';
+    const ruleLines = rules.map(rule => `- ${rule.name}：${rule.thresholdLabel}；${rule.description}`).join('\n');
+
+    return `
+当前选中的经营异常：
+标题：${issue.title}
+类型：${categoryLabel[issue.category]}
+严重程度：${issue.severity}
+证据：${issue.evidence}
+经营影响：${issue.impact}
+当前建议：${issue.recommendation}
+建议负责人：${issue.suggestedOwner}
+建议截止时间：${issue.suggestedDueDate}
+
+诊断链路：
+${chainLines}
+
+全部异常队列：
+${issueLines}
+
+已有动作：
+${actionLines}
+
+规则库：
+${ruleLines}
+
+请基于以上数据输出一个经营诊断，不要编造未提供的数据。格式必须包含：
+1. 一句话结论
+2. 当前异常更像落在哪一层
+3. 还需要验证的 1-3 个点
+4. 明天要执行的动作，包含负责人和截止时间
+5. 哪条规则需要新增、调整或继续保留
+`.trim();
+};
+
 export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
     issues,
     rules,
@@ -71,6 +138,10 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
 }) => {
     const [selectedIssueId, setSelectedIssueId] = useState(issues[0]?.id || '');
     const [rulesOpen, setRulesOpen] = useState(false);
+    const [isCollapsed, setIsCollapsed] = useState(loadInitialCollapsed);
+    const [aiAnswer, setAiAnswer] = useState('');
+    const [aiError, setAiError] = useState('');
+    const [isAiLoading, setIsAiLoading] = useState(false);
     const selectedIssue = useMemo(
         () => issues.find(issue => issue.id === selectedIssueId) || issues[0],
         [issues, selectedIssueId],
@@ -83,12 +154,66 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
 
     const linkedAction = getIssueAction(actions, selectedIssue.id);
 
+    const setCollapsed = (collapsed: boolean) => {
+        setIsCollapsed(collapsed);
+        saveCollapsed(collapsed);
+    };
+
     const openBestDrilldown = () => {
         if (selectedIssue.category === 'ads') onOpenDetail('Traffic');
         else if (selectedIssue.category === 'inventory') onOpenDetail('Inventory');
         else if (selectedIssue.category === 'quality') onOpenReviewAnalysis();
         else onOpenDetail('PL');
     };
+
+    const runAiDiagnosis = async () => {
+        setAiError('');
+        setAiAnswer('');
+        if (!hasConfiguredAiApi()) {
+            setAiError(`未配置 API Key。${AI_API_SETUP_HINT}`);
+            return;
+        }
+
+        setIsAiLoading(true);
+        try {
+            const answer = await unifiedGenerateContent({
+                systemInstruction: '你是亚马逊经营异常雷达的 AI 诊断引擎。只基于用户提供的异常、诊断链路、动作和规则库判断，不编造数据。输出要短、直接、能执行。',
+                contents: buildAiPrompt(selectedIssue, issues, actions, rules),
+            });
+            setAiAnswer(answer || 'AI 未返回有效内容。');
+        } catch (error) {
+            setAiError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setIsAiLoading(false);
+        }
+    };
+
+    if (isCollapsed) {
+        return (
+            <section className="rounded-[24px] border border-slate-200 bg-white/85 px-4 py-3 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.35)] ring-1 ring-white/70">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-950 text-sky-300">
+                            <Gauge className="h-4 w-4" />
+                        </div>
+                        <div>
+                            <div className="text-sm font-bold text-slate-900">经营异常雷达已隐藏</div>
+                            <div className="mt-0.5 text-xs text-slate-500">
+                                严重 {criticalCount} · 预警 {warningCount} · 动作 {activeActions.length}
+                            </div>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setCollapsed(false)}
+                        className="rounded-2xl bg-slate-950 px-3.5 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                    >
+                        展开雷达
+                    </button>
+                </div>
+            </section>
+        );
+    }
 
     return (
         <section className="overflow-hidden rounded-[28px] border border-white/80 bg-white shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] ring-1 ring-slate-200/70">
@@ -113,6 +238,14 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                         <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 font-semibold text-sky-100">
                             动作 {activeActions.length}
                         </span>
+                        <button
+                            type="button"
+                            onClick={() => setCollapsed(true)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 font-semibold text-slate-200 transition-colors hover:bg-white/15"
+                        >
+                            <Minimize2 className="h-3 w-3" />
+                            隐藏
+                        </button>
                     </div>
                 </div>
             </div>
@@ -188,6 +321,15 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                             <Filter className="h-3.5 w-3.5" />
                             下钻验证
                         </button>
+                        <button
+                            type="button"
+                            onClick={runAiDiagnosis}
+                            disabled={isAiLoading}
+                            className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                            {isAiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}
+                            AI 诊断
+                        </button>
                     </div>
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -232,6 +374,31 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                             ))}
                         </div>
                     </div>
+
+                    {(aiAnswer || aiError || isAiLoading) && (
+                        <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                            <div className="flex items-center gap-2 text-sm font-bold text-violet-900">
+                                <Sparkles className="h-4 w-4" />
+                                AI 经营诊断
+                            </div>
+                            {isAiLoading && (
+                                <div className="mt-3 flex items-center gap-2 text-sm text-violet-700">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    正在基于当前异常、诊断链路、动作和规则生成判断
+                                </div>
+                            )}
+                            {aiError && (
+                                <div className="mt-3 rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs leading-5 text-rose-700">
+                                    {aiError}
+                                </div>
+                            )}
+                            {aiAnswer && (
+                                <div className="mt-3 whitespace-pre-wrap rounded-xl border border-white bg-white/85 px-3 py-3 text-sm leading-6 text-slate-800">
+                                    {aiAnswer}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div className="mt-4 flex flex-wrap gap-2">
                         <button

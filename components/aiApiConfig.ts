@@ -21,7 +21,7 @@ export interface ChatApiSettings {
 }
 
 export const DEFAULT_CHAT_API_SETTINGS: ChatApiSettings = {
-    provider: 'gemini',
+    provider: 'deepseek',
     keys: { gemini: '', deepseek: '', dashscope: '', zhipu: '' },
     models: {
         gemini: 'gemini-3-pro-preview',
@@ -61,7 +61,7 @@ export const PROVIDER_METAS: ProviderMeta[] = [
     {
         id: 'deepseek',
         region: 'intl',
-        label: 'DeepSeek（API 基址 https://openrouter.fans/v1）',
+        label: 'DeepSeek（默认，API 基址 https://openrouter.fans/v1）',
         shortLabel: 'DeepSeek',
         obtainPath: '在 openrouter.fans（或您购买密钥的渠道）获取 Bearer API Key',
         obtainUrl: 'https://openrouter.fans/',
