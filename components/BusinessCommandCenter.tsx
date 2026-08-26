@@ -3,7 +3,6 @@ import {
     AlertTriangle,
     ArrowRight,
     BookOpen,
-    Bot,
     CalendarClock,
     Check,
     ChevronDown,
@@ -11,13 +10,10 @@ import {
     Filter,
     Gauge,
     ListChecks,
-    Loader2,
     Minimize2,
-    Sparkles,
     UserRound,
 } from 'lucide-react';
 import { ActionItem, ActionStatus, BusinessIssue, BusinessIssueCategory, BusinessRule } from '../types';
-import { AI_API_SETUP_HINT, hasConfiguredAiApi, unifiedGenerateContent } from './aiUnifiedGenerate';
 
 interface BusinessCommandCenterProps {
     issues: BusinessIssue[];
@@ -65,15 +61,6 @@ const getIssueAction = (actions: ActionItem[], issueId: string) =>
 
 const RADAR_COLLAPSED_KEY = 'business_command_center_collapsed';
 
-const RADAR_AI_SCENARIOS = [
-    { label: '诊断大盘', question: '请对当前筛选条件下的整体表现做全面诊断：销量、毛利、广告效率各自与目标的差距有多大？最大的风险点是什么？' },
-    { label: '找出问题ASIN', question: '找出当前范围内销量环比下降最明显的 5 个产品或 ASIN，分析各自可能原因，并给出行动建议。' },
-    { label: '广告效率', question: '分析广告投放效率：ACoS 最高的是哪些产品/品类？ASoAS 广告订单占比是否健康？哪些广告类型或词包的 ROI 最低？' },
-    { label: '库存风险', question: '检查库存健康状况：有哪些产品库龄超过 180 天？金额有多大？建议如何处理：清货、促销、移除还是控补货？' },
-    { label: '退款根因', question: '退款金额最高的产品是哪些？退款原因集中在什么问题？这些问题是否已经影响评分、转化和广告效率？' },
-    { label: '负责人总结', question: '按负责人维度汇总核心经营问题，找出各自亮点、风险、优先动作和需要主管介入的事项。' },
-];
-
 const loadInitialCollapsed = () => {
     if (typeof window === 'undefined') return false;
     try {
@@ -90,62 +77,6 @@ const saveCollapsed = (collapsed: boolean) => {
     } catch {}
 };
 
-const buildAiPrompt = (issue: BusinessIssue, issues: BusinessIssue[], actions: ActionItem[], rules: BusinessRule[], scenario?: string) => {
-    const issueLines = issues.map((item, index) => (
-        `${index + 1}. [${item.severity}/${categoryLabel[item.category]}] ${item.title}：${item.evidence}；建议：${item.recommendation}`
-    )).join('\n');
-    const chainLines = issue.diagnosticChain.map((step, index) => (
-        `${index + 1}. ${step.label}（${step.status}）：${step.evidence}；下一步：${step.nextAction}`
-    )).join('\n');
-    const actionLines = actions.length
-        ? actions.map(action => `- ${action.title}｜负责人：${action.owner}｜截止：${action.dueDate}｜状态：${statusLabel[action.status]}`).join('\n')
-        : '- 暂无已生成动作';
-    const ruleLines = rules.map(rule => `- ${rule.name}：${rule.thresholdLabel}；${rule.description}`).join('\n');
-
-    return `
-本次诊断场景：
-${scenario || '围绕当前选中的经营异常做根因诊断和行动建议'}
-
-当前选中的经营异常：
-标题：${issue.title}
-类型：${categoryLabel[issue.category]}
-严重程度：${issue.severity}
-证据：${issue.evidence}
-经营影响：${issue.impact}
-当前建议：${issue.recommendation}
-建议负责人：${issue.suggestedOwner}
-建议截止时间：${issue.suggestedDueDate}
-
-诊断链路：
-${chainLines}
-
-全部异常队列：
-${issueLines}
-
-已有动作：
-${actionLines}
-
-规则库：
-${ruleLines}
-
-请优先参考以下经营诊断框架：
-- 目标缺口：销售额、毛利额、毛利率与序时目标。
-- 流量缺口：Sessions、曝光、点击、CTR。
-- 转化缺口：销量、广告订单、CVR、评分、评论、退货。
-- 价格/客单缺口：客单价、促销、低价款占比。
-- 广告效率：广告花费、广告销售、ACoS、ASoAS、SP/SD/SB/SBV 结构。
-- 库存与供应：FBA 可售、180 天以上库龄、断货、慢动销。
-- 组织动作：负责人、截止时间、是否需要升级处理。
-
-请基于以上数据输出一个经营诊断，不要编造未提供的数据。格式必须包含：
-1. 一句话结论
-2. 当前异常更像落在哪一层
-3. 还需要验证的 1-3 个点
-4. 明天要执行的动作，包含负责人和截止时间
-5. 哪条规则需要新增、调整或继续保留
-`.trim();
-};
-
 export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
     issues,
     rules,
@@ -160,10 +91,6 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
     const [selectedIssueId, setSelectedIssueId] = useState(issues[0]?.id || '');
     const [rulesOpen, setRulesOpen] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(loadInitialCollapsed);
-    const [aiAnswer, setAiAnswer] = useState('');
-    const [aiError, setAiError] = useState('');
-    const [isAiLoading, setIsAiLoading] = useState(false);
-    const [aiScenario, setAiScenario] = useState('');
     const selectedIssue = useMemo(
         () => issues.find(issue => issue.id === selectedIssueId) || issues[0],
         [issues, selectedIssueId],
@@ -186,30 +113,6 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
         else if (selectedIssue.category === 'inventory') onOpenDetail('Inventory');
         else if (selectedIssue.category === 'quality') onOpenReviewAnalysis();
         else onOpenDetail('PL');
-    };
-
-    const runAiDiagnosis = async (scenario?: string) => {
-        const nextScenario = scenario || '';
-        setAiScenario(nextScenario);
-        setAiError('');
-        setAiAnswer('');
-        if (!hasConfiguredAiApi()) {
-            setAiError(`未配置 API Key。${AI_API_SETUP_HINT}`);
-            return;
-        }
-
-        setIsAiLoading(true);
-        try {
-            const answer = await unifiedGenerateContent({
-                systemInstruction: '你是亚马逊经营异常雷达的 AI 诊断引擎。只基于用户提供的异常、诊断链路、动作和规则库判断，不编造数据。输出要短、直接、能执行。',
-                contents: buildAiPrompt(selectedIssue, issues, actions, rules, nextScenario),
-            });
-            setAiAnswer(answer || 'AI 未返回有效内容。');
-        } catch (error) {
-            setAiError(error instanceof Error ? error.message : String(error));
-        } finally {
-            setIsAiLoading(false);
-        }
     };
 
     if (isCollapsed) {
@@ -249,7 +152,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                         </div>
                         <div>
                             <div className="text-sm font-bold tracking-[0.12em]">经营异常雷达</div>
-                            <div className="mt-1 text-xs text-slate-400">从看板指标直接落到诊断链路和责任动作</div>
+                            <div className="mt-1 text-xs text-slate-400">毛利额为核心目标，其余指标作为 KR 拆解到责任动作</div>
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -345,39 +248,6 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                             <Filter className="h-3.5 w-3.5" />
                             下钻验证
                         </button>
-                        <button
-                            type="button"
-                            onClick={() => runAiDiagnosis()}
-                            disabled={isAiLoading}
-                            className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                            {isAiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}
-                            AI 诊断
-                        </button>
-                    </div>
-
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
-                        <div className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-500">
-                            <Sparkles className="h-3.5 w-3.5 text-sky-500" />
-                            AI 快捷诊断
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                            {RADAR_AI_SCENARIOS.map(item => (
-                                <button
-                                    key={item.label}
-                                    type="button"
-                                    onClick={() => runAiDiagnosis(item.question)}
-                                    disabled={isAiLoading}
-                                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                                        aiScenario === item.question
-                                            ? 'border-sky-300 bg-sky-50 text-sky-700'
-                                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
-                                    }`}
-                                >
-                                    {item.label}
-                                </button>
-                            ))}
-                        </div>
                     </div>
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -422,31 +292,6 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                             ))}
                         </div>
                     </div>
-
-                    {(aiAnswer || aiError || isAiLoading) && (
-                        <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
-                            <div className="flex items-center gap-2 text-sm font-bold text-violet-900">
-                                <Sparkles className="h-4 w-4" />
-                                AI 经营诊断
-                            </div>
-                            {isAiLoading && (
-                                <div className="mt-3 flex items-center gap-2 text-sm text-violet-700">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    正在基于当前异常、诊断链路、动作和规则生成判断
-                                </div>
-                            )}
-                            {aiError && (
-                                <div className="mt-3 rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs leading-5 text-rose-700">
-                                    {aiError}
-                                </div>
-                            )}
-                            {aiAnswer && (
-                                <div className="mt-3 whitespace-pre-wrap rounded-xl border border-white bg-white/85 px-3 py-3 text-sm leading-6 text-slate-800">
-                                    {aiAnswer}
-                                </div>
-                            )}
-                        </div>
-                    )}
 
                     <div className="mt-4 flex flex-wrap gap-2">
                         <button

@@ -11,31 +11,31 @@ import { formatMoneyNoDecimals, formatNumber, formatPercent } from '../utils';
 
 export const DEFAULT_BUSINESS_RULES: BusinessRule[] = [
     {
-        id: 'sales-pacing-risk',
-        name: '销售额序时风险',
-        category: 'goal',
-        description: '销售额达成低于序时进度时，优先判断是流量、转化、客单价还是供给问题。',
-        thresholdLabel: '销售额序时达成 < 90%',
-    },
-    {
         id: 'profit-pacing-risk',
         name: '毛利额序时风险',
         category: 'profit',
-        description: '毛利额低于序时进度时，优先检查广告、退款、采购/FBA/佣金等费用结构。',
+        description: '毛利额是核心经营目标；低于序时进度时，所有 KR 都要回到毛利额缺口解释。',
         thresholdLabel: '毛利额序时达成 < 90%',
     },
     {
+        id: 'sales-pacing-risk',
+        name: '销售额 KR 序时风险',
+        category: 'goal',
+        description: '销售额是支撑毛利额的规模 KR；低于序时时，判断是流量、转化、客单价还是供给问题。',
+        thresholdLabel: '销售额 KR 序时达成 < 90%',
+    },
+    {
         id: 'margin-gap-risk',
-        name: '毛利率目标缺口',
+        name: '毛利率 KR 缺口',
         category: 'profit',
-        description: '毛利率低于目标时，不先追销售额，先确认利润模型是否还能成立。',
-        thresholdLabel: '毛利率低于目标 2 个百分点以上',
+        description: '毛利率是支撑毛利额的效率 KR；低于目标时，不先追销售额，先确认利润模型是否还能成立。',
+        thresholdLabel: '毛利率 KR 低于目标 2 个百分点以上',
     },
     {
         id: 'ad-budget-overrun',
-        name: '广告预算失控',
+        name: '广告 KR 失控',
         category: 'ads',
-        description: '广告消耗快于目标或销售贡献时，优先压无效词、低转化活动和异常 CPC。',
+        description: '广告花费是支撑毛利额的费用 KR；消耗快于目标或销售贡献时，优先压无效词、低转化活动和异常 CPC。',
         thresholdLabel: '广告预算使用率 > 110%',
     },
     {
@@ -208,22 +208,6 @@ export const generateBusinessIssues = ({
     const agedShare = inventory ? ratio(agedCost, inventory.fba_total_cost) : 0;
     const owner = '当前筛选负责人';
 
-    if (target.sales_amount > 0 && salesPacing < 0.9) {
-        issues.push({
-            id: 'issue-sales-pacing',
-            ruleId: 'sales-pacing-risk',
-            title: '销售额低于序时进度',
-            category: 'goal',
-            severity: salesPacing < 0.75 ? 'critical' : 'warning',
-            evidence: `当前销售额 ${formatMoneyNoDecimals(current.sales_amount)}，序时目标 ${formatMoneyNoDecimals(target.sales_amount * pacing)}，序时达成 ${formatPercent(salesPacing)}`,
-            impact: `若节奏不变，本期销售目标存在 ${formatMoneyNoDecimals(Math.max(0, target.sales_amount * pacing - current.sales_amount))} 的序时缺口。`,
-            recommendation: '定位销售缺口来自流量、转化、客单价还是供给，并只处理最大的一个缺口。',
-            suggestedOwner: owner,
-            suggestedDueDate: getDueDate(salesPacing < 0.75 ? 'critical' : 'warning'),
-            diagnosticChain: buildSalesChain(current, last, inventory),
-        });
-    }
-
     if (target.gross_profit > 0 && profitPacing < 0.9) {
         issues.push({
             id: 'issue-profit-pacing',
@@ -232,11 +216,27 @@ export const generateBusinessIssues = ({
             category: 'profit',
             severity: profitPacing < 0.75 ? 'critical' : 'warning',
             evidence: `当前毛利额 ${formatMoneyNoDecimals(current.gross_profit)}，序时目标 ${formatMoneyNoDecimals(target.gross_profit * pacing)}，序时达成 ${formatPercent(profitPacing)}`,
-            impact: '继续只追销售额会放大亏损或低效增长。',
-            recommendation: '先拆广告、退款和硬成本占比，确认利润缺口的最大来源。',
+            impact: '核心目标未达成。继续只追销售额会放大亏损或低效增长。',
+            recommendation: '先拆广告、退款和硬成本占比，再判断销售额、毛利率、广告和库存 KR 哪个对毛利额缺口贡献最大。',
             suggestedOwner: owner,
             suggestedDueDate: getDueDate(profitPacing < 0.75 ? 'critical' : 'warning'),
             diagnosticChain: buildProfitChain(current, last),
+        });
+    }
+
+    if (target.sales_amount > 0 && salesPacing < 0.9) {
+        issues.push({
+            id: 'issue-sales-pacing',
+            ruleId: 'sales-pacing-risk',
+            title: '销售额 KR 低于序时进度',
+            category: 'goal',
+            severity: salesPacing < 0.75 ? 'critical' : 'warning',
+            evidence: `当前销售额 ${formatMoneyNoDecimals(current.sales_amount)}，序时 KR ${formatMoneyNoDecimals(target.sales_amount * pacing)}，序时达成 ${formatPercent(salesPacing)}`,
+            impact: `规模 KR 存在 ${formatMoneyNoDecimals(Math.max(0, target.sales_amount * pacing - current.sales_amount))} 的序时缺口，需要解释其对毛利额核心目标的影响。`,
+            recommendation: '定位销售缺口来自流量、转化、客单价还是供给，并判断它是否正在拖累毛利额。',
+            suggestedOwner: owner,
+            suggestedDueDate: getDueDate(salesPacing < 0.75 ? 'critical' : 'warning'),
+            diagnosticChain: buildSalesChain(current, last, inventory),
         });
     }
 
@@ -244,12 +244,12 @@ export const generateBusinessIssues = ({
         issues.push({
             id: 'issue-margin-gap',
             ruleId: 'margin-gap-risk',
-            title: '毛利率低于目标',
+            title: '毛利率 KR 低于目标',
             category: 'profit',
             severity: current.gross_margin < target.gross_margin - 0.05 ? 'critical' : 'warning',
             evidence: `当前毛利率 ${formatPercent(current.gross_margin)}，目标 ${formatPercent(target.gross_margin)}，差距 ${formatPercent(current.gross_margin - target.gross_margin)}`,
-            impact: '利润模型没有达标，销售增长不一定带来经营改善。',
-            recommendation: '用利润试算器模拟售价、采购、FBA、广告占比的组合变化。',
+            impact: '效率 KR 未达标，销售增长不一定能转化为毛利额增长。',
+            recommendation: '用利润试算器模拟售价、采购、FBA、广告占比的组合变化，优先看毛利额能否回到序时。',
             suggestedOwner: owner,
             suggestedDueDate: getDueDate('warning'),
             diagnosticChain: buildProfitChain(current, last),
@@ -260,12 +260,12 @@ export const generateBusinessIssues = ({
         issues.push({
             id: 'issue-ad-budget',
             ruleId: 'ad-budget-overrun',
-            title: '广告预算消耗过快',
+            title: '广告 KR 消耗过快',
             category: 'ads',
             severity: adBudgetPacing > 1.3 ? 'critical' : 'warning',
             evidence: `当前广告花费 ${formatMoneyNoDecimals(current.ad_spend)}，序时预算 ${formatMoneyNoDecimals(target.ad_spend * pacing)}，使用率 ${formatPercent(adBudgetPacing)}`,
-            impact: '预算消耗快于计划，如果销售和毛利没有同步增长，会直接吃掉利润。',
-            recommendation: '先停或降出价高花费低转化对象，再扩有效词。',
+            impact: '费用 KR 消耗快于计划，如果没有带来毛利额增长，会直接吃掉核心目标。',
+            recommendation: '先停或降出价高花费低转化对象，再扩能贡献毛利额的有效词。',
             suggestedOwner: owner,
             suggestedDueDate: getDueDate(adBudgetPacing > 1.3 ? 'critical' : 'warning'),
             diagnosticChain: [
@@ -295,7 +295,7 @@ export const generateBusinessIssues = ({
             category: 'ads',
             severity: acos > 0.5 ? 'critical' : 'warning',
             evidence: `广告花费 ${formatMoneyNoDecimals(current.ad_spend)}，广告销售额 ${formatMoneyNoDecimals(current.ad_sales)}，ACoS ${formatPercent(acos)}`,
-            impact: '广告正在买低质量销售，可能同时拖累毛利。',
+            impact: '广告正在买低质量销售，可能直接拖累毛利额核心目标。',
             recommendation: '按搜索词四象限处理：高花费低转化先否词或降价，高转化低曝光再加预算。',
             suggestedOwner: owner,
             suggestedDueDate: getDueDate('warning'),
@@ -407,13 +407,13 @@ export const generateBusinessIssues = ({
     if (issues.length === 0 && !isWeeklyMode) {
         issues.push({
             id: 'issue-stable-watch',
-            ruleId: 'sales-pacing-risk',
+            ruleId: 'profit-pacing-risk',
             title: '当前未触发高优先级异常',
             category: 'goal',
             severity: 'info',
-            evidence: '目标、利润、广告、库存和口碑规则未触发高风险阈值。',
+            evidence: '毛利额核心目标及销售、毛利率、广告、库存和口碑 KR 未触发高风险阈值。',
             impact: '当前更适合做结构优化，而不是救火。',
-            recommendation: '按销售额或毛利额下钻 Top/Bottom ASIN，寻找可复制的正贡献对象。',
+            recommendation: '优先按毛利额下钻 Top/Bottom ASIN，寻找可复制的正贡献对象。',
             suggestedOwner: owner,
             suggestedDueDate: getDueDate('info'),
             diagnosticChain: [
@@ -429,5 +429,20 @@ export const generateBusinessIssues = ({
     }
 
     const severityRank = { critical: 0, warning: 1, info: 2 };
-    return issues.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]).slice(0, 8);
+    const ruleRank: Record<string, number> = {
+        'profit-pacing-risk': 0,
+        'margin-gap-risk': 1,
+        'ad-budget-overrun': 2,
+        'acos-risk': 3,
+        'aged-inventory-risk': 4,
+        'low-rating-risk': 5,
+        'sales-pacing-risk': 6,
+        'data-completeness-risk': 7,
+    };
+    return issues
+        .sort((a, b) => (
+            severityRank[a.severity] - severityRank[b.severity]
+            || (ruleRank[a.ruleId] ?? 99) - (ruleRank[b.ruleId] ?? 99)
+        ))
+        .slice(0, 8);
 };

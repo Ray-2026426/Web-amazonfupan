@@ -34,7 +34,7 @@ export const ChatApiSettingsPanel: React.FC<ChatApiSettingsPanelProps> = ({ valu
                 API 与模型
             </div>
             <p className="text-xs text-slate-500">
-                此处配置对全站 AI 功能生效（机器人对话、经营异常雷达、业绩/库存诊断、关键词、评论、退货分析等）。默认使用 DeepSeek 官方 API；填入 DeepSeek API Key 后即可启用相关 AI 能力。
+                此处配置对全站 AI 功能生效（机器人对话、业绩/库存诊断、关键词、评论、退货分析等）。默认使用 DeepSeek 官方 API；填入 DeepSeek API Key 后即可启用相关 AI 能力。
             </p>
 
             <div className="space-y-1">
