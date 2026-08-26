@@ -42,9 +42,10 @@
 ### 2.2 主内容区模块顺序（有有效 `processedData` 时）
 
 1. **DashboardOverview**：指标卡片（月度为目标达成进度条；周度为当周绝对值卡片）。
-2. **PLTable（P&L）**：损益与结构指标 + 环比/同比/目标（与表格渲染器一致）。
-3. **TrafficTable（流量与广告）**：广告花费/销售、分类型 SP/SD/SB/SBV、展示点击、CVR、ACoS 等。
-4. **InventoryTable（库存）**：基于当前筛选的 FBA 聚合与库龄等（可下钻库存子表）。
+2. **BusinessCommandCenter（经营异常雷达）**：基于当前筛选、目标、对比期、库存与数据告警生成优先异常、诊断链路、建议动作与规则库入口。
+3. **PLTable（P&L）**：损益与结构指标 + 环比/同比/目标（与表格渲染器一致）。
+4. **TrafficTable（流量与广告）**：广告花费/销售、分类型 SP/SD/SB/SBV、展示点击、CVR、ACoS 等。
+5. **InventoryTable（库存）**：基于当前筛选的 FBA 聚合与库龄等（可下钻库存子表）。
 
 无数据时展示空状态，引导导入 Excel。
 
@@ -195,6 +196,14 @@
 | **复制表格（飞书）** | 写入剪贴板 **HTML + 纯文本 TSV**：含表头灰底、总计行、涨跌颜色、目标达成颜色、**居中**、**销量/销售额/毛利额加宽（约 1.4×）**、`table-layout`/`colgroup`/列宽属性等（飞书若弱化样式属编辑器限制）。 |
 | 子表 AI | 基于 **当前筛选+排序后的行** 生成 Markdown 报告；**独立提示词配置键**（P&L / 流量各一）；依赖已配置 API。 |
 
+### 8.0 经营异常雷达 `BusinessCommandCenter`
+
+- 数据源：`processedData.current/last/year/target/inventory/warnings`。
+- 规则引擎：`utils/businessRules.ts` 内置经营规则库，覆盖目标、利润、广告、库存、口碑、数据可信度。
+- 输出：按严重程度排序的异常清单、每个异常的证据、经营影响、诊断链路、建议动作、建议负责人和截止时间。
+- 下钻：异常可直接打开 P&L、广告、库存、退货、评论、关键词等已有专题，用同一筛选范围继续验证。
+- 动作闭环：用户可把异常生成动作，动作支持 `待处理 / 处理中 / 已完成 / 暂不处理`，保存到 IndexedDB 的 `business_actions`，全量重新导入数据时不清空。
+
 ### 8.2 退货分析 `RefundAnalysisModal`
 
 - 数据源：`refundData`（导入退货表）+ `rawPerformance`（用于关联或上下文）。
@@ -241,11 +250,12 @@
 | `inventory` | 库存 `InventoryRow[]` |
 | `refunds` | 退货 `RefundRow[]` |
 | `reviews` | 评论 `ReviewRow[]` |
+| `business_actions` | 经营异常动作闭环 `ActionItem[]` |
 | `meta` | 当前 `FilterState`（含起止日期等） |
 
 **启动流程**：并行 `loadFromDB`；若有 `meta` 则恢复筛选；否则若有月度数据则默认 **最近月** 为时间区间。
 
-**全量导入**：`clearDB` 后重写各 store；**搜索词** 仅内存，不写入上述 DB（见 §3.4）。
+**全量导入**：`clearDB` 后重写数据类 store；**搜索词** 仅内存，不写入上述 DB（见 §3.4）；`business_actions` 不随导入清空，用于后续回看动作结果。
 
 ---
 
@@ -276,6 +286,8 @@
 |------|--------|------|------|
 | _示例：子表导出 Excel_ | P2 | 在保留「复制飞书」前提下增加 xlsx 导出 | 待评审 |
 | | | | |
+| 规则库可配置 | P2 | 将内置经营规则阈值开放成可编辑配置，并记录规则版本。 | 待评审 |
+| 动作结果回填 | P1 | 数据更新后自动提示待回填动作，并比较动作前后关键指标。 | 待评审 |
 
 ---
 
@@ -285,6 +297,7 @@
 |------|------|------|
 | 2026-04-16 | 0.1 | 初版 PRD。 |
 | 2026-04-16 | 0.2 | 扩充：数据槽位与识别规则、类型概要、月/周模式、计算与告警、各弹窗能力、IndexedDB、搜索词独立导入、飞书复制策略、风险与非目标。 |
+| 2026-08-26 | 0.3 | 新增经营异常雷达、诊断链路、动作闭环与内置经营规则库。 |
 
 ---
 
@@ -301,6 +314,7 @@
 | 本地 DB | `db.ts` |
 | 筛选 | `components/SidebarFilters.tsx` |
 | 总览卡片 | `components/DashboardOverview.tsx` |
+| 经营异常雷达 | `components/BusinessCommandCenter.tsx`、`utils/businessRules.ts` |
 | 主表 | `components/TableRenderers.tsx`、`components/InventoryTable.tsx` |
 | 子表 | `components/DetailAnalysisModal.tsx`、`components/TrendChartModal.tsx` |
 | 退货/评论/关键词/试算 | `RefundAnalysisModal.tsx`、`ReviewAnalysisModal.tsx`、`KeywordAnalysisModal.tsx`、`ProfitSimulatorModal.tsx` |

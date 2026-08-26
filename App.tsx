@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot, DataCoverage, AppMeta } from './types';
+import { ActionItem, BusinessIssue, DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot, DataCoverage, AppMeta } from './types';
 import { 
   calculatePeriodDates, 
   filterData, 
@@ -33,9 +33,11 @@ import { ReviewAnalysisModal } from './components/ReviewAnalysisModal';
 import { KeywordAnalysisModal } from './components/KeywordAnalysisModal'; 
 import { ChatBot } from './components/ChatBot';
 import { AppSettingsButton } from './components/AppSettingsButton';
+import { BusinessCommandCenter } from './components/BusinessCommandCenter';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard } from 'lucide-react';
 import { saveToDB, loadFromDB, clearDB } from './db';
+import { DEFAULT_BUSINESS_RULES, generateBusinessIssues, updateActionForIssue } from './utils/businessRules';
 
 const DEFAULT_DATA_START = '2025-01-01';
 
@@ -125,6 +127,7 @@ const App: React.FC = () => {
   const [reviewData, setReviewData] = useState<ReviewRow[]>([]);
   const [searchTermData, setSearchTermData] = useState<SearchTermRow[]>([]); 
   const [productImageData, setProductImageData] = useState<ProductImageRow[]>([]);
+  const [businessActions, setBusinessActions] = useState<ActionItem[]>([]);
 
   const productImageLookup = useMemo<ProductImageLookup | null>(() => {
       if (productImageData.length === 0) return null;
@@ -156,7 +159,7 @@ const App: React.FC = () => {
       const restoreData = async () => {
           setIsRestoringData(true);
           try {
-              const [monthly, weekly, targets, inv, refunds, reviews, productImages, savedFilters] = await Promise.all([
+              const [monthly, weekly, targets, inv, refunds, reviews, productImages, savedFilters, savedActions] = await Promise.all([
                   loadFromDB('monthly'),
                   loadFromDB('weekly'),
                   loadFromDB('targets'),
@@ -164,7 +167,8 @@ const App: React.FC = () => {
                   loadFromDB('refunds'),
                   loadFromDB('reviews'),
                   loadFromDB('product_images'),
-                  loadFromDB('meta')
+                  loadFromDB('meta'),
+                  loadFromDB('business_actions')
               ]);
 
               if (monthly) setPerformanceData(monthly);
@@ -174,6 +178,7 @@ const App: React.FC = () => {
               if (refunds) setRefundData(refunds);
               if (reviews) setReviewData(reviews);
               if (productImages?.length) setProductImageData(productImages);
+              if (Array.isArray(savedActions)) setBusinessActions(savedActions);
               
               const savedMeta = savedFilters as AppMeta | FilterState | null;
               if (savedMeta) {
@@ -236,6 +241,12 @@ const App: React.FC = () => {
           saveToDB('meta', meta);
       }
   }, [filters, dataStartDate, dataEndDate, isRestoringData, performanceData]);
+
+  useEffect(() => {
+      if (!isRestoringData) {
+          saveToDB('business_actions', businessActions);
+      }
+  }, [businessActions, isRestoringData]);
 
   // --- Handlers ---
   const handleDataUpload = async (slots: UploadSlots, coverage: DataCoverage): Promise<DataUploadResult | undefined> => {
@@ -360,6 +371,21 @@ const App: React.FC = () => {
       setRefundModalOpen(true);
   };
 
+  const handleCreateAction = (issue: BusinessIssue) => {
+      setBusinessActions(prev => updateActionForIssue(prev, issue));
+  };
+
+  const handleUpdateAction = (actionId: string, patch: Partial<ActionItem>) => {
+      setBusinessActions(prev => prev.map(action => (
+          action.id === actionId ? { ...action, ...patch } : action
+      )));
+  };
+
+  const handleOpenDetailByType = (type: 'PL' | 'Traffic' | 'Inventory') => {
+      setDetailType(type);
+      setDetailModalOpen(true);
+  };
+
   const handleLoadSnapshot = (snapshot: FilterSnapshot) => {
       setIsWeeklyMode(snapshot.isWeeklyMode);
       // 用 setTimeout 确保 mode 切换已生效再设 filters
@@ -445,6 +471,19 @@ const App: React.FC = () => {
       };
   }, [performanceData, weeklyData, targetData, inventoryData, filters, isWeeklyMode, dataEndDate]);
 
+  const businessIssues = useMemo(() => {
+      if (!processedData) return [];
+      return generateBusinessIssues({
+          current: processedData.current,
+          last: processedData.last,
+          target: processedData.target,
+          inventory: processedData.inventory,
+          warnings: processedData.warnings,
+          pacingRatio: processedData.pacingRatio,
+          isWeeklyMode,
+      });
+  }, [processedData, isWeeklyMode]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#e0f2fe_0%,#eff6ff_22%,#f8fafc_52%,#f8fafc_100%)] font-sans text-slate-900">
       <SidebarFilters 
@@ -520,6 +559,20 @@ const App: React.FC = () => {
                             filters={filters}
                             targetRows={targetData}
                             pacingRatio={processedData.pacingRatio}
+                        />
+                    )}
+
+                    {processedData && (
+                        <BusinessCommandCenter
+                            issues={businessIssues}
+                            rules={DEFAULT_BUSINESS_RULES}
+                            actions={businessActions}
+                            onCreateAction={handleCreateAction}
+                            onUpdateAction={handleUpdateAction}
+                            onOpenDetail={handleOpenDetailByType}
+                            onOpenRefundAnalysis={() => handleOpenRefundAnalysis()}
+                            onOpenReviewAnalysis={() => setReviewModalOpen(true)}
+                            onOpenKeywordAnalysis={() => setKeywordModalOpen(true)}
                         />
                     )}
 

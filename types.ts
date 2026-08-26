@@ -330,3 +330,48 @@ export interface ParsedDataResult<T> {
     data: T[];
     debug: DataSourceDebugInfo;
 }
+
+export type BusinessIssueSeverity = 'critical' | 'warning' | 'info';
+export type BusinessIssueCategory = 'goal' | 'profit' | 'ads' | 'inventory' | 'quality' | 'data';
+export type ActionStatus = 'open' | 'doing' | 'done' | 'ignored';
+
+export interface BusinessRule {
+    id: string;
+    name: string;
+    category: BusinessIssueCategory;
+    description: string;
+    thresholdLabel: string;
+}
+
+export interface DiagnosticStep {
+    id: string;
+    label: string;
+    status: 'triggered' | 'check' | 'blocked';
+    evidence: string;
+    nextAction: string;
+}
+
+export interface ActionItem {
+    id: string;
+    issueId: string;
+    title: string;
+    owner: string;
+    dueDate: string;
+    status: ActionStatus;
+    createdAt: number;
+    sourceRuleId: string;
+}
+
+export interface BusinessIssue {
+    id: string;
+    ruleId: string;
+    title: string;
+    category: BusinessIssueCategory;
+    severity: BusinessIssueSeverity;
+    evidence: string;
+    impact: string;
+    recommendation: string;
+    suggestedOwner: string;
+    suggestedDueDate: string;
+    diagnosticChain: DiagnosticStep[];
+}

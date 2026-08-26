@@ -5,7 +5,7 @@ import { DataRow, InventoryRow, RefundRow, ReviewRow, TargetRow, FilterState } f
 // Removed 'idb' import as we are implementing the wrapper manually below.
 
 const DB_NAME = 'AmazonDashboardDB';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 const openDatabase = (): Promise<IDBDatabase> => {
     return new Promise((resolve, reject) => {
@@ -28,7 +28,7 @@ const openDatabase = (): Promise<IDBDatabase> => {
 
         request.onupgradeneeded = (event) => {
             const db = (event.target as IDBOpenDBRequest).result;
-            const stores = ['monthly', 'weekly', 'targets', 'inventory', 'refunds', 'reviews', 'product_images', 'meta'];
+            const stores = ['monthly', 'weekly', 'targets', 'inventory', 'refunds', 'reviews', 'product_images', 'meta', 'business_actions'];
             
             stores.forEach(storeName => {
                 if (!db.objectStoreNames.contains(storeName)) {
