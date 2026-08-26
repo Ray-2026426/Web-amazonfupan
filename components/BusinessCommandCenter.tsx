@@ -65,6 +65,15 @@ const getIssueAction = (actions: ActionItem[], issueId: string) =>
 
 const RADAR_COLLAPSED_KEY = 'business_command_center_collapsed';
 
+const RADAR_AI_SCENARIOS = [
+    { label: '诊断大盘', question: '请对当前筛选条件下的整体表现做全面诊断：销量、毛利、广告效率各自与目标的差距有多大？最大的风险点是什么？' },
+    { label: '找出问题ASIN', question: '找出当前范围内销量环比下降最明显的 5 个产品或 ASIN，分析各自可能原因，并给出行动建议。' },
+    { label: '广告效率', question: '分析广告投放效率：ACoS 最高的是哪些产品/品类？ASoAS 广告订单占比是否健康？哪些广告类型或词包的 ROI 最低？' },
+    { label: '库存风险', question: '检查库存健康状况：有哪些产品库龄超过 180 天？金额有多大？建议如何处理：清货、促销、移除还是控补货？' },
+    { label: '退款根因', question: '退款金额最高的产品是哪些？退款原因集中在什么问题？这些问题是否已经影响评分、转化和广告效率？' },
+    { label: '负责人总结', question: '按负责人维度汇总核心经营问题，找出各自亮点、风险、优先动作和需要主管介入的事项。' },
+];
+
 const loadInitialCollapsed = () => {
     if (typeof window === 'undefined') return false;
     try {
@@ -81,7 +90,7 @@ const saveCollapsed = (collapsed: boolean) => {
     } catch {}
 };
 
-const buildAiPrompt = (issue: BusinessIssue, issues: BusinessIssue[], actions: ActionItem[], rules: BusinessRule[]) => {
+const buildAiPrompt = (issue: BusinessIssue, issues: BusinessIssue[], actions: ActionItem[], rules: BusinessRule[], scenario?: string) => {
     const issueLines = issues.map((item, index) => (
         `${index + 1}. [${item.severity}/${categoryLabel[item.category]}] ${item.title}：${item.evidence}；建议：${item.recommendation}`
     )).join('\n');
@@ -94,6 +103,9 @@ const buildAiPrompt = (issue: BusinessIssue, issues: BusinessIssue[], actions: A
     const ruleLines = rules.map(rule => `- ${rule.name}：${rule.thresholdLabel}；${rule.description}`).join('\n');
 
     return `
+本次诊断场景：
+${scenario || '围绕当前选中的经营异常做根因诊断和行动建议'}
+
 当前选中的经营异常：
 标题：${issue.title}
 类型：${categoryLabel[issue.category]}
@@ -115,6 +127,15 @@ ${actionLines}
 
 规则库：
 ${ruleLines}
+
+请优先参考以下经营诊断框架：
+- 目标缺口：销售额、毛利额、毛利率与序时目标。
+- 流量缺口：Sessions、曝光、点击、CTR。
+- 转化缺口：销量、广告订单、CVR、评分、评论、退货。
+- 价格/客单缺口：客单价、促销、低价款占比。
+- 广告效率：广告花费、广告销售、ACoS、ASoAS、SP/SD/SB/SBV 结构。
+- 库存与供应：FBA 可售、180 天以上库龄、断货、慢动销。
+- 组织动作：负责人、截止时间、是否需要升级处理。
 
 请基于以上数据输出一个经营诊断，不要编造未提供的数据。格式必须包含：
 1. 一句话结论
@@ -142,6 +163,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
     const [aiAnswer, setAiAnswer] = useState('');
     const [aiError, setAiError] = useState('');
     const [isAiLoading, setIsAiLoading] = useState(false);
+    const [aiScenario, setAiScenario] = useState('');
     const selectedIssue = useMemo(
         () => issues.find(issue => issue.id === selectedIssueId) || issues[0],
         [issues, selectedIssueId],
@@ -166,7 +188,9 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
         else onOpenDetail('PL');
     };
 
-    const runAiDiagnosis = async () => {
+    const runAiDiagnosis = async (scenario?: string) => {
+        const nextScenario = scenario || '';
+        setAiScenario(nextScenario);
         setAiError('');
         setAiAnswer('');
         if (!hasConfiguredAiApi()) {
@@ -178,7 +202,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
         try {
             const answer = await unifiedGenerateContent({
                 systemInstruction: '你是亚马逊经营异常雷达的 AI 诊断引擎。只基于用户提供的异常、诊断链路、动作和规则库判断，不编造数据。输出要短、直接、能执行。',
-                contents: buildAiPrompt(selectedIssue, issues, actions, rules),
+                contents: buildAiPrompt(selectedIssue, issues, actions, rules, nextScenario),
             });
             setAiAnswer(answer || 'AI 未返回有效内容。');
         } catch (error) {
@@ -323,13 +347,37 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                         </button>
                         <button
                             type="button"
-                            onClick={runAiDiagnosis}
+                            onClick={() => runAiDiagnosis()}
                             disabled={isAiLoading}
                             className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-70"
                         >
                             {isAiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}
                             AI 诊断
                         </button>
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
+                        <div className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-500">
+                            <Sparkles className="h-3.5 w-3.5 text-sky-500" />
+                            AI 快捷诊断
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {RADAR_AI_SCENARIOS.map(item => (
+                                <button
+                                    key={item.label}
+                                    type="button"
+                                    onClick={() => runAiDiagnosis(item.question)}
+                                    disabled={isAiLoading}
+                                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                                        aiScenario === item.question
+                                            ? 'border-sky-300 bg-sky-50 text-sky-700'
+                                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">

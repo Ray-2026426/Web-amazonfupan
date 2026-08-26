@@ -25,7 +25,7 @@ export const DEFAULT_CHAT_API_SETTINGS: ChatApiSettings = {
     keys: { gemini: '', deepseek: '', dashscope: '', zhipu: '' },
     models: {
         gemini: 'gemini-3-pro-preview',
-        deepseek: 'deepseek/deepseek-chat',
+        deepseek: 'deepseek-v4-flash',
         dashscope: 'qwen-plus',
         zhipu: 'glm-4',
     },
@@ -61,14 +61,13 @@ export const PROVIDER_METAS: ProviderMeta[] = [
     {
         id: 'deepseek',
         region: 'intl',
-        label: 'DeepSeek（默认，API 基址 https://openrouter.fans/v1）',
+        label: 'DeepSeek（默认，官方 API 基址 https://api.deepseek.com）',
         shortLabel: 'DeepSeek',
-        obtainPath: '在 openrouter.fans（或您购买密钥的渠道）获取 Bearer API Key',
-        obtainUrl: 'https://openrouter.fans/',
+        obtainPath: 'DeepSeek 开放平台 → API keys → 创建并复制官方 API Key',
+        obtainUrl: 'https://platform.deepseek.com/api_keys',
         modelOptions: [
-            { value: 'deepseek/deepseek-chat', label: 'deepseek/deepseek-chat（对话）' },
-            { value: 'deepseek/deepseek-reasoner', label: 'deepseek/deepseek-reasoner（推理）' },
-            { value: 'deepseek-chat', label: 'deepseek-chat（短模型名，视网关而定）' },
+            { value: 'deepseek-v4-flash', label: 'deepseek-v4-flash（默认，官方）' },
+            { value: 'deepseek-v4-pro', label: 'deepseek-v4-pro（官方，深度推理）' },
         ],
     },
     {
@@ -103,11 +102,13 @@ export function loadChatApiSettings(): ChatApiSettings {
         const raw = localStorage.getItem(CHATBOT_API_STORAGE_KEY);
         if (!raw) return { ...DEFAULT_CHAT_API_SETTINGS };
         const parsed = JSON.parse(raw) as Partial<ChatApiSettings>;
+        const nextModels = { ...DEFAULT_CHAT_API_SETTINGS.models, ...parsed.models };
+        nextModels.deepseek = normalizeDeepSeekModel(nextModels.deepseek);
         return {
             ...DEFAULT_CHAT_API_SETTINGS,
             ...parsed,
             keys: { ...DEFAULT_CHAT_API_SETTINGS.keys, ...parsed.keys },
-            models: { ...DEFAULT_CHAT_API_SETTINGS.models, ...parsed.models },
+            models: nextModels,
         };
     } catch {
         return { ...DEFAULT_CHAT_API_SETTINGS };
@@ -115,7 +116,13 @@ export function loadChatApiSettings(): ChatApiSettings {
 }
 
 export function saveChatApiSettings(settings: ChatApiSettings): void {
-    localStorage.setItem(CHATBOT_API_STORAGE_KEY, JSON.stringify(settings));
+    localStorage.setItem(CHATBOT_API_STORAGE_KEY, JSON.stringify({
+        ...settings,
+        models: {
+            ...settings.models,
+            deepseek: normalizeDeepSeekModel(settings.models.deepseek),
+        },
+    }));
 }
 
 /** 开发环境走 Vite 代理，减轻浏览器直连跨域问题 */
@@ -129,10 +136,23 @@ export function getZhipuChatUrl(): string {
     return import.meta.env.DEV ? `/zhipu${path}` : `https://open.bigmodel.cn${path}`;
 }
 
-/** OpenAI 兼容 Chat Completions；基址为 https://openrouter.fans/v1 */
+/** OpenAI 兼容 Chat Completions；基址为 DeepSeek 官方 https://api.deepseek.com */
 export function getDeepSeekChatUrl(): string {
     const path = '/chat/completions';
-    return import.meta.env.DEV ? `/openrouterfans${path}` : `https://openrouter.fans/v1${path}`;
+    return import.meta.env.DEV ? `/deepseek${path}` : `https://api.deepseek.com${path}`;
+}
+
+export function normalizeDeepSeekModel(model?: string): string {
+    if (model === 'deepseek-v4-flash' || model === 'deepseek-v4-pro') return model;
+    if (model === 'deepseek/deepseek-reasoner' || model === 'deepseek-reasoner') return 'deepseek-v4-pro';
+    return 'deepseek-v4-flash';
+}
+
+export function getDeepSeekRequestExtras(model: string) {
+    return {
+        thinking: { type: 'enabled' },
+        reasoning_effort: model === 'deepseek-v4-pro' ? 'high' : 'medium',
+    };
 }
 
 export function getEffectiveGeminiKey(settings: ChatApiSettings): string | null {

@@ -19,10 +19,10 @@ export default defineConfig(({ mode }) => {
             changeOrigin: true,
             rewrite: (p) => p.replace(/^\/zhipu/, ''),
           },
-          '/openrouterfans': {
-            target: 'https://openrouter.fans/v1',
+          '/deepseek': {
+            target: 'https://api.deepseek.com',
             changeOrigin: true,
-            rewrite: (p) => p.replace(/^\/openrouterfans/, ''),
+            rewrite: (p) => p.replace(/^\/deepseek/, ''),
           },
         },
       },

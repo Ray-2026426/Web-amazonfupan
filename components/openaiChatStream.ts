@@ -6,9 +6,10 @@ export async function streamOpenAICompatibleChat(options: {
     model: string;
     messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
     onDelta: (text: string) => void;
+    extraBody?: Record<string, unknown>;
     signal?: AbortSignal;
 }): Promise<void> {
-    const { url, apiKey, model, messages, onDelta, signal } = options;
+    const { url, apiKey, model, messages, onDelta, extraBody, signal } = options;
 
     const res = await fetch(url, {
         method: 'POST',
@@ -21,6 +22,7 @@ export async function streamOpenAICompatibleChat(options: {
             messages,
             stream: true,
             temperature: 0.7,
+            ...(extraBody || {}),
         }),
         signal,
     });

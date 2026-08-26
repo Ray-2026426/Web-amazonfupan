@@ -12,6 +12,7 @@ import {
     getDashScopeChatUrl,
     getZhipuChatUrl,
     getDeepSeekChatUrl,
+    getDeepSeekRequestExtras,
 } from './aiApiConfig';
 import { streamOpenAICompatibleChat } from './openaiChatStream';
 
@@ -323,6 +324,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ data, inventory, refunds, filt
                     apiKey,
                     model,
                     messages: openAiMessages,
+                    extraBody: apiCfg.provider === 'deepseek' ? getDeepSeekRequestExtras(model) : undefined,
                     onDelta: (t) => {
                         fullText += t;
                         setMessages((prev) =>

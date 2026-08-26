@@ -5,6 +5,7 @@ import {
     getDashScopeChatUrl,
     getZhipuChatUrl,
     getDeepSeekChatUrl,
+    getDeepSeekRequestExtras,
 } from './aiApiConfig';
 
 /** 与机器人设置中「API 与模型」一致；未配置时各功能会提示前往该处填写 */
@@ -74,6 +75,7 @@ export async function unifiedGenerateContent(options: {
             messages,
             stream: false,
             temperature: 0.7,
+            ...(settings.provider === 'deepseek' ? getDeepSeekRequestExtras(model) : {}),
         }),
     });
 
