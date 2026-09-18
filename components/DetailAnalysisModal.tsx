@@ -13,6 +13,7 @@ import {
     loadSubtableDiagnosisSettings,
 } from './subtableDiagnosis';
 import { SubtableDiagnosisSettingsModal } from './SubtableDiagnosisSettingsModal';
+import { loadSubtableDisplaySettings, saveSubtableDisplaySettings } from './subtableDisplay';
 import { useEscClose } from './useEscClose';
 
 interface DetailAnalysisModalProps {
@@ -463,6 +464,14 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         return <ProductImageThumb url={url} onEnlarge={setLightboxUrl} />;
     };
     const [showStructure, setShowStructure] = useState(false); 
+    /**
+     * 是否显示单元格下方的「环比 / 同比 / 目标」附注。默认显示（持久化）。
+     * 关掉后表格与复制/导出都只剩本期数值 —— 见 components/subtableDisplay.ts。
+     */
+    const [showCompare, setShowCompare] = useState(() => loadSubtableDisplaySettings().showCompare);
+    useEffect(() => {
+        saveSubtableDisplaySettings({ showCompare });
+    }, [showCompare]);
     const [visibleCount, setVisibleCount] = useState(50);
     const tableContainerRef = useRef<HTMLDivElement>(null);
     const [sortConfig, setSortConfig] = useState<{ colIndex: number, direction: 'asc' | 'desc' } | null>(null);
@@ -1384,7 +1393,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         const lines: string[] = [String(displayVal)];
         if (subLine) lines.push(subLine);
 
-        if (!isInventory) {
+        if (!isInventory && showCompare) {
             const momLabel = isWeeklyMode ? '周环' : '环';
             const yoyLabel = isWeeklyMode ? '周同' : '同';
             if (last !== undefined && last !== null) {
@@ -1494,7 +1503,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             blocks.push(rowLine(`font-size:11px;color:${COPY.slate500};`, escapeHtml(subLine)));
         }
 
-        if (!isInventory) {
+        if (!isInventory && showCompare) {
             const momLabel = isWeeklyMode ? '周环' : '环';
             const yoyLabel = isWeeklyMode ? '周同' : '同';
             if (last !== undefined && last !== null) {
@@ -2037,7 +2046,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                 </div>
                 {subDisplay}
 
-                {!isInventory && (
+                {!isInventory && showCompare && (
                     <>
                         {last !== undefined && last !== null && (
                             <div className={`text-[10px] ${isTotalRow ? 'text-slate-500' : 'text-slate-400'} mt-0.5 flex justify-end gap-1`}>
@@ -2322,6 +2331,29 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                         </button>
                     )}
                     
+                    {/* 同环比 / 目标 附注总开关：关掉后每格只剩本期数值。
+                        屏幕表格与「复制 / 导出 Excel」同步跟随，避免所见与所得不一致。 */}
+                    {type !== 'Inventory' && (
+                        <>
+                            <div className="h-6 w-px bg-slate-300 mx-2"></div>
+                            <label
+                                role="switch"
+                                aria-checked={showCompare}
+                                aria-label="显示同环比与目标"
+                                onClick={() => setShowCompare((v) => !v)}
+                                className="flex shrink-0 cursor-pointer select-none items-center gap-2"
+                                title={showCompare
+                                    ? '当前每格下方显示「环比 / 同比 / 目标」；点击隐藏，只看本期数值'
+                                    : '当前已隐藏「环比 / 同比 / 目标」，每格只剩本期数值；点击恢复显示'}
+                            >
+                                <div className={`w-9 h-5 rounded-full relative transition-colors ${showCompare ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                                    <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${showCompare ? 'translate-x-4' : ''}`}></div>
+                                </div>
+                                <span className="text-xs font-bold text-slate-600">显示同环比/目标</span>
+                            </label>
+                        </>
+                    )}
+
                     {/* Hide Structure Toggle for P&L types (both Monthly and Weekly), Show only for Inventory */}
                     {type === 'Inventory' && (
                         <>
