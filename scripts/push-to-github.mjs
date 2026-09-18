@@ -58,7 +58,7 @@ const [owner, name] = repo.split('/');
 /* ------------------------------------------------------------------ *
  * 收集文件（忽略规则与 .gitignore 保持一致）
  * ------------------------------------------------------------------ */
-const IGNORE_DIRS = new Set(['node_modules', 'dist', 'dist-ssr', '.git', 'logs', '.lingxing-probe']);
+const IGNORE_DIRS = new Set(['node_modules', 'dist', 'dist-ssr', '.git', 'logs', '.lingxing-probe', 'reports']);
 const IGNORE_FILE_RE = [
     /^\.env($|\.)/i,        // .env / .env.local / .env.*  （里面有 GEMINI_API_KEY）
     /\.local$/i,

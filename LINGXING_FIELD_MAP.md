@@ -20,7 +20,7 @@ search      →  {toolId:"<工具ID>"}    取该工具的入参 JSON Schema
 action      →  {toolId, params}       执行
 ```
 
-### 三个必须知道的坑（都踩过）
+### 六个必须知道的坑（全部实际踩过并解决）
 
 **坑 1：业务参数必须放在 `arguments` 字段**
 
@@ -34,10 +34,10 @@ rpc('tools/call', { name: 'action', arguments: { toolId, params } })
 **坑 2：成功码是 `code:1`，不是 0；失败也返回 HTTP 200**
 
 ```json
-{"code":1,   "data":{...}, "success":true}                 // 成功
-{"code":400, "data":null, "msg":"参数有误", "success":false}  // 参数错
-{"code":102, "data":null, "msg":"MCP Key无效或已失效"}       // key 无效
-{"code":429, "data":null, "msg":"认证请求过于频繁"}           // 试太多次被风控
+{"code":1,   "data":{...}, "success":true}                    // 成功
+{"code":400, "data":null, "msg":"参数有误", "success":false}     // 参数错
+{"code":102, "data":null, "msg":"MCP Key无效或已失效"}          // key 无效
+{"code":429, "data":null, "msg":"认证请求过于频繁"}              // 试太多次被风控
 ```
 
 JSON-RPC 层的 `isError` **恒为 false**，必须自己判 `code`。
@@ -45,6 +45,30 @@ JSON-RPC 层的 `isError` **恒为 false**，必须自己判 `code`。
 **坑 3：`initialize` / `tools/list` 不校验鉴权**
 
 拿假 key 也能握手成功并拿到 3 个网关工具。「能连上」不等于「key 有效」——鉴权只在 `action` 时才真正检查。
+
+**坑 4：必须完整走 `tools/list → help → search → action` 这条链**
+
+少了刷新步骤，`action` 会返回
+`422 {"code":102,"msg":"工具参数定义已更新，请刷新工具列表后重新调用。"}`。
+会话建立顺序必须是：`initialize` → `notifications/initialized` → **`tools/list`** → **`help`** → **`search(toolId)`** → `action`。
+
+**坑 5（最坑）：上面那条 422 报错，真正的成因往往不是"定义过期"，而是参数类型错了**
+
+`offset` / `length` 的类型**两个工具不一样**：
+
+| 工具 | `offset` / `length` 的 schema 类型 |
+|---|---|
+| `query_product_performance_asin_lists` | **integer**（传数字） |
+| `query_order_profit_list` | **string**（**必须传字符串**） |
+
+给订单利润传数字 `offset: 0`，就会得到那条"工具参数定义已更新"的 422 ——
+报错信息和类型完全不沾边。**别被它带偏去反复刷新工具列表**（我在这上面浪费了好几轮）。
+
+**坑 6：双层信封不一致**
+
+网关统一返回 `{code:1, data:...}`，但 `data` 里面有的工具是业务载荷本体
+（如店铺列表 `data.list`），有的还套了一层（如产品表现的 `data.data.list`）。
+必须做一层归一化，不能写死层级。
 
 ---
 
@@ -165,51 +189,108 @@ first_mile_cost: number;
 
 ---
 
-## 四、拼接方案
+## 四、拼接方案（已实现并跑通）
 
 ```
-对每一天 D：
-  对每个店铺 sid（81 个）：
-    产品表现(sids=sid, start=end=D, date_view_type=day, summary_field=asin)
-      → 单店 × 单日 × ASIN 指标（销量/流量/广告/评分/库存）
-  订单利润(start=end=D, summary_field=msku[待验证])
-      → 成本结构（按 MSKU）
-  以 (店铺 + ASIN/MSKU + 日期) 为键拼接
-      → 取订单利润成本的绝对值
-      → 输出符合 DataRow 的一行
+订单利润 summary_field='msku'（length='1000'，offset/length 用字符串）
+  → 每行都是单店铺（实测 200/200）
+  → 用 price_list[0] 取 (sid, asin, seller_sku)
+  → 按 (sid|asin) 归并成本
+
+产品表现 逐店铺 sids=<sid>（length=1000，offset/length 用数字）
+  → 单店 × 当天 × ASIN 行，带 rdate
+
+按 (sid|asin) 拼接 → 成本取绝对值 → 过滤零活动行 → 输出 Excel
 ```
 
-**拼接键的难点**：
-- 产品表现的行是 **ASIN 级**（`asin` + `sids`）
-- 订单利润的行是 **MSKU 级**（`price_list[].seller_sku` + `price_list[].asin`）
-- 两边都有 `price_list`，里面有 `asin` / `parent_asin` / `seller_sku` / `sid` → **可以用 `price_list` 做映射表**
+**已实测确认：**
+- 订单利润 `summary_field='msku'` 实测 **100% 单店铺行**（200/200），而 `summary_field='asin'`
+  有 95/200 行是跨店铺的。**这是解决"订单利润没有 sids 参数"的关键。**
+- 成本字段的取值选择（两两实测相等，可放心用）：
+  `fulfillment_fee` == `fba_fulfillment_fee`、`fba_storage_fee` == `total_stock_fee`
+- 头程字段仍有歧义：`logistics_costs`(-2.24) vs `afn_logistics_costs`(-2.18)，
+  当前用 `logistics_costs`，改 `scripts/lingxing-asin-report.mjs` 的 `FIRST_MILE_FIELD` 即可切换。
+
+**正确性对账（`scripts/verify-lingxing-report.mjs`）：**
+逐店铺把「拉取到的行汇总」与「领星返回的 total_sum」对账 ——
+81/81 店铺一致（仅 1 个店铺 0.03 的四舍五入差），销量 2307 = 2307。
+说明**分页与店铺循环没有漏数据**。
+
+**性能**：81 店铺 × 1 次调用（每店铺一页拉完）+ 订单利润 2 页 ≈ 116 次调用 / 约 9 分钟。
+结果按店铺+日期缓存在 `.lingxing-probe/cache/`，重跑（换过滤条件、改字段）**秒级完成，不再打接口**。
+
+### 4.1 必须过滤零活动行
+
+产品表现返回的是**整个 ASIN 目录**：实测 2026-09-17 共 **45,789 行，其中只有 1,109 行有活动（2.3%）**。
+全量导出既没法看也没意义。脚本默认只保留当天有活动的行，需要完整目录用 `--include-empty`。
 
 ---
 
-## 五、需要你确认的 4 件事
+## 五、⚠️ 数据新鲜度：流量指标不是 T+1
 
-1. **头程 / FBA费 / 仓储费分别对应哪个字段？**
-   领星的成本字段名有多个近义项（`logistics_costs` vs `afn_logistics_costs`、`fulfillment_fee` vs `fba_fulfillment_fee`、
-   `fba_storage_fee` vs `total_stock_fee` vs `long_term_stock_fee`），**我不敢替你猜**——猜错会让整个 P&L 费用结构失真。
-   建议：你打开领星「订单利润」页面，看它表头对应的字段名，或者告诉我你现在的 Excel 里这几列的列名。
+**实测证据（同一账号、同一套条件，只换日期）：**
 
-2. **币种**：我测试用的是 `currency_type=CNY`（返回 `￥`）。你实际经营报表用 **USD 还是 CNY**？
-   （这会影响所有金额字段，也会影响 `target` 目标的币种一致性）
+| 指标（全店合计） | 2026-09-16 | 2026-09-17 |
+|---|---|---|
+| Sessions-Total | **14,117** | **789** |
+| 自然点击量 < 0 的行数 | 49 | 467 |
+| 匹配到成本的行 | 1,207 / 1,323 | 1,083 / 1,109 |
 
-3. **国家字段**：领星返回中文（`"美国"`），你 app 里的 `country` 存的是**国家代码还是中文**？
-   （决定要不要建一张映射表，也决定筛选器能不能对上）
+2026-09-17 的 `sessions` / `sessions_total` / `page_views` **全为 0**，且 `nature_click` 变成
+`-clicks` 的负残差（因为自然流量 = 总流量 − 广告流量，总流量缺失时就成了负数）。
+用 `length=1000` 拉全部 482 行复查，`total_sum.sessions` 依然是 0 —— **不是分页问题**。
+切换 `date_type`（purchase / settlement）也不改变结果。
 
-4. **`parent_asin` 取值**：产品表现**顶层** `parent_asin` 是 `null`，只有 `parent_asins[]` 数组和 `price_list[].parent_asin` 有值。
-   你 app 的父 ASIN 折叠功能依赖这个字段——确认用哪个来源？
+**结论：领星的亚马逊流量数据（Sessions / PageViews）有 1 天以上的同步延迟。**
+若在 T+1 当天就拉前一日的报表，`Sessions-Total`、`CVR`、`销量CVR`、`自然点击量`、`自然CVR`
+这 5 列会是 0 或负数。脚本已内置告警，不会静默输出空值。
+
+**建议**：日常同步跑 **T-2**（即今天拉前天），或对 T-1 的数据标记"流量待补"。
 
 ---
 
-## 六、附：可复用脚本
+## 六、仍需你确认的 2 件事
+
+1. **头程费用**用 `logistics_costs` 还是 `afn_logistics_costs`？
+   （两者实测值不同：-2.24 vs -2.18。当前默认前者）
+2. **二级分类**：领星 `categories[0]` 形如 `B-GJ工具\A戒指尺\戒指测量`，
+   脚本取第 2 段 = `"A戒指尺"`（含排序用字母前缀）。
+   如果你们习惯的"二级分类"是去掉前缀的 `"戒指尺"`，把 `STRIP_LEVEL_PREFIX` 改成 `true` 即可。
+
+（原先关于币种、国家字段的问题已定：币种用 USD；国家字段领星返回中文如 `"美国"`，报表按中文输出。）
+
+---
+
+## 七、怎么用
+
+```powershell
+$env:LINGXING_MCP_KEY='<你的鉴权密钥>'
+
+# 生成某天的 ASIN 日报（输出到 reports/）
+node scripts/lingxing-asin-report.mjs --date 2026-09-16 --currency USD
+
+# 需要完整 ASIN 目录（含当天零销售的 ASIN）
+node scripts/lingxing-asin-report.mjs --date 2026-09-16 --include-empty
+
+# 忽略本地缓存，强制重新拉取
+node scripts/lingxing-asin-report.mjs --date 2026-09-16 --no-cache
+
+# 对账：逐店铺核对行汇总 vs 领星 total_sum
+node scripts/verify-lingxing-report.mjs --date 2026-09-16
+```
+
+---
+
+## 八、附：可复用脚本
 
 | 脚本 | 用途 |
 |---|---|
-| `scripts/lingxing-probe.mjs` | 通用探针：`--catalog` 拉全量工具目录 / `--call` / `--schema` |
-| `.lingxing-probe/catalog.tsv` | 276 个业务工具清单（toolId + 名称），便于按关键词找工具 |
+| `scripts/lingxing-client.mjs` | MCP 客户端封装（会话链路、双层信封归一化、错误解析、QPS 节流）。**所有领星调用都应走它** |
+| `scripts/lingxing-asin-report.mjs` | **主脚本**：生成 ASIN 维度日报（Excel，47 列按指定顺序） |
+| `scripts/verify-lingxing-report.mjs` | 对账：逐店铺核对行汇总 vs 领星 `total_sum` |
+| `scripts/lingxing-probe.mjs` | 通用探针：`--catalog` 拉全量工具目录 / `--schema` / `--call` |
+| `.lingxing-probe/catalog.tsv` | 276 个业务工具清单（toolId + 名称） |
 | `.lingxing-probe/field-inventory.json` | 两张表的完整字段清单 |
+| `.lingxing-probe/cache/<日期>/` | 按店铺缓存的原始返回，重跑秒级完成 |
 
-`.lingxing-probe/` 已在 `.gitignore` 中——**里面有真实店铺名、销量、品名，绝不能提交**。
+`.lingxing-probe/` 与 `reports/` 已在 `.gitignore` 中 ——**里面有真实店铺名、销量、品名，绝不能提交**。

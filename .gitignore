@@ -33,6 +33,9 @@ pnpm-debug.log*
 # 领星 MCP 探针的原始返回（含真实店铺/销量数据，绝不能提交）
 .lingxing-probe/
 
+# 领星导出的报表（含真实店铺名/销量/销售额，绝不能提交）
+reports/
+
 # 推送脚本用的凭据文件（绝不能提交）
 .github-token
 *.token
