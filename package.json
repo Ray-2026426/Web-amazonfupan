@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "theme:gen": "node scripts/gen-dark-theme.mjs",
+    "theme:verify": "node scripts/verify-dark-theme.mjs",
+    "theme:audit": "node scripts/audit-contrast.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.35.0",

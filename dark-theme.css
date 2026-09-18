@@ -1,0 +1,280 @@
+/*
+ * dark-theme.css —— 暗色模式工具类覆盖表（自动生成，请勿手改）
+ *
+ * 由 scripts/gen-dark-theme.mjs 根据源码里实际用到的 360 个
+ * 调色板工具类（共 1909 处）生成。
+ * 重新生成： node scripts/gen-dark-theme.mjs
+ * 校验覆盖率：node scripts/verify-dark-theme.mjs
+ *
+ * 设计要点见生成器顶部注释；核心是「按属性 + 色相 + 色阶推导」而不是逐类硬编码，
+ * 因此不会再出现「漏了某个 bg-*-50 导致暗色下露出白块」的问题。
+ */
+
+
+/* ---------- 背景色 bg-* （63 条） ---------- */
+html.dark .bg-amber-50 { background-color: rgba(251, 191, 36, 0.15) !important; }
+html.dark .bg-blue-100 { background-color: rgba(88, 166, 255, 0.22) !important; }
+html.dark .bg-blue-50 { background-color: rgba(88, 166, 255, 0.15) !important; }
+html.dark .bg-blue-50\/50 { background-color: rgba(88, 166, 255, 0.1) !important; }
+html.dark .bg-emerald-50 { background-color: rgba(52, 211, 153, 0.15) !important; }
+html.dark .bg-gray-400 { background-color: #4d5762 !important; }
+html.dark .bg-gray-50 { background-color: #1c2128 !important; }
+html.dark .bg-green-100 { background-color: rgba(74, 222, 128, 0.22) !important; }
+html.dark .bg-green-50 { background-color: rgba(74, 222, 128, 0.15) !important; }
+html.dark .bg-indigo-100 { background-color: rgba(129, 140, 248, 0.22) !important; }
+html.dark .bg-indigo-50 { background-color: rgba(129, 140, 248, 0.15) !important; }
+html.dark .bg-indigo-50\/50 { background-color: rgba(129, 140, 248, 0.1) !important; }
+html.dark .bg-orange-100 { background-color: rgba(251, 146, 60, 0.22) !important; }
+html.dark .bg-orange-50 { background-color: rgba(251, 146, 60, 0.15) !important; }
+html.dark .bg-purple-100 { background-color: rgba(192, 132, 252, 0.22) !important; }
+html.dark .bg-purple-50 { background-color: rgba(192, 132, 252, 0.15) !important; }
+html.dark .bg-red-100 { background-color: rgba(248, 113, 113, 0.22) !important; }
+html.dark .bg-red-50 { background-color: rgba(248, 113, 113, 0.15) !important; }
+html.dark .bg-rose-50 { background-color: rgba(251, 113, 133, 0.15) !important; }
+html.dark .bg-sky-50 { background-color: rgba(56, 189, 248, 0.15) !important; }
+html.dark .bg-sky-50\/70 { background-color: rgba(56, 189, 248, 0.105) !important; }
+html.dark .bg-sky-50\/80 { background-color: rgba(56, 189, 248, 0.12) !important; }
+html.dark .bg-slate-100 { background-color: #21262d !important; }
+html.dark .bg-slate-200 { background-color: #2d333b !important; }
+html.dark .bg-slate-300 { background-color: #3e4651 !important; }
+html.dark .bg-slate-400 { background-color: #4d5762 !important; }
+html.dark .bg-slate-50 { background-color: #1c2128 !important; }
+html.dark .bg-slate-50\/50 { background-color: rgba(177, 186, 196, 0.06) !important; }
+html.dark .bg-slate-50\/60 { background-color: rgba(28, 33, 40, 0.6) !important; }
+html.dark .bg-slate-50\/80 { background-color: rgba(28, 33, 40, 0.8) !important; }
+html.dark .bg-slate-50\/90 { background-color: rgba(28, 33, 40, 0.9) !important; }
+html.dark .bg-slate-600 { background-color: #444c56 !important; }
+html.dark .bg-slate-700 { background-color: #21262d !important; }
+html.dark .bg-slate-800 { background-color: #161b22 !important; }
+html.dark .bg-slate-900 { background-color: #0d1117 !important; }
+html.dark .bg-slate-950 { background-color: #010409 !important; }
+html.dark .bg-yellow-100 { background-color: rgba(250, 204, 21, 0.22) !important; }
+html.dark .bg-yellow-50 { background-color: rgba(250, 204, 21, 0.15) !important; }
+html.dark .disabled\:bg-slate-100:disabled { background-color: #21262d !important; }
+html.dark .disabled\:bg-slate-300:disabled { background-color: #3e4651 !important; }
+html.dark .even\:bg-slate-50\/35:nth-child(even) { background-color: rgba(177, 186, 196, 0.048) !important; }
+html.dark .group:hover .group-hover\:bg-blue-50\/30 { background-color: rgba(88, 166, 255, 0.1) !important; }
+html.dark .group:hover .group-hover\:bg-slate-100\/80 { background-color: rgba(33, 38, 45, 0.8) !important; }
+html.dark .hover\:bg-blue-100:hover { background-color: rgba(88, 166, 255, 0.22) !important; }
+html.dark .hover\:bg-blue-50:hover { background-color: rgba(88, 166, 255, 0.15) !important; }
+html.dark .hover\:bg-blue-50\/30:hover { background-color: rgba(88, 166, 255, 0.1) !important; }
+html.dark .hover\:bg-orange-50:hover { background-color: rgba(251, 146, 60, 0.15) !important; }
+html.dark .hover\:bg-orange-50\/50:hover { background-color: rgba(251, 146, 60, 0.1) !important; }
+html.dark .hover\:bg-purple-50\/30:hover { background-color: rgba(192, 132, 252, 0.1) !important; }
+html.dark .hover\:bg-purple-50\/50:hover { background-color: rgba(192, 132, 252, 0.1) !important; }
+html.dark .hover\:bg-red-50:hover { background-color: rgba(248, 113, 113, 0.15) !important; }
+html.dark .hover\:bg-sky-100:hover { background-color: rgba(56, 189, 248, 0.22) !important; }
+html.dark .hover\:bg-sky-50:hover { background-color: rgba(56, 189, 248, 0.15) !important; }
+html.dark .hover\:bg-slate-100:hover { background-color: #21262d !important; }
+html.dark .hover\:bg-slate-200:hover { background-color: #2d333b !important; }
+html.dark .hover\:bg-slate-300:hover { background-color: #3e4651 !important; }
+html.dark .hover\:bg-slate-50:hover { background-color: #1c2128 !important; }
+html.dark .hover\:bg-slate-50\/50:hover { background-color: rgba(177, 186, 196, 0.06) !important; }
+html.dark .hover\:bg-slate-600:hover { background-color: #444c56 !important; }
+html.dark .hover\:bg-slate-700:hover { background-color: #21262d !important; }
+html.dark .hover\:bg-slate-800:hover { background-color: #161b22 !important; }
+html.dark .hover\:bg-yellow-50:hover { background-color: rgba(250, 204, 21, 0.15) !important; }
+html.dark .hover\:bg-yellow-50\/50:hover { background-color: rgba(250, 204, 21, 0.1) !important; }
+
+/* ---------- 文字色 text-* （74 条） ---------- */
+html.dark .disabled\:text-slate-500:disabled { color: #8b949e !important; }
+html.dark .hover\:text-blue-500:hover { color: #79c0ff !important; }
+html.dark .hover\:text-blue-600:hover { color: #79c0ff !important; }
+html.dark .hover\:text-blue-800:hover { color: #cae8ff !important; }
+html.dark .hover\:text-indigo-600:hover { color: #818cf8 !important; }
+html.dark .hover\:text-purple-600:hover { color: #c084fc !important; }
+html.dark .hover\:text-red-500:hover { color: #f87171 !important; }
+html.dark .hover\:text-red-600:hover { color: #f87171 !important; }
+html.dark .hover\:text-slate-200:hover { color: #dde3ea !important; }
+html.dark .hover\:text-slate-300:hover { color: #c9d1d9 !important; }
+html.dark .hover\:text-slate-600:hover { color: #c9d1d9 !important; }
+html.dark .hover\:text-slate-700:hover { color: #c9d1d9 !important; }
+html.dark .hover\:text-slate-800:hover { color: #e6edf3 !important; }
+html.dark .hover\:text-yellow-600:hover { color: #facc15 !important; }
+html.dark .placeholder\:text-slate-400::placeholder { color: #9aa4ae !important; }
+html.dark .placeholder\:text-slate-500::placeholder { color: #8b949e !important; }
+html.dark .text-amber-500 { color: #fbbf24 !important; }
+html.dark .text-amber-600 { color: #fbbf24 !important; }
+html.dark .text-amber-600\/90 { color: rgba(251, 191, 36, 0.9) !important; }
+html.dark .text-amber-700 { color: #fcd34d !important; }
+html.dark .text-amber-800 { color: #fde68a !important; }
+html.dark .text-amber-800\/90 { color: rgba(253, 230, 138, 0.9) !important; }
+html.dark .text-amber-900 { color: #fde68a !important; }
+html.dark .text-amber-950 { color: #fde68a !important; }
+html.dark .text-blue-500 { color: #79c0ff !important; }
+html.dark .text-blue-600 { color: #79c0ff !important; }
+html.dark .text-blue-700 { color: #a5d6ff !important; }
+html.dark .text-blue-800 { color: #cae8ff !important; }
+html.dark .text-emerald-500 { color: #34d399 !important; }
+html.dark .text-emerald-600 { color: #34d399 !important; }
+html.dark .text-emerald-700 { color: #6ee7b7 !important; }
+html.dark .text-emerald-700\/85 { color: rgba(110, 231, 183, 0.85) !important; }
+html.dark .text-emerald-800 { color: #a7f3d0 !important; }
+html.dark .text-emerald-900 { color: #a7f3d0 !important; }
+html.dark .text-green-500 { color: #4ade80 !important; }
+html.dark .text-green-600 { color: #4ade80 !important; }
+html.dark .text-green-700 { color: #86efac !important; }
+html.dark .text-indigo-500 { color: #818cf8 !important; }
+html.dark .text-indigo-600 { color: #818cf8 !important; }
+html.dark .text-indigo-700 { color: #a5b4fc !important; }
+html.dark .text-indigo-900 { color: #c7d2fe !important; }
+html.dark .text-orange-500 { color: #fb923c !important; }
+html.dark .text-orange-600 { color: #fb923c !important; }
+html.dark .text-orange-700 { color: #fdba74 !important; }
+html.dark .text-purple-500 { color: #c084fc !important; }
+html.dark .text-purple-600 { color: #c084fc !important; }
+html.dark .text-purple-700 { color: #d8b4fe !important; }
+html.dark .text-red-500 { color: #f87171 !important; }
+html.dark .text-red-600 { color: #f87171 !important; }
+html.dark .text-red-700 { color: #fca5a5 !important; }
+html.dark .text-red-800 { color: #fecaca !important; }
+html.dark .text-rose-500 { color: #fb7185 !important; }
+html.dark .text-rose-600 { color: #fb7185 !important; }
+html.dark .text-rose-700 { color: #fda4af !important; }
+html.dark .text-sky-500 { color: #38bdf8 !important; }
+html.dark .text-sky-600 { color: #38bdf8 !important; }
+html.dark .text-sky-700 { color: #7dd3fc !important; }
+html.dark .text-sky-900 { color: #bae6fd !important; }
+html.dark .text-slate-100 { color: #f0f6fc !important; }
+html.dark .text-slate-200 { color: #dde3ea !important; }
+html.dark .text-slate-300 { color: #c9d1d9 !important; }
+html.dark .text-slate-400 { color: #9aa4ae !important; }
+html.dark .text-slate-500 { color: #8b949e !important; }
+html.dark .text-slate-600 { color: #c9d1d9 !important; }
+html.dark .text-slate-700 { color: #c9d1d9 !important; }
+html.dark .text-slate-800 { color: #e6edf3 !important; }
+html.dark .text-slate-900 { color: #e6edf3 !important; }
+html.dark .text-slate-950 { color: #e6edf3 !important; }
+html.dark .text-violet-600 { color: #a78bfa !important; }
+html.dark .text-violet-700\/85 { color: rgba(196, 181, 253, 0.85) !important; }
+html.dark .text-violet-900 { color: #ddd6fe !important; }
+html.dark .text-yellow-500 { color: #facc15 !important; }
+html.dark .text-yellow-600 { color: #facc15 !important; }
+html.dark .text-yellow-700 { color: #fde047 !important; }
+
+/* ---------- 边框色 border-* （46 条） ---------- */
+html.dark .border-amber-200 { border-color: rgba(251, 191, 36, 0.4) !important; }
+html.dark .border-amber-200\/80 { border-color: rgba(251, 191, 36, 0.32) !important; }
+html.dark .border-blue-100 { border-color: rgba(88, 166, 255, 0.28) !important; }
+html.dark .border-blue-200 { border-color: rgba(88, 166, 255, 0.4) !important; }
+html.dark .border-blue-300 { border-color: rgba(88, 166, 255, 0.5) !important; }
+html.dark .border-emerald-200 { border-color: rgba(52, 211, 153, 0.4) !important; }
+html.dark .border-emerald-200\/80 { border-color: rgba(52, 211, 153, 0.32) !important; }
+html.dark .border-gray-100 { border-color: #21262d !important; }
+html.dark .border-gray-200 { border-color: #30363d !important; }
+html.dark .border-green-100 { border-color: rgba(74, 222, 128, 0.28) !important; }
+html.dark .border-green-200 { border-color: rgba(74, 222, 128, 0.4) !important; }
+html.dark .border-indigo-100 { border-color: rgba(129, 140, 248, 0.28) !important; }
+html.dark .border-indigo-200 { border-color: rgba(129, 140, 248, 0.4) !important; }
+html.dark .border-orange-100 { border-color: rgba(251, 146, 60, 0.28) !important; }
+html.dark .border-purple-200 { border-color: rgba(192, 132, 252, 0.4) !important; }
+html.dark .border-red-100 { border-color: rgba(248, 113, 113, 0.28) !important; }
+html.dark .border-red-200 { border-color: rgba(248, 113, 113, 0.4) !important; }
+html.dark .border-rose-200 { border-color: rgba(251, 113, 133, 0.4) !important; }
+html.dark .border-rose-200\/80 { border-color: rgba(251, 113, 133, 0.32) !important; }
+html.dark .border-sky-200 { border-color: rgba(56, 189, 248, 0.4) !important; }
+html.dark .border-sky-200\/60 { border-color: rgba(56, 189, 248, 0.24) !important; }
+html.dark .border-sky-200\/80 { border-color: rgba(56, 189, 248, 0.32) !important; }
+html.dark .border-sky-300 { border-color: rgba(56, 189, 248, 0.5) !important; }
+html.dark .border-slate-100 { border-color: #21262d !important; }
+html.dark .border-slate-200 { border-color: #30363d !important; }
+html.dark .border-slate-200\/80 { border-color: rgba(48, 54, 61, 0.8) !important; }
+html.dark .border-slate-200\/90 { border-color: rgba(48, 54, 61, 0.9) !important; }
+html.dark .border-slate-300 { border-color: #3e4651 !important; }
+html.dark .border-slate-50 { border-color: #21262d !important; }
+html.dark .border-slate-500 { border-color: #57606a !important; }
+html.dark .border-slate-600 { border-color: #5c6773 !important; }
+html.dark .border-slate-600\/60 { border-color: rgba(92, 103, 115, 0.6) !important; }
+html.dark .border-slate-600\/80 { border-color: rgba(92, 103, 115, 0.8) !important; }
+html.dark .border-slate-700 { border-color: #30363d !important; }
+html.dark .border-slate-700\/50 { border-color: rgba(48, 54, 61, 0.5) !important; }
+html.dark .border-slate-700\/60 { border-color: rgba(48, 54, 61, 0.6) !important; }
+html.dark .border-slate-700\/80 { border-color: rgba(48, 54, 61, 0.8) !important; }
+html.dark .border-slate-800 { border-color: #30363d !important; }
+html.dark .border-slate-800\/80 { border-color: rgba(48, 54, 61, 0.8) !important; }
+html.dark .border-violet-300\/30 { border-color: rgba(167, 139, 250, 0.15) !important; }
+html.dark .border-yellow-100 { border-color: rgba(250, 204, 21, 0.28) !important; }
+html.dark .border-yellow-200 { border-color: rgba(250, 204, 21, 0.4) !important; }
+html.dark .hover\:border-blue-300:hover { border-color: rgba(88, 166, 255, 0.5) !important; }
+html.dark .hover\:border-slate-200:hover { border-color: #30363d !important; }
+html.dark .hover\:border-slate-300:hover { border-color: #3e4651 !important; }
+html.dark .hover\:border-slate-500:hover { border-color: #57606a !important; }
+
+/* ---------- 分隔线 divide-* （1 条） ---------- */
+html.dark .divide-slate-100 { border-color: #21262d !important; }
+
+/* ---------- 外描边 ring-* （14 条） ---------- */
+html.dark .focus\:ring-blue-100:focus { --tw-ring-color: rgba(88, 166, 255, 0.28) !important; }
+html.dark .focus\:ring-blue-200:focus { --tw-ring-color: rgba(88, 166, 255, 0.4) !important; }
+html.dark .focus\:ring-sky-100:focus { --tw-ring-color: rgba(56, 189, 248, 0.28) !important; }
+html.dark .hover\:ring-blue-300:hover { --tw-ring-color: rgba(88, 166, 255, 0.5) !important; }
+html.dark .ring-amber-200\/80 { --tw-ring-color: rgba(251, 191, 36, 0.32) !important; }
+html.dark .ring-blue-200 { --tw-ring-color: rgba(88, 166, 255, 0.4) !important; }
+html.dark .ring-emerald-200\/80 { --tw-ring-color: rgba(52, 211, 153, 0.32) !important; }
+html.dark .ring-rose-200\/80 { --tw-ring-color: rgba(251, 113, 133, 0.32) !important; }
+html.dark .ring-sky-100 { --tw-ring-color: rgba(56, 189, 248, 0.28) !important; }
+html.dark .ring-sky-100\/80 { --tw-ring-color: rgba(56, 189, 248, 0.224) !important; }
+html.dark .ring-sky-200\/80 { --tw-ring-color: rgba(56, 189, 248, 0.32) !important; }
+html.dark .ring-slate-200 { --tw-ring-color: #30363d !important; }
+html.dark .ring-slate-200\/70 { --tw-ring-color: rgba(48, 54, 61, 0.7) !important; }
+html.dark .ring-slate-200\/80 { --tw-ring-color: rgba(48, 54, 61, 0.8) !important; }
+
+/* ---------- white / black 系列 ----------
+ * 说明：bg-white/* 的低透明度（10/15/20）用于「彩色深底上的浅色叠层」，
+ * 暗色下保持半透明白才是对的，因此不做覆盖；只有 60 以上（当作面板表面用）
+ * 以及 hover/focus 态的纯白才需要变暗。
+ */
+html.dark .bg-white { background-color: #161b22 !important; }
+html.dark .bg-white\/60 { background-color: rgba(22, 27, 34, 0.60) !important; }
+html.dark .bg-white\/70 { background-color: rgba(22, 27, 34, 0.70) !important; }
+html.dark .bg-white\/75 { background-color: rgba(22, 27, 34, 0.75) !important; }
+html.dark .bg-white\/80 { background-color: rgba(22, 27, 34, 0.80) !important; }
+html.dark .bg-white\/85 { background-color: rgba(22, 27, 34, 0.85) !important; }
+html.dark .bg-white\/90 { background-color: rgba(22, 27, 34, 0.90) !important; }
+html.dark .bg-white\/95 { background-color: rgba(22, 27, 34, 0.95) !important; }
+html.dark .hover\:bg-white:hover,
+html.dark .focus\:bg-white:focus { background-color: #161b22 !important; }
+html.dark .hover\:bg-white\/50:hover { background-color: rgba(177, 186, 196, 0.12) !important; }
+
+html.dark .border-white,
+html.dark .border-white\/60,
+html.dark .border-white\/70,
+html.dark .border-white\/80,
+html.dark .border-white\/90 { border-color: #30363d !important; }
+
+html.dark .ring-white\/70 { --tw-ring-color: rgba(48, 54, 61, 0.90) !important; }
+
+/* ---------- 图表 / SVG ----------
+ * 图表把颜色写在 SVG 属性上（stroke="#e2e8f0" 等），属性选择器 + CSS 属性
+ * 可以覆盖呈现属性（presentation attribute 优先级最低），所以不必改组件代码。
+ */
+html.dark [stroke="#e2e8f0"],
+html.dark [stroke="#f1f5f9"],
+html.dark [stroke="#f8fafc"],
+html.dark [stroke="#cbd5e1"] { stroke: #30363d !important; }
+
+html.dark [stroke="#94a3b8"] { stroke: #4d5762 !important; }
+
+html.dark [fill="white"],
+html.dark [fill="#fff"],
+html.dark [fill="#ffffff"] { fill: #e6edf3 !important; }
+
+/* Recharts：坐标轴刻度、参考线、hover 指示线与 Tooltip 都是内联样式，
+ * 内联样式不能被普通 CSS 覆盖，必须 !important。
+ */
+html.dark .recharts-cartesian-axis-tick-value { fill: #8b949e !important; }
+html.dark .recharts-cartesian-axis-line,
+html.dark .recharts-cartesian-axis-tick-line { stroke: #30363d !important; }
+html.dark .recharts-tooltip-cursor { stroke: #3e4651 !important; }
+html.dark .recharts-default-tooltip {
+    background-color: rgba(33, 38, 45, 0.96) !important;
+    border-color: #30363d !important;
+    color: #e6edf3 !important;
+}
+html.dark .recharts-tooltip-label { color: #e6edf3 !important; }
+html.dark .recharts-legend-item-text { color: #c9d1d9 !important; }
+html.dark .recharts-reference-line line { stroke: #4d5762 !important; }
+
+/* ---------- 暗色下无需覆盖的类（原值已适配深色底，仅作核对） ----------
+   共 162 个：bg-amber-400/10、bg-amber-500/10、bg-amber-500/15、bg-amber-500/8、bg-blue-400、bg-blue-500、bg-blue-500/90、bg-blue-600、bg-emerald-500/10、bg-emerald-600、bg-emerald-600/12、bg-green-400、bg-green-500、bg-green-600、bg-indigo-500、bg-indigo-600、bg-orange-400、bg-orange-500、bg-orange-600、bg-orange-700/50、bg-purple-600、bg-red-400、bg-red-500、bg-rose-400/10、bg-rose-500、bg-rose-500/10、bg-rose-600、bg-sky-400/10、bg-sky-500、bg-sky-500/10、bg-sky-500/15、bg-slate-700/50、bg-slate-800/30、bg-slate-800/40、bg-slate-800/60、bg-slate-800/70、bg-slate-800/80、bg-slate-800/95、bg-slate-900/30、bg-slate-900/50、bg-slate-900/60、bg-slate-900/70、bg-slate-950/45、bg-slate-950/50、bg-violet-400/10、bg-violet-500/15、bg-violet-600/12、bg-yellow-400、bg-yellow-500、bg-yellow-600、bg-yellow-700/50、border-amber-400/30、border-amber-500/20、border-blue-400、border-blue-500、border-blue-600、border-green-500、border-indigo-400、border-indigo-600、border-orange-500、border-red-500、border-rose-400/30、border-sky-400、border-sky-400/20、border-sky-400/30、border-sky-400/50、border-sky-400/60、border-sky-400/70、border-sky-500/40、border-violet-400/20、border-yellow-500、border-yellow-600、disabled:hover:bg-blue-600、focus-within:border-blue-500、focus-within:ring-blue-500/30、focus:border-blue-400、focus:border-blue-500、focus:border-green-500、focus:border-orange-500、focus:border-purple-500、focus:border-sky-400、focus:border-yellow-500、focus:ring-blue-400/30、focus:ring-blue-500、focus:ring-green-500、focus:ring-purple-500、focus:ring-sky-400、from-amber-500、from-amber-500/12、from-blue-600、from-emerald-500、from-emerald-500/12、from-rose-500、from-rose-500/12、from-sky-500、from-sky-500/12、hover:bg-blue-700、hover:bg-emerald-500、hover:bg-indigo-500、hover:bg-indigo-700、hover:bg-orange-700、hover:bg-sky-400、hover:bg-sky-500/10、hover:bg-sky-500/5、hover:bg-slate-700/80、hover:bg-slate-800/80、hover:bg-violet-500/25、hover:bg-yellow-600、hover:bg-yellow-700、hover:border-blue-400、hover:border-orange-500、hover:border-purple-500、hover:border-sky-500、hover:border-sky-500/40、hover:border-sky-500/60、hover:border-yellow-500、hover:text-rose-300、hover:text-sky-300、ring-amber-500/40、ring-emerald-500/35、ring-orange-500、ring-sky-400/30、ring-violet-500/35、ring-yellow-500、shadow-sky-500/20、shadow-slate-950/40、text-amber-100、text-amber-100/80、text-amber-300、text-blue-100、text-blue-300、text-blue-400、text-green-100、text-green-300、text-green-400、text-indigo-100、text-indigo-400、text-orange-100、text-orange-400、text-pink-400、text-purple-200、text-red-400、text-rose-100、text-rose-400、text-sky-100、text-sky-200、text-sky-300、text-sky-400、text-sky-400/70、text-violet-100、text-violet-200、text-yellow-100、text-yellow-400、to-cyan-400、to-indigo-700、to-orange-400、to-red-400、to-teal-400、via-cyan-400/10、via-orange-400/10、via-red-400/10、via-teal-400/10
+*/

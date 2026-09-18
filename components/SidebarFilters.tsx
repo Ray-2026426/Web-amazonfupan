@@ -118,7 +118,7 @@ const EnhancedDropdown = ({ title, icon, options, selected, onToggle, onBulkSet 
             </button>
 
             {isOpen && (
-                <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-slate-600/80 bg-slate-850 shadow-2xl shadow-slate-950/40 flex flex-col backdrop-blur-xl">
+                <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-slate-600/80 bg-slate-800 shadow-2xl shadow-slate-950/40 flex flex-col backdrop-blur-xl">
                     <div className="border-b border-slate-700/80 bg-slate-800/95 p-2.5 sticky top-0">
                         <div className="relative mb-2">
                             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
