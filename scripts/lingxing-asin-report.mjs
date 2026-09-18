@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 领星 → 「ASIN 维度业绩日报」导出（Excel）。
  *
  * 数据来源两张表拼接（用户明确指定的业务口径）：
@@ -38,7 +38,12 @@ const has = (n) => process.argv.includes(`--${n}`);
 
 const DATE = args('date', '2026-09-17');
 const CURRENCY = args('currency', 'USD');
-const OUT_DIR = path.join(ROOT, 'reports');
+/**
+ * 输出目录。默认写到仓库下的 reports/。
+ * 用 --out 可以直接写到桌面等任意位置（注意：写到工作区之外需要相应权限）：
+ *   node scripts/lingxing-asin-report.mjs --date 2026-09-16 --out "C:\Users\A\Desktop\领星ASIN日报"
+ */
+const OUT_DIR = args('out', null) ? path.resolve(args('out', null)) : path.join(ROOT, 'reports');
 const CACHE_DIR = path.join(ROOT, '.lingxing-probe', 'cache', DATE);
 const PAGE = 1000; // 实测可接受的最大页长
 

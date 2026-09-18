@@ -266,8 +266,11 @@ first_mile_cost: number;
 ```powershell
 $env:LINGXING_MCP_KEY='<你的鉴权密钥>'
 
-# 生成某天的 ASIN 日报（输出到 reports/）
+# 生成某天的 ASIN 日报（默认输出到仓库下的 reports/）
 node scripts/lingxing-asin-report.mjs --date 2026-09-16 --currency USD
+
+# 直接输出到桌面（推荐，免得再去项目目录里翻）
+node scripts/lingxing-asin-report.mjs --date 2026-09-16 --currency USD --out "$env:USERPROFILE\Desktop\领星ASIN日报"
 
 # 需要完整 ASIN 目录（含当天零销售的 ASIN）
 node scripts/lingxing-asin-report.mjs --date 2026-09-16 --include-empty
@@ -278,6 +281,8 @@ node scripts/lingxing-asin-report.mjs --date 2026-09-16 --no-cache
 # 对账：逐店铺核对行汇总 vs 领星 total_sum
 node scripts/verify-lingxing-report.mjs --date 2026-09-16
 ```
+
+> `--out` 指向工作区之外（如桌面）时，需要 Node 进程有对应的文件写权限。
 
 ---
 
