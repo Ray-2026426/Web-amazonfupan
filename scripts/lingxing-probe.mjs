@@ -167,6 +167,64 @@ if (arg('schema')) {
     console.log(JSON.stringify(t.inputSchema, null, 2));
 }
 
+/**
+ * 业务返回的统一拆包。
+ * 注意：领星把业务错误放在「成功的 JSON-RPC 响应」里，
+ * 成功是 code:1，失败是 code:102/429 等且 success:false。
+ * 绝不能只看 isError。
+ */
+function unwrapBusiness(result) {
+    const text = (result?.content || []).find((c) => c.type === 'text')?.text;
+    if (!text) return { ok: false, raw: result, reason: '返回里没有 text 内容' };
+    let j;
+    try {
+        j = JSON.parse(text);
+    } catch {
+        return { ok: false, raw: text, reason: '返回的 text 不是合法 JSON' };
+    }
+    const ok = j.code === 1 || (j.success === true && j.code !== 102);
+    return { ok, code: j.code, msg: j.msg, data: j.data, raw: j, reason: ok ? null : `code=${j.code} ${j.msg || ''}` };
+}
+
+if (has('catalog')) {
+    console.log('\n=== 拉取完整业务工具目录 ===');
+    const PAGE = 50; // 官方上限 50
+    const all = [];
+    let offset = 0;
+    let total = null;
+    while (total === null || all.length < total) {
+        const res = await rpc('tools/call', { name: 'help', arguments: { limit: PAGE, offset } });
+        const b = unwrapBusiness(res);
+        if (!b.ok) throw new Error(`help 分页失败 (offset=${offset}): ${b.reason}`);
+        total = b.data.total;
+        all.push(...(b.data.tools || []));
+        offset += PAGE;
+        if (offset > 2000) break; // 保险丝
+    }
+    console.log(`  共 ${all.length} / ${total} 个业务工具`);
+
+    const byType = {};
+    for (const t of all) byType[t.toolType] = (byType[t.toolType] || 0) + 1;
+    console.log('  类型分布:', JSON.stringify(byType));
+
+    const catalogFile = path.join(outDir, 'catalog.json');
+    fs.writeFileSync(catalogFile, JSON.stringify(all, null, 2), 'utf8');
+
+    // 同时给一份人类可读的清单，方便按关键词找工具
+    const lines = all.map((t) => `${t.toolType}\t${t.toolId}\t${t.displayName}`);
+    fs.writeFileSync(path.join(outDir, 'catalog.tsv'), lines.join('\n'), 'utf8');
+
+    console.log(`  已写入 ${path.relative(ROOT, catalogFile)} 与 catalog.tsv`);
+
+    // 按关键词过滤（--grep 利润 / --grep 产品表现 ...）
+    const grep = arg('grep');
+    if (grep && grep !== true) {
+        const hit = all.filter((t) => (t.toolId + ' ' + t.displayName + ' ' + (t.description || '')).includes(grep));
+        console.log(`\n  含「${grep}」的工具 ${hit.length} 个:`);
+        for (const t of hit) console.log(`    ${t.toolId}\n      ${t.displayName}`);
+    }
+}
+
 if (arg('call')) {
     const name = arg('call');
     let params = {};
@@ -194,7 +252,8 @@ if (arg('call')) {
 
     const result = await rpc('tools/call', { name, arguments: params });
 
-    const outFile = path.join(outDir, `call-${name}.json`);
+    // 输出文件名带上 toolId，避免连续调用同一个网关工具时互相覆盖
+    const outFile = path.join(outDir, `call-${name}${params && params.toolId ? `-${params.toolId}` : ''}.json`);
     fs.writeFileSync(outFile, JSON.stringify(result, null, 2), 'utf8');
 
     console.log('isError:', result?.isError === true);
