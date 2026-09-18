@@ -30,6 +30,9 @@ pnpm-debug.log*
 .chrome-debug*/
 .tmp-*/
 
+# 领星 MCP 探针的原始返回（含真实店铺/销量数据，绝不能提交）
+.lingxing-probe/
+
 # 推送脚本用的凭据文件（绝不能提交）
 .github-token
 *.token

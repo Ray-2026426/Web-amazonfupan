@@ -34,6 +34,7 @@ const UTIL_RE = new RegExp(
 const SKIP_DIRS = new Set([
     'node_modules', 'dist', '.git', 'scripts', 'tools',
     '.chrome-debug', '.chrome-debug2', '.chrome-debug3', '.tmp-esbuild', '.tmp-verify',
+    '.lingxing-probe',
 ]);
 
 /** 覆盖清单自身不能参与扫描，否则会把「生成的规则」当成「源码用到的类」 */
