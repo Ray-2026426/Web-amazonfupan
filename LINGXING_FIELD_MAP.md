@@ -124,7 +124,7 @@ total 从 25497（全店）降到 482（单店）
 | `date` | `rdate` | ✅ 已验证 `"2026-09-02"` |
 | `child_asin` | `asin` | ✅ |
 | `parent_asin` | `parent_asins[0].parent_asin`（**顶层 `parent_asin` 是 null**） | ⚠️ 注意 |
-| `product_name` | `item_name`（或 `local_name` 中文短名） | ✅ |
+| `product_name` | **`price_list[].local_name`** —— 见下方 **3.5 品名规则**（**最容易拉错的字段**） | ⚠️ 已修正 |
 | `shop_name` | `seller_store_countries[0].seller_name` 或 `price_list[0].seller_name` | ✅ 已验证 `"OG-Meo-NA诺博-US"` |
 | `country` | `seller_store_countries[0].country` | ⚠️ 返回**中文**（`"美国"`），需要中文→国家代码映射 |
 | `brand` | `price_list[0].brand_title`（已验证 `"Meowoo"`） | ⚠️ 待确认 |
@@ -186,6 +186,31 @@ first_mile_cost: number;
 ```
 
 → **必须取绝对值**，否则所有占比与毛利率会算反。这是拼接时最容易出错的一步。
+
+### 3.5 【品名规则】—— 最容易拉错的字段，已与业务确认
+
+领星里三个"名字"字段含义**完全不同**，我第一版就拉错了：
+
+| 字段 | 实际含义 | 示例 | 能不能当品名用 |
+|---|---|---|---|
+| `item_name` | Amazon 商品**标题**（英文长标题） | `Meowoo Ring Sizer Measuring Tool with Magnifier, for Ring Measurer...` | ❌ **不是品名** |
+| 顶层 `local_name` | 实测**恒为 null** | `null` | ❌ 不可用 |
+| **`price_list[].local_name`** | **品名**（中文短名） | `戒指条-黑-放大镜-美规数字-1pcs` | ✅ **要的是这个** |
+
+**取值规则（已固化进 `scripts/lingxing-asin-report.mjs` 的 `productName()`）：**
+
+1. 一个 ASIN 可能对应**多个 MSKU**（`price_list` 多项），各自品名不同；
+2. 取 `price_list` 中 **`volume` 最大**的那一项的 `local_name` 作为该 ASIN 的代表品名；
+3. 若该项品名为空 → 退回第一个非空品名；
+4. 若仍为空 → **留空**。
+
+**第 4 条是刻意的：宁可留空，也不用标题顶替。**
+领星里"品名"对应的是 `品名/SKU` 那个字段，和标题是两个概念；混用会让下游
+按品名做的分组、透视、AI 分析全部失真。
+
+**实测覆盖率**：在有活动的行里 **99.8%（1107/1109）**；剩余 2 行是领星自己就没维护品名
+（`local_name` 与 `local_sku` 都是空串）。全量 45,789 行里覆盖率只有 60.4%——
+但这不影响报表，因为报表默认只保留有活动的行。
 
 ---
 

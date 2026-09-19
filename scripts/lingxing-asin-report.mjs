@@ -79,6 +79,33 @@ function categoryLevel2(raw) {
     return seg;
 }
 
+/**
+ * 【品名规则 —— 已与业务确认，勿改】
+ *
+ * 领星里三个"名字"字段含义完全不同：
+ *   · item_name                = Amazon 商品**标题**（英文长标题），**不是品名**
+ *   · 顶层 local_name          = 实测**恒为 null**，不可用
+ *   · price_list[].local_name  = **品名**（如 "戒指条-黑-放大镜-美规数字-1pcs"）← 要的是这个
+ *
+ * 一个 ASIN 可能对应多个 MSKU（price_list 多项），各自品名不同。
+ * 取 price_list 中 **volume 最大** 的那一项的品名作为该 ASIN 的代表品名；
+ * 若该项品名为空，退回第一个非空品名。
+ *
+ * 实测覆盖率：有活动的行里 99.8%（1107/1109），其余是领星自己就没维护品名。
+ * 这种情况**宁可留空，也不要用标题顶替** —— 标题不是品名，混用会让下游
+ * 按品名做的分组/透视全部失真。
+ */
+function productName(row) {
+    const pl = row.price_list || [];
+    if (pl.length) {
+        const best = pl.reduce((a, b) => (num(b?.volume) > num(a?.volume) ? b : a), pl[0]);
+        if (best?.local_name) return best.local_name;
+        const any = pl.find((p) => p?.local_name);
+        if (any) return any.local_name;
+    }
+    return row.local_name || '';
+}
+
 fs.mkdirSync(OUT_DIR, { recursive: true });
 fs.mkdirSync(CACHE_DIR, { recursive: true });
 
@@ -195,7 +222,7 @@ const COLUMNS = [
     { h: '店铺', get: (x) => (x.row.seller_store_countries || [])[0]?.seller_name || x.shop.name, fmt: 'text', w: 26 },
     { h: '国家', get: (x) => (x.row.seller_store_countries || [])[0]?.country || x.shop.country, fmt: 'text', w: 10 },
     { h: '负责人', get: (x) => (x.row.principal_names || [])[0] || '', fmt: 'text', w: 12 },
-    { h: '品名', get: (x) => x.row.item_name || x.row.local_name || '', fmt: 'text', w: 44 },
+    { h: '品名', get: (x) => productName(x.row), fmt: 'text', w: 40 },
     { h: '二级分类', get: (x) => categoryLevel2((x.row.categories || [])[0]), fmt: 'text', w: 16 },
     { h: '品牌', get: (x) => (x.row.brands || [])[0] || '', fmt: 'text', w: 14 },
     // 经营结果
