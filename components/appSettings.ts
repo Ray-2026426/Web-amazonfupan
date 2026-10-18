@@ -1,9 +1,11 @@
 export type AppTheme = 'light' | 'dark';
 export type TableFontSize = 'sm' | 'md' | 'lg';
+export type TableDensity = 'compact' | 'comfortable';
 
 export type AppSettings = {
     theme: AppTheme;
     tableFontSize: TableFontSize;
+    tableDensity: TableDensity;
 };
 
 const STORAGE_KEY = 'app_settings_v1';
@@ -11,6 +13,7 @@ const STORAGE_KEY = 'app_settings_v1';
 const DEFAULTS: AppSettings = {
     theme: 'light',
     tableFontSize: 'md',
+    tableDensity: 'comfortable',
 };
 
 function readInitialTheme(): AppTheme {
@@ -36,6 +39,7 @@ export function loadAppSettings(): AppSettings {
             return {
                 theme: p.theme === 'dark' || p.theme === 'light' ? p.theme : readInitialTheme(),
                 tableFontSize: p.tableFontSize === 'sm' || p.tableFontSize === 'lg' ? p.tableFontSize : 'md',
+                tableDensity: p.tableDensity === 'compact' ? 'compact' : 'comfortable',
             };
         }
     } catch {}
@@ -55,6 +59,7 @@ export function applyAppSettings(s: AppSettings) {
     if (s.theme === 'dark') root.classList.add('dark');
     else root.classList.remove('dark');
     root.dataset.tableFont = s.tableFontSize;
+    root.dataset.tableDensity = s.tableDensity;
 }
 
 export const TABLE_FONT_OPTIONS: { value: TableFontSize; label: string; px: number }[] = [

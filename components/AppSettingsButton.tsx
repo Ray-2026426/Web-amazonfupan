@@ -8,6 +8,7 @@ import {
     type AppSettings,
     type AppTheme,
     type TableFontSize,
+    type TableDensity,
 } from './appSettings';
 import { useEscClose } from './useEscClose';
 
@@ -34,6 +35,7 @@ export const AppSettingsButton: React.FC = () => {
 
     const setTheme = (theme: AppTheme) => setSettings((prev) => ({ ...prev, theme }));
     const setTableFontSize = (tableFontSize: TableFontSize) => setSettings((prev) => ({ ...prev, tableFontSize }));
+    const setTableDensity = (tableDensity: TableDensity) => setSettings((prev) => ({ ...prev, tableDensity }));
 
     const isDark = settings.theme === 'dark';
 
@@ -102,6 +104,12 @@ export const AppSettingsButton: React.FC = () => {
                                 ))}
                             </div>
                         </div>
+                        <div>
+                            <div className="mb-1.5 text-[11px] font-semibold text-slate-500">表格密度</div>
+                            <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                                {(['compact', 'comfortable'] as const).map(density => <button key={density} type="button" onClick={() => setTableDensity(density)} className={`flex-1 rounded-md py-1.5 text-[11px] font-semibold ${settings.tableDensity === density ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500'}`}>{density === 'compact' ? '紧凑' : '舒适'}</button>)}
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
@@ -112,7 +120,7 @@ export const AppSettingsButton: React.FC = () => {
                 title="总控设置"
                 aria-label="总控设置"
                 className={
-                    'flex h-9 w-9 items-center justify-center rounded-2xl border shadow-sm transition-all hover:scale-105 active:scale-95 ' +
+                    'flex h-9 w-9 items-center justify-center rounded-2xl border shadow-sm transition-colors active:scale-95 ' +
                     (isDark
                         ? 'border-[#30363d] bg-[#21262d] text-slate-400 hover:bg-[#30363d] hover:text-slate-200'
                         : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700')

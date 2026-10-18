@@ -96,7 +96,7 @@ export const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div role="dialog" aria-modal="true" aria-label="提示词设置" tabIndex={-1} className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
             <div
                 className={`bg-white w-full rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-slate-200 ${
                     showChatApiSettings ? 'max-w-3xl' : 'max-w-2xl'

@@ -448,7 +448,7 @@ const ClusteringSettingsModal = ({ isOpen, onClose, onSave, initialRules }: any)
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div role="dialog" aria-modal="true" aria-label="评论分析设置" tabIndex={-1} className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
             <div className="bg-white w-full max-w-4xl h-[80vh] rounded-xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
                 <div className="bg-slate-800 px-6 py-4 flex items-center justify-between text-white flex-shrink-0">
                     <h3 className="font-bold flex items-center gap-2"><Settings className="w-5 h-5" /> 标签聚类配置</h3>
@@ -540,7 +540,7 @@ const ExpertReportOverlay = ({ isOpen, onClose, onGenerate, report, isGenerating
     useEscClose(isOpen, onClose);
     if (!isOpen) return null;
     return (
-        <div className="fixed inset-0 z-[150] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
+        <div role="dialog" aria-modal="true" aria-label="评论分析详情" tabIndex={-1} className="fixed inset-0 z-[150] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
             <div className="bg-white w-full max-w-2xl max-h-[80vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
                 <PromptSettingsModal 
                     isOpen={isSettingsOpen}
@@ -810,7 +810,7 @@ export const ReviewAnalysisModal: React.FC<ReviewAnalysisModalProps> = ({ isOpen
         <>
             <ExpertReportOverlay isOpen={showReportOverlay} onClose={() => setShowReportOverlay(false)} onGenerate={generateAnalysis} report={aiInsight} isGenerating={isGeneratingAi} onReset={() => setAiInsight('')} />
             <ClusteringSettingsModal isOpen={isClusteringSettingsOpen} onClose={() => setIsClusteringSettingsOpen(false)} onSave={saveClusteringRules} initialRules={clusteringRules} />
-            <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
+            <div role="dialog" aria-modal="true" aria-label="评论分析" tabIndex={-1} className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
                 <div className="bg-slate-50 w-full h-full max-w-[95vw] max-h-[95vh] rounded-xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
                     <div className="bg-slate-900 px-6 py-4 flex items-center justify-between text-white flex-shrink-0">
                         <div className="flex items-center gap-3">

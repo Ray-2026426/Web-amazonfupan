@@ -14,6 +14,8 @@ import {
     UserRound,
 } from 'lucide-react';
 import { ActionItem, ActionStatus, BusinessIssue, BusinessIssueCategory, BusinessRule } from '../types';
+import { formatMoneyNoDecimals } from '../utils';
+import { SEVERITY_TONE, ACTION_STATUS_TONE } from '../utils/semantics';
 
 interface BusinessCommandCenterProps {
     issues: BusinessIssue[];
@@ -36,10 +38,11 @@ const categoryLabel: Record<BusinessIssueCategory, string> = {
     data: '数据',
 };
 
-const severityClass = {
-    critical: 'border-rose-200 bg-rose-50 text-rose-700',
-    warning: 'border-amber-200 bg-amber-50 text-amber-700',
-    info: 'border-sky-200 bg-sky-50 text-sky-700',
+// 严重度与动作状态统一走语义 token（utils/semantics.ts），避免与「涨跌/达成」混用同一套颜色。
+const severityClass: Record<BusinessIssue['severity'], string> = {
+    critical: SEVERITY_TONE.critical.chip,
+    warning: SEVERITY_TONE.warning.chip,
+    info: SEVERITY_TONE.info.chip,
 };
 
 const statusLabel: Record<ActionStatus, string> = {
@@ -50,10 +53,10 @@ const statusLabel: Record<ActionStatus, string> = {
 };
 
 const statusClass: Record<ActionStatus, string> = {
-    open: 'bg-amber-50 text-amber-700 border-amber-200',
-    doing: 'bg-sky-50 text-sky-700 border-sky-200',
-    done: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    ignored: 'bg-slate-100 text-slate-500 border-slate-200',
+    open: ACTION_STATUS_TONE.open,
+    doing: ACTION_STATUS_TONE.doing,
+    done: ACTION_STATUS_TONE.done,
+    ignored: ACTION_STATUS_TONE.ignored,
 };
 
 const getIssueAction = (actions: ActionItem[], issueId: string) =>
@@ -96,6 +99,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
         [issues, selectedIssueId],
     );
     const activeActions = actions.filter(action => action.status !== 'ignored');
+    const awaitingReview = actions.filter(action => action.status === 'done' && action.lastEvaluatedAt && !action.reviewedAt).length;
     const criticalCount = issues.filter(issue => issue.severity === 'critical').length;
     const warningCount = issues.filter(issue => issue.severity === 'warning').length;
 
@@ -117,7 +121,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
 
     if (isCollapsed) {
         return (
-            <section className="rounded-[24px] border border-slate-200 bg-white/85 px-4 py-3 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.35)] ring-1 ring-white/70">
+            <section className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 shadow-[0_18px_50px_-30px_rgba(15,23,42,0.35)] ring-1 ring-white/70">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-950 text-sky-300">
@@ -143,7 +147,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
     }
 
     return (
-        <section className="overflow-hidden rounded-[28px] border border-white/80 bg-white shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] ring-1 ring-slate-200/70">
+        <section className="overflow-hidden rounded-3xl border border-white/80 bg-white shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] ring-1 ring-slate-200/70">
             <div className="border-b border-slate-200 bg-slate-950 px-5 py-4 text-white">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
@@ -151,7 +155,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                             <Gauge className="h-5 w-5 text-sky-300" />
                         </div>
                         <div>
-                            <div className="text-sm font-bold tracking-[0.12em]">经营异常雷达</div>
+                            <div className="text-sm font-bold">经营异常雷达</div>
                             <div className="mt-1 text-xs text-slate-400">毛利额为核心目标，其余指标作为 KR 拆解到责任动作</div>
                         </div>
                     </div>
@@ -165,6 +169,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                         <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 font-semibold text-sky-100">
                             动作 {activeActions.length}
                         </span>
+                        {awaitingReview > 0 && <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 font-semibold text-amber-100">待复盘 {awaitingReview}</span>}
                         <button
                             type="button"
                             onClick={() => setCollapsed(true)}
@@ -177,8 +182,8 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(260px,0.9fr)_minmax(360px,1.35fr)_minmax(280px,0.95fr)]">
-                <div className="border-b border-slate-200 bg-slate-50/80 p-4 lg:border-b-0 lg:border-r">
+            <div className="grid grid-cols-1 2xl:grid-cols-[minmax(260px,0.9fr)_minmax(360px,1.35fr)_minmax(280px,0.95fr)]">
+                <div className="border-b border-slate-200 bg-slate-50/80 p-4 2xl:border-b-0 2xl:border-r">
                     <div className="mb-3 flex items-center justify-between">
                         <div className="flex items-center gap-2 text-sm font-bold text-slate-800">
                             <AlertTriangle className="h-4 w-4 text-amber-500" />
@@ -217,6 +222,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                                                 )}
                                             </div>
                                             <div className="mt-2 truncate text-sm font-bold text-slate-900">{issue.title}</div>
+                                            <div className="mt-1 text-xs font-semibold text-sky-800">{issue.estimatedGrossProfitImpact !== undefined ? `估算毛利影响 ${formatMoneyNoDecimals(issue.estimatedGrossProfitImpact)}` : '毛利影响待量化'}</div>
                                             <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{issue.evidence}</div>
                                         </div>
                                         <ArrowRight className={`mt-1 h-4 w-4 flex-shrink-0 ${isActive ? 'text-sky-500' : 'text-slate-300'}`} />
@@ -227,7 +233,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                     </div>
                 </div>
 
-                <div className="border-b border-slate-200 p-5 lg:border-b-0 lg:border-r">
+                <div className="border-b border-slate-200 p-5 2xl:border-b-0 2xl:border-r">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                             <div className="flex flex-wrap items-center gap-2">
@@ -258,6 +264,8 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                             <div className="text-xs font-bold text-slate-500">经营影响</div>
                             <p className="mt-2 text-sm leading-6 text-slate-800">{selectedIssue.impact}</p>
+                            <p className="mt-2 text-xs font-semibold text-sky-800">{selectedIssue.estimatedGrossProfitImpact !== undefined ? `估算毛利影响 ${formatMoneyNoDecimals(selectedIssue.estimatedGrossProfitImpact)}` : '毛利影响待量化'}</p>
+                            {selectedIssue.impactBasis && <p className="mt-1 text-xs text-slate-500">依据：{selectedIssue.impactBasis} · 可信度：{selectedIssue.confidence === 'high' ? '高' : selectedIssue.confidence === 'medium' ? '中' : '低'}</p>}
                         </div>
                     </div>
 
@@ -281,7 +289,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                                     <div className="rounded-2xl border border-white bg-white/80 p-3">
                                         <div className="flex flex-wrap items-center justify-between gap-2">
                                             <div className="text-sm font-bold text-slate-900">{step.label}</div>
-                                            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                            <span className="text-[11px] font-semibold text-slate-500">
                                                 {step.status === 'triggered' ? '已触发' : step.status === 'blocked' ? '缺数据' : '待核对'}
                                             </span>
                                         </div>
@@ -391,8 +399,37 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                                     </button>
                                 ))}
                             </div>
+                            {linkedAction.baselineGrossProfit !== undefined && <div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-700">
+                                <div>创建时毛利额：{formatMoneyNoDecimals(linkedAction.baselineGrossProfit)}</div>
+                                {linkedAction.latestGrossProfit !== undefined && <div className="mt-1">更新后同范围毛利额：{formatMoneyNoDecimals(linkedAction.latestGrossProfit)}（变化 {formatMoneyNoDecimals(linkedAction.latestGrossProfit - linkedAction.baselineGrossProfit)}）</div>}
+                                {linkedAction.lastEvaluatedAt && <div className="mt-1 text-slate-500">最近对比：{new Date(linkedAction.lastEvaluatedAt).toLocaleString('zh-CN')}</div>}
+                            </div>}
+                            {linkedAction.status === 'done' && <div className="mt-3 space-y-2">
+                                <label className="block text-xs font-semibold text-slate-700">复盘结论
+                                    <select value={linkedAction.resultType || ''} onChange={e => onUpdateAction(linkedAction.id, {resultType: e.target.value as ActionItem['resultType'], reviewedAt: Date.now()})} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm">
+                                        <option value="">选择结果</option><option value="effective">有效改善</option><option value="no_improvement">无改善</option><option value="false_alarm">规则误报</option><option value="observe">继续观察</option>
+                                    </select>
+                                </label>
+                                <label className="block text-xs font-semibold text-slate-700">原因与下一步
+                                    <textarea value={linkedAction.resultNote || ''} onChange={e => onUpdateAction(linkedAction.id, {resultNote: e.target.value})} rows={3} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" placeholder="记录处理结果、原因和下一步" />
+                                </label>
+                            </div>}
                         </div>
                     )}
+
+                    {awaitingReview > 0 && <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                        <div className="text-sm font-bold text-amber-900">数据更新后待复盘 · {awaitingReview}</div>
+                        <div className="mt-2 space-y-3">{actions.filter(action => action.status === 'done' && action.lastEvaluatedAt && !action.reviewedAt).map(action => <div key={action.id} className="rounded-xl border border-amber-100 bg-white p-3 text-xs text-slate-700">
+                            <div className="font-semibold">{action.title}</div>
+                            <div className="mt-1">毛利额：{formatMoneyNoDecimals(action.baselineGrossProfit ?? 0)} → {formatMoneyNoDecimals(action.latestGrossProfit ?? 0)}</div>
+                            <label className="mt-2 block">复盘结论
+                                <select value={action.resultType || ''} onChange={e => onUpdateAction(action.id, {resultType: e.target.value as ActionItem['resultType'], reviewedAt: e.target.value ? Date.now() : undefined})} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm">
+                                    <option value="">选择结果</option><option value="effective">有效改善</option><option value="no_improvement">无改善</option><option value="false_alarm">规则误报</option><option value="observe">继续观察</option>
+                                </select>
+                            </label>
+                            <label className="mt-2 block">原因与下一步<textarea value={action.resultNote || ''} onChange={e => onUpdateAction(action.id, {resultNote: e.target.value})} rows={2} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" /></label>
+                        </div>)}</div>
+                    </div>}
 
                     <div className="mt-5">
                         <button

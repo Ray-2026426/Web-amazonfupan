@@ -231,6 +231,7 @@ export interface AppMeta {
   filters: FilterState;
   dataStartDate?: string;
   dataEndDate?: string;
+  lastImportedAt?: number;
 }
 
 export interface FilterSnapshot {
@@ -360,6 +361,13 @@ export interface ActionItem {
     status: ActionStatus;
     createdAt: number;
     sourceRuleId: string;
+    baselineFilters?: FilterState;
+    baselineGrossProfit?: number;
+    latestGrossProfit?: number;
+    lastEvaluatedAt?: number;
+    resultType?: 'effective' | 'no_improvement' | 'false_alarm' | 'observe';
+    resultNote?: string;
+    reviewedAt?: number;
 }
 
 export interface BusinessIssue {
@@ -370,6 +378,9 @@ export interface BusinessIssue {
     severity: BusinessIssueSeverity;
     evidence: string;
     impact: string;
+    estimatedGrossProfitImpact?: number;
+    impactBasis?: string;
+    confidence?: 'high' | 'medium' | 'low';
     recommendation: string;
     suggestedOwner: string;
     suggestedDueDate: string;

@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, Suspense, lazy } from 'react';
 import { ActionItem, BusinessIssue, DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot, DataCoverage, AppMeta } from './types';
 import { 
   calculatePeriodDates, 
@@ -15,7 +15,7 @@ import {
   analyzeTargetCompleteness,
   getISOWeekDateRange,
   formatDate,
-  getCurrentWeekInfo,
+  formatMoneyNoDecimals,
   buildProductImageLookup,
   type ProductImageLookup,
 } from './utils';
@@ -24,22 +24,32 @@ import { DashboardOverview } from './components/DashboardOverview';
 import { PLTable, TrafficTable } from './components/TableRenderers';
 import { InventoryTable } from './components/InventoryTable';
 import { DataUploadModal, type DataUploadResult } from './components/DataUploadModal';
-import { resetTrendChartMetricsSelection } from './components/TrendChartModal';
+import { resetTrendChartMetricsSelection } from './components/trendSelection';
 import { UploadSlots, listMissingOptionalSlots } from './uploadFileClassifier';
-import { DetailAnalysisModal } from './components/DetailAnalysisModal';
-import { RefundAnalysisModal } from './components/RefundAnalysisModal';
-import { ProfitSimulatorModal } from './components/ProfitSimulatorModal';
-import { ReviewAnalysisModal } from './components/ReviewAnalysisModal';
-import { KeywordAnalysisModal } from './components/KeywordAnalysisModal'; 
-import { ChatBot } from './components/ChatBot';
+const DetailAnalysisModal = lazy(() => import('./components/DetailAnalysisModal').then(m => ({default: m.DetailAnalysisModal})));
+const RefundAnalysisModal = lazy(() => import('./components/RefundAnalysisModal').then(m => ({default: m.RefundAnalysisModal})));
+const ProfitSimulatorModal = lazy(() => import('./components/ProfitSimulatorModal').then(m => ({default: m.ProfitSimulatorModal})));
+const ReviewAnalysisModal = lazy(() => import('./components/ReviewAnalysisModal').then(m => ({default: m.ReviewAnalysisModal})));
+const KeywordAnalysisModal = lazy(() => import('./components/KeywordAnalysisModal').then(m => ({default: m.KeywordAnalysisModal})));
+const ChatBot = lazy(() => import('./components/ChatBot').then(m => ({default: m.ChatBot})));
 import { AppSettingsButton } from './components/AppSettingsButton';
 import { BusinessCommandCenter } from './components/BusinessCommandCenter';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
-import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard } from 'lucide-react';
-import { saveToDB, loadFromDB, clearDB } from './db';
+import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles } from 'lucide-react';
+import { saveToDB, loadFromDB, replaceImportedData } from './db';
 import { DEFAULT_BUSINESS_RULES, generateBusinessIssues, updateActionForIssue } from './utils/businessRules';
 
 const DEFAULT_DATA_START = '2025-01-01';
+const SAMPLE_HEADERS = '日期,ASIN,国家,店铺,负责人,销售额,销量,毛利润,广告花费,广告销售额,Sessions';
+const downloadImportTemplate = () => {
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const csv = `\uFEFF${SAMPLE_HEADERS}\n${monthStart},B0SAMPLE01,美国,示例店铺,张三,12000,80,2400,1800,6500,4200\n`;
+  const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
+  const link = document.createElement('a');
+  link.href = url; link.download = '月度业绩导入模板.csv'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
 
 const initialFilters: FilterState = {
   startDate: '',
@@ -54,68 +64,25 @@ const initialFilters: FilterState = {
   productNames: []
 };
 
-// --- World Clock Component ---
-const WorldClock = () => {
-    const [times, setTimes] = useState<Record<string, string>>({});
-    const [weekLine, setWeekLine] = useState<string>(() => {
-        const { week, rangeCompact } = getCurrentWeekInfo();
-        return `第 ${week} 周（${rangeCompact}）`;
-    });
-
-    useEffect(() => {
-        const updateTime = () => {
-            const now = new Date();
-            const { week, rangeCompact } = getCurrentWeekInfo();
-            setWeekLine(`第 ${week} 周（${rangeCompact}）`);
-
-            const format = (date: Date) => {
-                const m = date.getMonth() + 1;
-                const d = date.getDate();
-                const h = date.getHours().toString().padStart(2, '0');
-                const min = date.getMinutes().toString().padStart(2, '0');
-                return `${m}.${d} ${h}:${min}`;
-            };
-
-            const getTzTime = (tz: string) => new Date(now.toLocaleString("en-US", { timeZone: tz }));
-
-            setTimes({
-                CN: format(getTzTime("Asia/Shanghai")),
-                EU: format(getTzTime("Europe/Berlin")), // Using Germany as central EU time
-                US: format(getTzTime("America/Los_Angeles")) // Using PST/PDT (Amazon HQ)
-            });
-        };
-
-        updateTime();
-        const interval = setInterval(updateTime, 60000); // Update every minute
-        return () => clearInterval(interval);
-    }, []);
-
-    if (!times.CN) return null;
-
-    return (
-        <div className="hidden lg:flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white/70 px-3 py-2 text-[10px] font-mono font-medium text-slate-500 shadow-sm">
-            <div className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
-                <CalendarDays className="w-3 h-3" />
-                <span>{weekLine}</span>
-            </div>
-            <div className="w-px h-4 bg-slate-200"></div>
-            <div className="flex items-center gap-1.5">
-                <span className="font-bold text-rose-500">CN</span>
-                <span className="text-slate-700">{times.CN}</span>
-            </div>
-            <div className="w-px h-4 bg-slate-200"></div>
-            <div className="flex items-center gap-1.5">
-                <span className="font-bold text-sky-600">EU</span>
-                <span className="text-slate-700">{times.EU}</span>
-            </div>
-            <div className="w-px h-4 bg-slate-200"></div>
-            <div className="flex items-center gap-1.5">
-                <span className="font-bold text-violet-600">US</span>
-                <span className="text-slate-700">{times.US}</span>
-            </div>
-        </div>
-    );
+// 筛选 chip 的中文标签（此前直接渲染 countries / brands 等英文字段名）
+const FILTER_KEY_LABELS: Record<string, string> = {
+  countries: '国家',
+  shops: '店铺',
+  brands: '品牌',
+  managers: '负责人',
+  subCategories: '二级分类',
+  parentAsins: '父ASIN',
+  childAsins: '子ASIN',
+  productNames: '品名',
 };
+
+const REPORT_SECTIONS: { id: string; label: string }[] = [
+  { id: 'overview', label: '业绩概览' },
+  { id: 'issues', label: '优先事项' },
+  { id: 'pl', label: '利润表' },
+  { id: 'traffic', label: '流量广告' },
+  { id: 'inventory', label: '库存' },
+];
 
 const App: React.FC = () => {
   // Data States
@@ -138,9 +105,14 @@ const App: React.FC = () => {
   const [filters, setFilters] = useState<FilterState>(initialFilters);
   const [dataStartDate, setDataStartDate] = useState(DEFAULT_DATA_START);
   const [dataEndDate, setDataEndDate] = useState('');
+  const [lastImportedAt, setLastImportedAt] = useState<number | undefined>();
   const [isWeeklyMode, setIsWeeklyMode] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatLoaded, setChatLoaded] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isRestoringData, setIsRestoringData] = useState(true);
+  const [restoreFailed, setRestoreFailed] = useState(false);
+  const [persistenceError, setPersistenceError] = useState('');
   // Modal States
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailType, setDetailType] = useState<'PL' | 'Traffic' | 'Inventory'>('PL');
@@ -188,6 +160,7 @@ const App: React.FC = () => {
                       setFilters(meta.filters);
                       if (meta.dataStartDate) setDataStartDate(meta.dataStartDate);
                       if (meta.dataEndDate) setDataEndDate(meta.dataEndDate);
+                      if (meta.lastImportedAt) setLastImportedAt(meta.lastImportedAt);
                   } else if ((savedMeta as FilterState).startDate) {
                       setFilters(savedMeta as FilterState);
                   } else if (monthly && monthly.length > 0) {
@@ -223,6 +196,8 @@ const App: React.FC = () => {
 
           } catch (e) {
               console.error("Error restoring data from DB", e);
+              setRestoreFailed(true);
+              setPersistenceError(`本地数据读取失败：${String(e)}。请勿重新导入以免覆盖原有数据。`);
           } finally {
               setIsRestoringData(false);
           }
@@ -237,100 +212,45 @@ const App: React.FC = () => {
               filters,
               dataStartDate,
               dataEndDate,
+              lastImportedAt,
           };
-          saveToDB('meta', meta);
+          saveToDB('meta', meta).catch(e => setPersistenceError(`筛选设置保存失败：${String(e)}`));
       }
-  }, [filters, dataStartDate, dataEndDate, isRestoringData, performanceData]);
+  }, [filters, dataStartDate, dataEndDate, lastImportedAt, isRestoringData, performanceData]);
 
   useEffect(() => {
       if (!isRestoringData) {
-          saveToDB('business_actions', businessActions);
+          saveToDB('business_actions', businessActions).catch(e => setPersistenceError(`行动记录保存失败：${String(e)}`));
       }
   }, [businessActions, isRestoringData]);
 
   // --- Handlers ---
   const handleDataUpload = async (slots: UploadSlots, coverage: DataCoverage): Promise<DataUploadResult | undefined> => {
     if (!slots.monthly) return undefined;
-    await clearDB();
-    resetTrendChartMetricsSelection();
-    setSearchTermData([]);
-
-    setDataStartDate(coverage.dataStartDate || DEFAULT_DATA_START);
-    setDataEndDate(coverage.dataEndDate);
-
     const debugs: DataUploadResult['reports'] = [];
-
     const monthlyRes = await parseMonthlyPerformance(slots.monthly);
-    setPerformanceData(monthlyRes.data);
-    saveToDB('monthly', monthlyRes.data);
+    if (!monthlyRes.data.length) throw new Error('月度业绩表没有有效数据，请检查表头和日期。');
+    for (const field of ['sales_amount', 'sales_quantity', 'gross_profit', 'child_asin']) {
+        if (!monthlyRes.debug.mappedColumns[field]) throw new Error(`月度业绩表缺少必需字段：${field}。请先下载模板核对表头。`);
+    }
     debugs.push(monthlyRes.debug);
+    const parseOptional = async <T,>(file: File | null, parser: (file: File) => Promise<{data: T[]; debug: DataUploadResult['reports'][number]}>) => {
+        if (!file) return [] as T[];
+        const result = await parser(file);
+        if (!result.data.length) throw new Error(`${file.name} 没有有效数据，请检查表头。`);
+        debugs.push(result.debug);
+        return result.data;
+    };
+    const newWeekly = await parseOptional(slots.weekly, parseWeeklyPerformance);
+    const parsedTargets = await parseOptional(slots.target, parseTargetData);
+    const newTargets = enrichTargetData(parsedTargets, monthlyRes.data);
+    const newInventory = await parseOptional(slots.inventory, parseInventoryData);
+    const newRefunds = await parseOptional(slots.refund, parseRefundData);
+    const newReviews = await parseOptional(slots.review, parseReviewData);
+    const newImages = await parseOptional(slots.productImages, parseProductImageData);
 
-    // 导入后统一先看月度仪表盘，避免「周度」开关仍打开但周表未上传时整页无数据
-    setIsWeeklyMode(false);
-
-    if (slots.weekly) {
-        const weeklyRes = await parseWeeklyPerformance(slots.weekly);
-        setWeeklyData(weeklyRes.data);
-        saveToDB('weekly', weeklyRes.data);
-        debugs.push(weeklyRes.debug);
-    } else {
-        setWeeklyData([]);
-        saveToDB('weekly', []);
-    }
-
-    if (slots.target) {
-        const targetRes = await parseTargetData(slots.target);
-        const enrichedTargets = enrichTargetData(targetRes.data, monthlyRes.data);
-        setTargetData(enrichedTargets);
-        saveToDB('targets', enrichedTargets);
-        debugs.push(targetRes.debug);
-    } else {
-        setTargetData([]);
-        saveToDB('targets', []);
-    }
-
-    if (slots.inventory) {
-        const invRes = await parseInventoryData(slots.inventory);
-        setInventoryData(invRes.data);
-        saveToDB('inventory', invRes.data);
-        debugs.push(invRes.debug);
-    } else {
-        setInventoryData([]);
-        saveToDB('inventory', []);
-    }
-
-    if (slots.refund) {
-        const refRes = await parseRefundData(slots.refund);
-        setRefundData(refRes.data);
-        saveToDB('refunds', refRes.data);
-        debugs.push(refRes.debug);
-    } else {
-        setRefundData([]);
-        saveToDB('refunds', []);
-    }
-
-    if (slots.review) {
-        const revRes = await parseReviewData(slots.review);
-        setReviewData(revRes.data);
-        saveToDB('reviews', revRes.data);
-        debugs.push(revRes.debug);
-    } else {
-        setReviewData([]);
-        saveToDB('reviews', []);
-    }
-
-    if (slots.productImages) {
-        const imgRes = await parseProductImageData(slots.productImages);
-        setProductImageData(imgRes.data);
-        saveToDB('product_images', imgRes.data);
-        debugs.push(imgRes.debug);
-    } else {
-        // 用户这次没上传图片表 → 清空图片，不保留上次
-        setProductImageData([]);
-        saveToDB('product_images', []);
-    }
-
-    if (monthlyRes.data.length > 0) {
+    let newFilters = filters;
+    {
         const dates = monthlyRes.data.map(d => d.date).sort();
         const lastDate = dates[dates.length - 1];
         const [y, m] = lastDate.split('-').map(Number);
@@ -339,26 +259,65 @@ const App: React.FC = () => {
 
         const fmt = (d: Date) => `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
 
-        const newFilters = {
+        newFilters = {
             ...initialFilters,
             startDate: fmt(lastMonthStart),
             endDate: fmt(lastMonthEnd)
         };
-        setFilters(newFilters);
-        const meta: AppMeta = {
-            filters: newFilters,
-            dataStartDate: coverage.dataStartDate || DEFAULT_DATA_START,
-            dataEndDate: coverage.dataEndDate,
-        };
-        saveToDB('meta', meta);
     }
-
-    // 不在此处关弹窗：先展示解析结果，用户点「开始分析」再关，避免与子表状态更新不同步
+    const nextMeta: AppMeta = {
+        filters: newFilters,
+        dataStartDate: coverage.dataStartDate || DEFAULT_DATA_START,
+        dataEndDate: coverage.dataEndDate,
+        lastImportedAt: Date.now(),
+    };
     return {
         reports: debugs,
         missingOptional: listMissingOptionalSlots(slots),
         unrecognizedNames: [],
+        commit: async () => {
+            const evaluatedActions = businessActions.map(action => {
+                const f = action.baselineFilters;
+                if (!f?.startDate || !f.endDate || action.baselineGrossProfit === undefined) return action;
+                const rows = filterData(monthlyRes.data, calculatePeriodDates(f.startDate, f.endDate).current, f);
+                if (!rows.length) return action;
+                return { ...action, latestGrossProfit: aggregateData(rows).gross_profit, lastEvaluatedAt: Date.now() };
+            });
+            await replaceImportedData({ monthly: monthlyRes.data, weekly: newWeekly, targets: newTargets,
+                inventory: newInventory, refunds: newRefunds, reviews: newReviews,
+                product_images: newImages, meta: nextMeta, business_actions: evaluatedActions });
+            setPersistenceError('');
+            resetTrendChartMetricsSelection();
+            setSearchTermData([]);
+            setPerformanceData(monthlyRes.data);
+            setWeeklyData(newWeekly);
+            setTargetData(newTargets);
+            setInventoryData(newInventory);
+            setRefundData(newRefunds);
+            setReviewData(newReviews);
+            setProductImageData(newImages);
+            setBusinessActions(evaluatedActions);
+            setIsWeeklyMode(false);
+            setFilters(newFilters);
+            setDataStartDate(nextMeta.dataStartDate);
+            setDataEndDate(nextMeta.dataEndDate);
+            setLastImportedAt(nextMeta.lastImportedAt);
+        },
     };
+  };
+
+  const handleLoadSample = async () => {
+      const now = new Date();
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const previousMonth = `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, '0')}-01`;
+      const csv = `\uFEFF${SAMPLE_HEADERS}\n${previousMonth},B0SAMPLE01,美国,示例店铺,张三,10500,70,2100,1600,5700,3800\n${currentMonth},B0SAMPLE01,美国,示例店铺,张三,12000,80,2400,1800,6500,4200\n`;
+      const file = new File([csv], '月度业绩脱敏样例.csv', {type: 'text/csv'});
+      const slots: UploadSlots = { monthly: file, weekly: null, target: null, inventory: null, refund: null, review: null, productImages: null };
+      try {
+          const prepared = await handleDataUpload(slots, {dataStartDate: previousMonth, dataEndDate: formatDate(now)});
+          await prepared?.commit();
+      } catch (e) { setPersistenceError(`样例加载失败：${String(e)}`); }
   };
 
   const handleOpenCalculator = (product?: string, country?: string) => {
@@ -372,7 +331,9 @@ const App: React.FC = () => {
   };
 
   const handleCreateAction = (issue: BusinessIssue) => {
-      setBusinessActions(prev => updateActionForIssue(prev, issue));
+      setBusinessActions(prev => updateActionForIssue(prev, issue).map(action => action.issueId === issue.id && !action.baselineFilters
+          ? { ...action, baselineFilters: {...filters}, baselineGrossProfit: processedData?.current.gross_profit }
+          : action));
   };
 
   const handleUpdateAction = (actionId: string, patch: Partial<ActionItem>) => {
@@ -484,8 +445,33 @@ const App: React.FC = () => {
       });
   }, [processedData, isWeeklyMode]);
 
+  // --- Scroll spy：滚动时高亮当前模块，避免长页面丢失位置感 ---
+  const mainRef = useRef<HTMLElement | null>(null);
+  const [activeSection, setActiveSection] = useState('overview');
+
+  useEffect(() => {
+      if (!processedData) return;
+      const root = mainRef.current;
+      if (!root || typeof IntersectionObserver === 'undefined') return;
+      const els = REPORT_SECTIONS
+          .map(({ id }) => root.querySelector<HTMLElement>(`#${id}`))
+          .filter((el): el is HTMLElement => Boolean(el));
+      if (!els.length) return;
+      const observer = new IntersectionObserver((entries) => {
+          const visible = entries
+              .filter(entry => entry.isIntersecting)
+              .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          const next = visible[0]?.target.id;
+          if (next) setActiveSection(next);
+      }, { root, rootMargin: '-20% 0px -65% 0px', threshold: 0 });
+      els.forEach(el => observer.observe(el));
+      return () => observer.disconnect();
+  }, [processedData]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#e0f2fe_0%,#eff6ff_22%,#f8fafc_52%,#f8fafc_100%)] font-sans text-slate-900">
+      {sidebarOpen && <button type="button" aria-label="关闭筛选侧栏" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-slate-950/50 xl:hidden" />}
+      <div className={`fixed inset-y-0 left-0 z-40 transition-transform xl:relative xl:z-20 xl:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       <SidebarFilters 
         data={isWeeklyMode ? weeklyData : performanceData} 
         inventoryData={inventoryData}
@@ -496,17 +482,20 @@ const App: React.FC = () => {
         isWeeklyMode={isWeeklyMode}
         onLoadSnapshot={handleLoadSnapshot}
       />
+      </div>
       
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* Top Bar */}
-        <header className="relative z-10 mx-4 mt-4 flex flex-shrink-0 items-center justify-between rounded-[28px] border border-white/70 bg-white/85 px-6 py-4 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+        <header className="relative z-10 mx-3 mt-3 flex flex-shrink-0 flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/70 bg-white/85 px-4 py-3 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
             <div className="flex items-center gap-5">
+                <button type="button" aria-label={sidebarOpen ? '关闭筛选侧栏' : '打开筛选侧栏'} onClick={() => setSidebarOpen(v => !v)} className="rounded-xl border border-slate-200 p-2 text-slate-700 xl:hidden">{sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}</button>
                 <div className="flex items-center gap-3">
                     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0f172a_0%,#2563eb_100%)] text-white shadow-lg shadow-sky-500/20">
                         <LayoutDashboard className="w-5 h-5" />
                     </div>
+                    <span className="hidden text-sm font-bold text-slate-900 sm:inline">亚马逊业绩复盘</span>
                 </div>
-                <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/90 p-1">
+                <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/90 p-1">
                     <button 
                         onClick={() => handleSetWeeklyMode(false)}
                         className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${!isWeeklyMode ? 'bg-white text-sky-700 shadow-sm ring-1 ring-sky-100' : 'text-slate-500 hover:text-slate-700'}`}
@@ -522,15 +511,25 @@ const App: React.FC = () => {
                 </div>
             </div>
             
-            <div className="flex items-center gap-3">
-                <WorldClock />
-                <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block"></div>
+            <div className="flex items-center gap-2 sm:gap-3">
+                <div className="hidden items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-slate-600 lg:flex">
+                    <span className="flex items-center gap-1.5">
+                        <CalendarDays className="h-3 w-3" />
+                        {isWeeklyMode ? '周度' : '月度'} · {filters.startDate || '--'} 至 {filters.endDate || '--'}
+                    </span>
+                    <span className="h-4 w-px bg-slate-200" />
+                    <span>数据截至 {dataEndDate || '未标注'}</span>
+                    <span className="h-4 w-px bg-slate-200" />
+                    <span>更新 {lastImportedAt ? new Date(lastImportedAt).toLocaleString('zh-CN') : '未记录'}</span>
+                </div>
 
                 <AppSettingsButton />
 
                 <button 
                     onClick={() => setShowUploadModal(true)}
-                    className="flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#0284c7_0%,#2563eb_100%)] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-sky-500/20 transition-all hover:brightness-110 active:scale-95"
+                    disabled={restoreFailed}
+                    title={restoreFailed ? '本地数据读取失败，刷新并排查后再导入' : undefined}
+                    className="flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#0284c7_0%,#2563eb_100%)] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-sky-500/20 transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                     <FileSpreadsheet className="w-4 h-4" />
                     {performanceData.length > 0 ? '更新数据源' : '导入数据源'}
@@ -539,19 +538,72 @@ const App: React.FC = () => {
         </header>
 
         {/* Scrollable Content */}
-        <main className="flex-1 overflow-y-auto p-6 custom-scroll">
+        <main ref={mainRef} className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">
+            {persistenceError && <div role="alert" className="mx-auto mb-3 flex max-w-[1680px] items-center justify-between rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"><span>{persistenceError}</span><button type="button" onClick={() => setPersistenceError('')} className="ml-3 font-bold">关闭</button></div>}
             {isRestoringData ? (
-                <div className="flex flex-col items-center justify-center rounded-[28px] border border-white/80 bg-white/80 py-24 text-slate-400 shadow-[0_24px_60px_-35px_rgba(15,23,42,0.3)] backdrop-blur-xl">
+                <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/80 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
                     <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
                     <p className="text-lg font-semibold text-slate-700">正在恢复数据...</p>
                     <p className="mt-1 text-sm text-slate-500">从本地缓存读取中</p>
                 </div>
             ) : (
                 <div className="max-w-[1680px] mx-auto space-y-6 pb-20">
+                    {processedData && <section className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm" aria-label="当前分析范围">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <div className="text-xs font-semibold text-slate-500">当前分析范围</div>
+                                <div className="mt-1 text-sm font-bold text-slate-900">{isWeeklyMode ? '周度' : '月度'} · {filters.startDate} 至 {filters.endDate}</div>
+                                <div className="mt-1 text-xs text-slate-500">数据截至 {dataEndDate || '未标注'} · 最近导入 {lastImportedAt ? new Date(lastImportedAt).toLocaleString('zh-CN') : '未记录'} · 本期 {processedData.currentRows.length} 行 · {processedData.warnings.length} 条完整性提示</div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                                {Object.entries(filters).filter(([key, value]) => !['startDate', 'endDate'].includes(key) && Array.isArray(value) && value.length > 0).map(([key, value]) => {
+                                    const vals = value as string[];
+                                    const label = FILTER_KEY_LABELS[key] || key;
+                                    const noneSelected = vals.includes('__NONE__');
+                                    const summary = noneSelected ? '未选' : `${vals.slice(0, 2).join('、')}${vals.length > 2 ? ` 等${vals.length}项` : ''}`;
+                                    return (
+                                        <span key={key} className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 font-medium text-sky-800">
+                                            {label}：{summary}
+                                            <button
+                                                type="button"
+                                                aria-label={`移除${label}筛选`}
+                                                onClick={() => setFilters(prev => ({ ...prev, [key]: [] } as FilterState))}
+                                                className="rounded-full p-0.5 text-sky-600 transition-colors hover:bg-sky-100"
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                        </span>
+                                    );
+                                })}
+                                <button type="button" onClick={() => setFilters(prev => ({...initialFilters, startDate: prev.startDate, endDate: prev.endDate}))} className="rounded-full border border-slate-200 px-2.5 py-1 text-slate-600 hover:bg-slate-50">清除维度筛选</button>
+                            </div>
+                        </div>
+                        {processedData.target.gross_profit > 0 && <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-700">毛利额距目标 <strong className="tabular-nums text-rose-700">{formatMoneyNoDecimals(Math.max(0, processedData.target.gross_profit - processedData.current.gross_profit))}</strong>{!isWeeklyMode && processedData.pacingRatio > 0 && processedData.pacingRatio < 1 && <> · 按当前进度预计期末 <strong className="tabular-nums">{formatMoneyNoDecimals(processedData.current.gross_profit / processedData.pacingRatio)}</strong></>}</p>}
+                        {businessIssues.some(issue => issue.severity !== 'info') && (
+                            <a href="#issues" className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-xs font-semibold">
+                                <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-700">严重 {businessIssues.filter(issue => issue.severity === 'critical').length}</span>
+                                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">预警 {businessIssues.filter(issue => issue.severity === 'warning').length}</span>
+                                <span className="text-sky-700">查看优先事项与建议动作 →</span>
+                            </a>
+                        )}
+                    </section>}
+                    {processedData && <nav aria-label="报表模块" className="sticky top-0 z-20 -mx-1 flex gap-2 overflow-x-auto whitespace-nowrap rounded-2xl bg-white/90 px-1 py-2 text-xs font-semibold text-slate-600 backdrop-blur">
+                        {REPORT_SECTIONS.map(({ id, label }) => (
+                            <a
+                                key={id}
+                                href={`#${id}`}
+                                aria-current={activeSection === id ? 'true' : undefined}
+                                className={`rounded-full border px-3 py-1.5 transition-colors ${activeSection === id ? 'border-sky-500 bg-sky-600 text-white' : 'border-slate-200 bg-white hover:border-sky-300 hover:text-sky-700'}`}
+                            >
+                                {label}
+                            </a>
+                        ))}
+                    </nav>}
+
                     
                     {/* 1. Overview Cards */}
                     {processedData && (
-                        <DashboardOverview 
+                        <section id="overview"><DashboardOverview 
                             current={processedData.current} 
                             target={processedData.target} 
                             isWeeklyMode={isWeeklyMode}
@@ -559,11 +611,11 @@ const App: React.FC = () => {
                             filters={filters}
                             targetRows={targetData}
                             pacingRatio={processedData.pacingRatio}
-                        />
+                        /></section>
                     )}
 
                     {processedData && (
-                        <BusinessCommandCenter
+                        <section id="issues"><BusinessCommandCenter
                             issues={businessIssues}
                             rules={DEFAULT_BUSINESS_RULES}
                             actions={businessActions}
@@ -573,51 +625,64 @@ const App: React.FC = () => {
                             onOpenRefundAnalysis={() => handleOpenRefundAnalysis()}
                             onOpenReviewAnalysis={() => setReviewModalOpen(true)}
                             onOpenKeywordAnalysis={() => setKeywordModalOpen(true)}
-                        />
+                        /></section>
                     )}
 
                     {/* 2. PL Table */}
                     {processedData && (
-                        <PLTable 
+                        <section id="pl"><PLTable 
                             current={processedData.current}
                             last={processedData.last}
                             year={processedData.year}
                             target={processedData.target}
+                            rawData={isWeeklyMode ? weeklyData : performanceData}
+                            filters={filters}
+                            isWeeklyMode={isWeeklyMode}
+                            targetRows={targetData}
                             onOpenDetail={() => { setDetailType('PL'); setDetailModalOpen(true); }}
                             onOpenCalculator={() => handleOpenCalculator()}
                             onOpenRefundAnalysis={() => handleOpenRefundAnalysis()}
                             onOpenReviewAnalysis={() => setReviewModalOpen(true)}
-                        />
+                        /></section>
                     )}
 
                     {/* 3. Traffic Table */}
                     {processedData && (
-                        <TrafficTable 
+                        <section id="traffic"><TrafficTable 
                             current={processedData.current}
                             last={processedData.last}
                             year={processedData.year}
                             target={processedData.target}
+                            rawData={isWeeklyMode ? weeklyData : performanceData}
+                            filters={filters}
+                            isWeeklyMode={isWeeklyMode}
+                            targetRows={targetData}
                             onOpenDetail={() => { setDetailType('Traffic'); setDetailModalOpen(true); }}
                             onOpenKeywordAnalysis={() => setKeywordModalOpen(true)}
-                        />
+                        /></section>
                     )}
 
                     {/* 4. Inventory Table */}
                     {processedData && (
-                        <InventoryTable 
+                        <section id="inventory"><InventoryTable 
                             data={processedData.inventory} 
                             inventoryRows={processedData.invRows}
                             onOpenDetail={() => { setDetailType('Inventory'); setDetailModalOpen(true); }}
-                        />
+                        /></section>
                     )}
 
                     {!processedData && (
-                        <div className="flex flex-col items-center justify-center rounded-[28px] border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_60px_-35px_rgba(15,23,42,0.3)] backdrop-blur-xl">
-                            <div className="mb-5 rounded-[24px] bg-sky-50 p-6 text-sky-300 ring-1 ring-sky-100">
+                        <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+                            <div className="mb-5 rounded-2xl bg-sky-50 p-6 text-sky-300 ring-1 ring-sky-100">
                                 <FileSpreadsheet className="w-12 h-12" />
                             </div>
-                            <p className="text-lg font-semibold text-slate-700">暂无数据</p>
-                            <p className="mt-1 text-sm text-slate-500">请点击右上角导入 Excel 数据源</p>
+                            <p className="text-lg font-semibold text-slate-700">{restoreFailed ? '本地数据暂时无法读取' : performanceData.length ? '当前选择无数据' : '暂无数据'}</p>
+                            <p className="mt-1 text-sm text-slate-500">{restoreFailed ? '请检查浏览器存储权限后刷新页面' : performanceData.length ? '请调整分析周期或切换月度视图' : '可先加载样例，也可导入自己的数据'}</p>
+                            {!restoreFailed && !performanceData.length && <div className="mt-5 flex flex-wrap justify-center gap-2">
+                                <button type="button" onClick={downloadImportTemplate} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">下载模板</button>
+                                <button type="button" onClick={handleLoadSample} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">加载脱敏样例</button>
+                                <button type="button" onClick={() => setShowUploadModal(true)} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white">导入自己的数据</button>
+                            </div>}
                         </div>
                     )}
                 </div>
@@ -635,8 +700,8 @@ const App: React.FC = () => {
             }}
         />
 
-        {processedData && (
-            <DetailAnalysisModal 
+        {processedData && detailModalOpen && (
+            <Suspense fallback={<div role="status" className="fixed inset-0 z-[140] grid place-items-center bg-slate-950/40 text-white">正在加载详细数据…</div>}><DetailAnalysisModal 
                 isOpen={detailModalOpen}
                 onClose={() => setDetailModalOpen(false)}
                 type={detailType}
@@ -655,52 +720,54 @@ const App: React.FC = () => {
                 performanceWeekly={weeklyData}
                 productImageLookup={productImageLookup}
                 dataEndDate={dataEndDate}
-            />
+            /></Suspense>
         )}
 
-        <RefundAnalysisModal 
+        {refundModalOpen && <Suspense fallback={null}><RefundAnalysisModal 
             isOpen={refundModalOpen}
             onClose={() => { setRefundModalOpen(false); setRefundOverrideFilters(null); }}
             refundData={refundData}
             rawPerformance={performanceData}
             onDataChange={setRefundData}
             initialFilters={refundOverrideFilters ? { ...filters, ...refundOverrideFilters } : filters}
-        />
+        /></Suspense>}
 
-        <ReviewAnalysisModal 
+        {reviewModalOpen && <Suspense fallback={null}><ReviewAnalysisModal 
             isOpen={reviewModalOpen}
             onClose={() => setReviewModalOpen(false)}
             reviewData={reviewData}
             rawPerformance={performanceData}
             onDataChange={setReviewData}
             initialFilters={filters}
-        />
+        /></Suspense>}
 
-        <KeywordAnalysisModal 
+        {keywordModalOpen && <Suspense fallback={null}><KeywordAnalysisModal 
             isOpen={keywordModalOpen}
             onClose={() => setKeywordModalOpen(false)}
             data={searchTermData}
             onDataChange={setSearchTermData}
-        />
+        /></Suspense>}
 
-        <ProfitSimulatorModal 
+        {calculatorModalOpen && <Suspense fallback={null}><ProfitSimulatorModal 
             isOpen={calculatorModalOpen}
             onClose={() => setCalculatorModalOpen(false)}
             rawData={performanceData}
             filters={filters}
             initialProduct={calculatorParams.product}
             initialCountry={calculatorParams.country}
-        />
+        /></Suspense>}
 
         {/* Chat Bot Integration with All Data Sources */}
-        <ChatBot 
+        {!chatLoaded && <button type="button" aria-label="打开 AI 顾问" onClick={() => setChatLoaded(true)} className="fixed bottom-6 right-6 z-50 rounded-full bg-blue-600 p-4 text-white shadow-xl hover:bg-blue-700"><Sparkles className="h-6 w-6" /></button>}
+        {chatLoaded && <Suspense fallback={<div role="status" className="fixed bottom-6 right-6 z-50 rounded-full bg-blue-600 p-4 text-white">加载中…</div>}><ChatBot 
             data={processedData} 
             inventory={processedData?.inventory || null}
             refunds={refundData}
             filters={filters} 
             rawPerformance={isWeeklyMode ? weeklyData : performanceData}
             rawInventory={inventoryData}
-        />
+            initialOpen
+        /></Suspense>}
       </div>
     </div>
   );

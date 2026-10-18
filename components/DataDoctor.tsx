@@ -86,7 +86,7 @@ export const DataDoctor: React.FC<DataDoctorProps> = ({ isOpen, onClose, monthly
     );
 
     return (
-        <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
+        <div role="dialog" aria-modal="true" aria-label="数据诊断" tabIndex={-1} className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
             <div className="bg-white w-full max-w-2xl h-[80vh] rounded-xl shadow-2xl overflow-hidden flex flex-col">
                 <div className="bg-slate-800 px-6 py-4 flex items-center justify-between text-white flex-shrink-0">
                     <div className="flex items-center gap-2">

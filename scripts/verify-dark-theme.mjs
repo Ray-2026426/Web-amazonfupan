@@ -252,18 +252,18 @@ console.log('\n[4/5] 结构与冲突');
     balance(themeCss, 'dark-theme.css');
     balance(indexCss, 'index.css');
 
-    // 覆盖表必须真的被加载：index.html 里要有指向它的 <link>，
-    // 且必须排在 index.css 之后（同为 !important 时后加载者胜出）。
-    const htmlPath = path.join(ROOT, 'index.html');
-    const html = fs.readFileSync(htmlPath, 'utf8');
-    const iIndex = html.indexOf('/index.css');
-    const iDark = html.indexOf('/dark-theme.css');
+    // 覆盖表必须真的被加载：改用构建期 Tailwind 后，样式由 index.tsx 以 import 引入，
+    // 因此检查入口文件的引入与顺序（dark-theme.css 必须排在 index.css 之后）。
+    const entryPath = path.join(ROOT, 'index.tsx');
+    const entry = fs.readFileSync(entryPath, 'utf8');
+    const iIndex = entry.indexOf("'./index.css'");
+    const iDark = entry.indexOf("'./dark-theme.css'");
     if (iDark === -1) {
-        fail('index.html 没有引入 dark-theme.css', '覆盖表不会被加载，暗色模式等于没修');
+        fail('index.tsx 没有引入 dark-theme.css', '覆盖表不会被加载，暗色模式等于没修');
     } else if (iIndex === -1 || iDark < iIndex) {
         fail('dark-theme.css 的引入顺序不对', '应排在 index.css 之后');
     } else {
-        ok('index.html 引入了 dark-theme.css', '且顺序在 index.css 之后');
+        ok('index.tsx 引入了 dark-theme.css', '且顺序在 index.css 之后');
     }
 
     const conflicts = [];

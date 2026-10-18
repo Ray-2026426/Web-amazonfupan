@@ -182,7 +182,7 @@ const SettingsPanel = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[150] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
+        <div role="dialog" aria-modal="true" aria-label="关键词分析" tabIndex={-1} className="fixed inset-0 z-[150] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
                 <div className="bg-slate-800 px-4 py-3 flex justify-between items-center text-white flex-shrink-0">
                     <h3 className="font-bold flex items-center gap-2"><Sliders className="w-4 h-4" /> 分析标准配置</h3>
@@ -614,7 +614,7 @@ export const KeywordAnalysisModal: React.FC<KeywordAnalysisModalProps> = ({ isOp
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
+        <div role="dialog" aria-modal="true" aria-label="关键词分析详情" tabIndex={-1} className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
             <SettingsPanel 
                 isOpen={isSettingsOpen} 
                 onClose={() => setIsSettingsOpen(false)} 

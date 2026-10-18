@@ -1,5 +1,7 @@
 # 依赖
 node_modules/
+node_modules.*/
+.pnpm-store/
 
 # 构建产物
 dist/
@@ -39,3 +41,10 @@ reports/
 # 推送脚本用的凭据文件（绝不能提交）
 .github-token
 *.token
+
+# 本地临时/备份文件
+*.bak
+.*.bak
+
+# 本地生成的比对/诊断报告
+repo-diff-report.txt

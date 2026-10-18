@@ -2072,7 +2072,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
     };
 
     return (
-        <div className={`fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200 ${isOpen ? '' : 'hidden'}`}>
+        <div role="dialog" aria-modal="true" aria-label="详细数据分析" tabIndex={-1} className={`fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200 ${isOpen ? '' : 'hidden'}`}>
              <div className="bg-white w-full max-w-[95vw] h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
                 <div className="bg-slate-800 px-6 py-4 flex items-center justify-between text-white flex-shrink-0">
                     <div className="flex items-center gap-3">

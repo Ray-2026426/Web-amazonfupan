@@ -63,9 +63,9 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ data, inventoryR
     }, [inv, combinedQty]);
 
     return (
-        <div className="overflow-hidden rounded-3xl border border-white/80 bg-white shadow-[0_24px_60px_-35px_rgba(15,23,42,0.35)] ring-1 ring-slate-200/70">
+        <div className="overflow-hidden rounded-3xl border border-white/80 bg-white shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] ring-1 ring-slate-200/70">
             <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 bg-[linear-gradient(135deg,#0f172a_0%,#172554_100%)] px-5 py-4 text-white">
-                <div className="mt-1 flex flex-wrap items-center gap-3 text-sm font-bold tracking-[0.08em]">
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-sm font-bold">
                     <span>表格 3：FBA库存与库龄结构</span>
                     {snapshotDate && (
                         <div className="flex items-center gap-1.5 rounded-2xl border border-white/20 bg-white/10 px-2.5 py-1">
@@ -94,7 +94,7 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ data, inventoryR
                             {columns.map((col, idx) => (
                                 <th
                                     key={idx}
-                                    className="min-w-[168px] border-r border-slate-100 px-4 py-3.5 text-right text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 last:border-0"
+                                    className={`min-w-[168px] border-r border-slate-100 px-4 py-3.5 text-right text-[11px] font-semibold text-slate-500 last:border-0 ${idx === 0 ? 'sticky left-0 z-10 bg-slate-50' : ''}`}
                                 >
                                     {col.label}
                                 </th>
@@ -104,20 +104,20 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ data, inventoryR
                     <tbody>
                         <tr className="bg-white">
                             {columns.map((col, idx) => (
-                                <td key={idx} className="border-r border-slate-100 px-4 py-4 align-top text-right last:border-0 even:bg-slate-50/35">
-                                    <div className="font-mono text-lg font-bold tracking-tight text-slate-900">{formatNumber(col.qty)}</div>
-                                    <div className="mb-2 font-mono text-xs text-slate-500">{formatRMB(col.cost)}</div>
+                                <td key={idx} className={`border-r border-slate-100 px-4 py-4 align-top text-right last:border-0 even:bg-slate-50/35 ${idx === 0 ? 'sticky left-0 z-10 bg-white' : ''}`}>
+                                    <div className="font-mono text-lg font-bold tracking-tight text-slate-900 tabular-nums">{formatNumber(col.qty)}</div>
+                                    <div className="mb-2 font-mono text-xs text-slate-500 tabular-nums">{formatRMB(col.cost)}</div>
                                     {idx > 0 && (
                                         <div className="flex flex-col items-end gap-1">
-                                            <div className="flex gap-1 text-[10px] text-slate-500">
+                                            <div className="flex gap-1 text-[11px] text-slate-500">
                                                 <span>数量占比:</span>
-                                                <span className={col.qtyPercent > 0.2 && idx > 4 ? 'font-bold text-red-600' : 'text-slate-700'}>
+                                                <span className={`tabular-nums ${col.qtyPercent > 0.2 && idx > 4 ? 'font-bold text-rose-600' : 'text-slate-700'}`}>
                                                     {formatPercent(col.qtyPercent)}
                                                 </span>
                                             </div>
-                                            <div className="flex gap-1 text-[10px] text-slate-500">
+                                            <div className="flex gap-1 text-[11px] text-slate-500">
                                                 <span>成本占比:</span>
-                                                <span className={col.costPercent > 0.2 && idx > 4 ? 'font-bold text-red-600' : 'text-slate-700'}>
+                                                <span className={`tabular-nums ${col.costPercent > 0.2 && idx > 4 ? 'font-bold text-rose-600' : 'text-slate-700'}`}>
                                                     {formatPercent(col.costPercent)}
                                                 </span>
                                             </div>

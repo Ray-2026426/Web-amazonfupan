@@ -2,12 +2,11 @@
  * 主题样式（亮 / 暗）—— 基础层
  *
  * 分工：
- *   · dark-theme.css  —— 工具类覆盖表（自动生成，覆盖源码里用到的每一个调色板类）。
- *                        生成器：scripts/gen-dark-theme.mjs
- *                        由 index.html 里排在 index.css 之后的第二个 <link> 引入；
- *                        这里刻意不用 @import，免得依赖打包器对 @import 的处理细节。
- *   · 本文件          —— 无法用「工具类覆盖」表达的全局规则：页面底色、根容器渐变、
- *                        滚动条、表单控件配色、阴影压平、主题切换动效、表格字号。
+ *   · styles/tailwind.css —— @tailwind base/components/utilities，构建期生成（不再用 CDN）。
+ *   · dark-theme.css      —— 工具类覆盖表（自动生成，覆盖源码里用到的每一个调色板类）。
+ *                            生成器：scripts/gen-dark-theme.mjs；由 index.tsx 最后引入。
+ *   · 本文件              —— 无法用「工具类覆盖」表达的全局规则：页面底色、根容器渐变、
+ *                            滚动条、表单控件配色、阴影压平、主题切换动效、表格字号。
  *
  * 暗色配色基准（参考 GitHub Dark，数据密集型界面长时间阅读舒适）：
  *   - 页面底色：#0d1117（最沉）
@@ -19,18 +18,30 @@
  *   - 次要文字：#c9d1d9 / #8b949e
  *   - 蓝色强调：#58a6ff（柔和的 GitHub 蓝，识别度高且不灼眼）
  *
- * 为什么所有覆盖都带 !important：Tailwind 由 CDN 在运行时注入 <style>，
- * 注入位置在 <link rel="stylesheet" href="/index.css"> 之后，同等特异性下会赢。
+ * 关于 !important：改为构建期 Tailwind 后，dark-theme.css 的选择器都带 html.dark 前缀，
+ * 特异性已高于普通工具类，因此绝大多数规则不再需要 !important（Recharts 内联样式除外）。
  */
 
 :root { color-scheme: light; }
 html.dark { color-scheme: dark; }
 
+/* ---------- 页面底色与字体 ----------
+ * 移除 Google Fonts 外链后，使用系统字体栈（Inter 可用则用），
+ * 保证内网 / 弱网 / 被墙环境下不出现白屏或不可读。
+ */
+body {
+    margin: 0;
+    background-color: #f8fafc;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
 /* ---------- 页面底色与字色 ---------- */
 html.dark { background-color: #0d1117; }
 
 html.dark body {
-    background-color: #0d1117 !important;
+    background-color: #0d1117;
     color: #e6edf3;
 }
 
@@ -91,3 +102,30 @@ html[data-table-font="lg"] table th,
 html[data-table-font="lg"] table td { font-size: 16px !important; }
 
 html:not([data-table-font]) table { font-size: 14px; }
+
+html[data-table-density="compact"] table th,
+html[data-table-density="compact"] table td { padding-top: 0.45rem !important; padding-bottom: 0.45rem !important; }
+html[data-table-density="comfortable"] table th,
+html[data-table-density="comfortable"] table td { padding-top: 0.85rem; padding-bottom: 0.85rem; }
+
+/* ---------- 数字对齐 ----------
+ * 表格与等宽数字统一使用等宽字形（tabular-nums），避免金额/百分比纵向对比时数位漂移。
+ */
+table,
+.font-mono {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 层级 token（视觉一致性） ----------
+ * 只保留两个层级，避免「28px / 24px / 3xl」混用导致层级模糊：
+ *   · panel（页头、三张主表、经营雷达、加载/空状态）：
+ *       rounded-3xl + shadow 0 24px 70px -42px rgba(15,23,42,.45)
+ *   · card（指标卡、内嵌信息块）：
+ *       rounded-2xl + shadow 0 18px 50px -30px rgba(15,23,42,.35)
+ * 颜色语义见 utils/semantics.ts（涨跌 / 达成 / 严重度 / 状态四套分离）。
+ */
+
+:focus-visible { outline: 2px solid #0284c7; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

@@ -515,7 +515,7 @@ export const ProfitSimulatorModal: React.FC<ProfitSimulatorModalProps> = ({ isOp
     const totalMix = (Object.values(childMix) as number[]).reduce((a: number, b: number) => a + b, 0);
 
     return (
-        <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
+        <div role="dialog" aria-modal="true" aria-label="利润试算" tabIndex={-1} className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
             <div className="bg-white w-full max-w-6xl rounded-xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[95vh]">
                 
                 {/* Header */}

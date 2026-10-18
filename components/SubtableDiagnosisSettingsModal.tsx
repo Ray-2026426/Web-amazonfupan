@@ -147,6 +147,7 @@ export const SubtableDiagnosisSettingsModal: React.FC<Props> = ({ isOpen, onClos
 
     return (
         <div
+            role="dialog" aria-modal="true" aria-label="子表标签规则" tabIndex={-1}
             className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-900/50 p-4"
             onMouseDown={(e) => e.target === e.currentTarget && onClose()}
         >

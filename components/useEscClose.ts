@@ -37,10 +37,36 @@ export function useEscClose(isOpen: boolean, onClose: () => void): void {
         if (!isOpen) return;
         ensureGlobalListener();
         const handler = () => onCloseRef.current();
+        const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
         escStack.push(handler);
+        const topDialog = () => Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]'))
+            .filter(dialog => dialog.getClientRects().length > 0).at(-1);
+        const focusTimer = window.setTimeout(() => {
+            const dialog = topDialog();
+            if (!dialog) return;
+            const first = dialog.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]');
+            (first || dialog).focus();
+        }, 0);
+        const trapFocus = (e: KeyboardEvent) => {
+            if (e.key !== 'Tab' || escStack.at(-1) !== handler) return;
+            const dialog = topDialog();
+            if (!dialog) return;
+            const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]')).filter(el => el.getClientRects().length > 0);
+            if (!focusable.length) { e.preventDefault(); dialog.focus(); return; }
+            const first = focusable[0], last = focusable[focusable.length - 1];
+            if (e.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+        };
+        document.addEventListener('keydown', trapFocus);
         return () => {
+            window.clearTimeout(focusTimer);
+            document.removeEventListener('keydown', trapFocus);
             const idx = escStack.lastIndexOf(handler);
             if (idx >= 0) escStack.splice(idx, 1);
+            if (!escStack.length) document.body.style.overflow = previousOverflow;
+            previousFocus?.focus();
         };
     }, [isOpen]);
 }

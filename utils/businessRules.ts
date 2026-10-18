@@ -8,6 +8,7 @@ import {
     InventoryAggregated,
 } from '../types';
 import { formatMoneyNoDecimals, formatNumber, formatPercent } from '../utils';
+import { metricValue } from './metrics';
 
 export const DEFAULT_BUSINESS_RULES: BusinessRule[] = [
     {
@@ -201,11 +202,11 @@ export const generateBusinessIssues = ({
     const salesPacing = ratio(current.sales_amount, target.sales_amount * pacing);
     const profitPacing = ratio(current.gross_profit, target.gross_profit * pacing);
     const adBudgetPacing = ratio(current.ad_spend, target.ad_spend * pacing);
-    const acos = ratio(current.ad_spend, current.ad_sales);
+    const acos = metricValue('acos', { current }) ?? 0;
     const agedCost = inventory
         ? inventory.age_181_270_cost + inventory.age_271_330_cost + inventory.age_331_365_cost + inventory.age_365_plus_cost
         : 0;
-    const agedShare = inventory ? ratio(agedCost, inventory.fba_total_cost) : 0;
+    const agedShare = metricValue('aged_inventory_share', { current, inventory }) ?? 0;
     const owner = '当前筛选负责人';
 
     if (target.gross_profit > 0 && profitPacing < 0.9) {
@@ -428,6 +429,21 @@ export const generateBusinessIssues = ({
         });
     }
 
+    const estimatedByRule: Record<string, { amount: number; basis: string; confidence: BusinessIssue['confidence'] }> = {
+        'profit-pacing-risk': { amount: Math.max(0, target.gross_profit * pacing - current.gross_profit), basis: '毛利额序时缺口', confidence: 'high' },
+        'margin-gap-risk': { amount: Math.max(0, (target.gross_margin - current.gross_margin) * current.sales_amount), basis: '销售额 × 毛利率差距的近似值', confidence: 'medium' },
+        'ad-budget-overrun': { amount: Math.max(0, current.ad_spend - target.ad_spend * pacing), basis: '超出序时广告预算的支出', confidence: 'medium' },
+        'acos-risk': { amount: Math.max(0, current.ad_spend - current.ad_sales * 0.35), basis: '相对 35% ACoS 健康线的超额支出', confidence: 'medium' },
+        'sales-pacing-risk': { amount: Math.max(0, target.sales_amount * pacing - current.sales_amount) * Math.max(0, current.gross_margin), basis: '销售缺口 × 当前毛利率的近似值', confidence: 'low' },
+    };
+    for (const issue of issues) {
+        const estimate = estimatedByRule[issue.ruleId];
+        if (estimate && issue.id !== 'issue-stable-watch') {
+            issue.estimatedGrossProfitImpact = estimate.amount;
+            issue.impactBasis = estimate.basis;
+            issue.confidence = warnings.length ? 'low' : estimate.confidence;
+        }
+    }
     const severityRank = { critical: 0, warning: 1, info: 2 };
     const ruleRank: Record<string, number> = {
         'profit-pacing-risk': 0,
@@ -441,7 +457,9 @@ export const generateBusinessIssues = ({
     };
     return issues
         .sort((a, b) => (
-            severityRank[a.severity] - severityRank[b.severity]
+            (b.estimatedGrossProfitImpact ?? -1) * (b.confidence === 'high' ? 1 : b.confidence === 'medium' ? 0.7 : 0.4)
+            - (a.estimatedGrossProfitImpact ?? -1) * (a.confidence === 'high' ? 1 : a.confidence === 'medium' ? 0.7 : 0.4)
+            || severityRank[a.severity] - severityRank[b.severity]
             || (ruleRank[a.ruleId] ?? 99) - (ruleRank[b.ruleId] ?? 99)
         ))
         .slice(0, 8);

@@ -40,19 +40,37 @@ const openDatabase = (): Promise<IDBDatabase> => {
 };
 
 export const saveToDB = async (storeName: string, data: any) => {
-    try {
         const db = await openDatabase();
+        try {
         const transaction = db.transaction([storeName], 'readwrite');
         const store = transaction.objectStore(storeName);
         store.put(data, 'main_data'); // Overwrite with key 'main_data'
         
-        return new Promise<void>((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
             transaction.oncomplete = () => resolve();
             transaction.onerror = () => reject(transaction.error);
+            transaction.onabort = () => reject(transaction.error || new Error('数据库写入已中止'));
         });
-    } catch (e) {
-        console.error(`Failed to save ${storeName}`, e);
-    }
+        } finally { db.close(); }
+};
+
+/** Replace all imported datasets in one IndexedDB transaction. A rejected transaction
+ * leaves the previous import intact. Action records live in a separate store. */
+export const replaceImportedData = async (data: Record<string, unknown>): Promise<void> => {
+    const stores = ['monthly', 'weekly', 'targets', 'inventory', 'refunds', 'reviews', 'product_images', 'meta', 'business_actions'];
+    const db = await openDatabase();
+    try {
+        await new Promise<void>((resolve, reject) => {
+            const transaction = db.transaction(stores, 'readwrite');
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error || new Error('导入事务失败'));
+            transaction.onabort = () => reject(transaction.error || new Error('导入事务已中止'));
+            for (const store of stores) {
+                if (store === 'business_actions' && !Object.hasOwn(data, store)) continue;
+                transaction.objectStore(store).put(data[store] ?? [], 'main_data');
+            }
+        });
+    } finally { db.close(); }
 };
 
 export const loadFromDB = async (storeName: string): Promise<any | null> => {
@@ -73,8 +91,9 @@ export const loadFromDB = async (storeName: string): Promise<any | null> => {
 };
 
 export const clearDB = async () => {
-    try {
+    {
         const db = await openDatabase();
+        try {
         const dataStores = ['monthly', 'weekly', 'targets', 'inventory', 'refunds', 'reviews', 'product_images', 'meta'];
         const transaction = db.transaction(dataStores, 'readwrite');
         
@@ -84,11 +103,11 @@ export const clearDB = async () => {
             }
         });
 
-        return new Promise<void>((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
             transaction.oncomplete = () => resolve();
             transaction.onerror = () => reject(transaction.error);
+            transaction.onabort = () => reject(transaction.error || new Error('数据库清空已中止'));
         });
-    } catch (e) {
-        console.error("Failed to clear DB", e);
+        } finally { db.close(); }
     }
 };

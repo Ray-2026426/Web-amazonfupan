@@ -1,5 +1,4 @@
 
-import * as XLSX from 'xlsx';
 import { DataRow, TargetRow, RefundRow, InventoryRow, ReviewRow, SearchTermRow, ProductImageRow, ParsedDataResult, DataSourceDebugInfo } from './types';
 import { getBusinessWeekRangeFromYearWeek, formatDate } from './utils';
 import { compressDataUrlMapInBatches, compressProductImageRows } from './utils/productImageCompress';
@@ -416,8 +415,8 @@ const extractEmbeddedImagesByRow = async (
         if (!ws?.getImages) return { byRow, imageCol: null, count: 0 };
 
         for (const item of ws.getImages()) {
-            const imageId = (item as { imageId?: number }).imageId;
-            if (imageId == null) continue;
+            const imageId = Number(item.imageId);
+            if (!Number.isSafeInteger(imageId)) continue;
             const meta = wb.getImage(imageId);
             if (!meta?.buffer) continue;
 
@@ -503,8 +502,9 @@ const readExcel = (
 ): Promise<ReadExcelResult> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
             try {
+                const XLSX = await import('xlsx');
                 const data = e.target?.result;
                 const workbook = XLSX.read(data, { type: 'binary' });
                 const sheetNames = workbook.SheetNames;
@@ -880,6 +880,7 @@ export const parseProductImageData = async (file: File): Promise<ParsedDataResul
     };
 
     try {
+        const XLSX = await import('xlsx');
         const buf = await file.arrayBuffer();
         const workbook = XLSX.read(buf, { type: 'array' });
         const sheetNames = workbook.SheetNames;

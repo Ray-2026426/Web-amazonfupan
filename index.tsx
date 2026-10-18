@@ -1,5 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+// 样式加载顺序：Tailwind 构建产物 → 基础主题 → 暗色覆盖表
+import './styles/tailwind.css';
+import './index.css';
+import './dark-theme.css';
 import App from './App';
 import { applyAppSettings, loadAppSettings } from './components/appSettings';
 

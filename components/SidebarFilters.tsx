@@ -29,7 +29,7 @@ const UserGuideModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
         { title: "5. AI 顾问", icon: <BookOpen className="w-5 h-5 text-yellow-500" />, content: "利用右下角 AI 助手进行自由问答与数据挖掘。" }
     ];
     return (
-        <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200" onClick={onClose}>
+        <div role="dialog" aria-modal="true" aria-label="筛选帮助" tabIndex={-1} className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200" onClick={onClose}>
             <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="bg-slate-900 px-6 py-5 flex items-center justify-between text-white">
                     <h2 className="text-xl font-bold tracking-wide">平台使用指南</h2>
@@ -134,13 +134,13 @@ const EnhancedDropdown = ({ title, icon, options, selected, onToggle, onBulkSet 
                         <div className="flex justify-between items-center px-1">
                              <button 
                                 onClick={handleSelectAllVisible}
-                                className="text-[10px] text-sky-300 hover:text-white transition-colors"
+                                className="text-[11px] text-sky-300 hover:text-white transition-colors"
                              >
                                 全选
                              </button>
                              <button 
                                 onClick={handleDeselectAll}
-                                className="text-[10px] text-slate-400 hover:text-rose-300 transition-colors flex items-center gap-1"
+                                className="text-[11px] text-slate-400 hover:text-rose-300 transition-colors flex items-center gap-1"
                              >
                                 <Square className="w-3 h-3" />
                                 取消全选
@@ -494,6 +494,8 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                              filters.productNames.length > 0;
 
     return (
+        // 设计决定：侧栏固定为深色「导航轨」，两种主题下都保持深色，
+        // 让可切换的主区始终有稳定的对比基准；正文文字不低于 slate-300，对比度达标。
         <div className="w-72 bg-[linear-gradient(180deg,#020617_0%,#0f172a_18%,#111827_100%)] text-slate-200 h-screen overflow-visible flex-shrink-0 sticky top-0 border-r border-slate-800/80 flex flex-col z-20 shadow-[16px_0_50px_-28px_rgba(15,23,42,0.85)]">
             <UserGuideModal isOpen={isGuideOpen} onClose={() => setIsGuideOpen(false)} />
             
@@ -526,7 +528,7 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
 
             <div className="px-5 pt-4">
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/50 px-3.5 py-3">
-                    <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                    <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-slate-400">
                         <CalendarRange className="w-3.5 h-3.5" />
                         当前周期
                     </div>
@@ -537,7 +539,7 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
             </div>
 
             <div className="flex-1 overflow-y-auto custom-scroll px-5 pb-5 pt-4">
-                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">筛选快照</div>
+                <div className="mb-3 text-[11px] font-semibold text-slate-400">筛选快照</div>
                 <div className="mb-4 space-y-1.5">
                     {/* 已保存的快照列表 */}
                     {snapshots.length > 0 && (
@@ -570,7 +572,7 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                                             >
                                                 {snap.name}
                                             </span>
-                                            <span className="text-[9px] text-slate-500 flex-shrink-0 bg-slate-700/50 rounded px-1">{snap.isWeeklyMode ? '周' : '月'}</span>
+                                            <span className="text-[10px] text-slate-400 flex-shrink-0 bg-slate-700/50 rounded px-1">{snap.isWeeklyMode ? '周' : '月'}</span>
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); setSnapshotMenuOpen(snapshotMenuOpen === snap.id ? null : snap.id); }}
                                                 className="p-0.5 rounded opacity-0 group-hover/snap:opacity-100 transition-opacity text-slate-500 hover:text-slate-300"
@@ -583,13 +585,13 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                                                 <div className="absolute right-0 top-full mt-1 z-[60] w-28 rounded-xl border border-slate-600/80 bg-slate-800/95 py-1 shadow-xl backdrop-blur-lg">
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); setRenamingId(snap.id); setRenameText(snap.name); setSnapshotMenuOpen(null); }}
-                                                        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-slate-300 hover:bg-slate-700/80 hover:text-white transition-colors"
+                                                        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-slate-300 hover:bg-slate-700/80 hover:text-white transition-colors"
                                                     >
                                                         重命名
                                                     </button>
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); handleDeleteSnapshot(snap.id); }}
-                                                        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-rose-400 hover:bg-slate-700/80 hover:text-rose-300 transition-colors"
+                                                        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-rose-400 hover:bg-slate-700/80 hover:text-rose-300 transition-colors"
                                                     >
                                                         <Trash2 className="w-3 h-3" /> 删除
                                                     </button>
@@ -637,7 +639,7 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                     )}
                 </div>
 
-                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">筛选维度</div>
+                <div className="mb-3 text-[11px] font-semibold text-slate-400">筛选维度</div>
                 <div className="space-y-1">
                     <EnhancedDropdown title="国家" icon={<Globe className="w-3 h-3"/>} options={availableOptions.countries} selected={filters.countries} onToggle={(v, all) => toggleFilter('countries', v, all)} onBulkSet={(vs) => setBulkFilter('countries', vs)} />
                     <EnhancedDropdown title="品牌" icon={<Tag className="w-3 h-3"/>} options={availableOptions.brands} selected={filters.brands} onToggle={(v, all) => toggleFilter('brands', v, all)} onBulkSet={(vs) => setBulkFilter('brands', vs)} />
@@ -651,7 +653,7 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
             </div>
 
             <div className="mt-auto border-t border-slate-800/80 bg-slate-950/45 px-5 py-4 backdrop-blur-sm">
-                <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold text-slate-400">
                     <CalendarRange className="w-3.5 h-3.5" />
                     分析周期
                 </div>
@@ -669,11 +671,11 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                     )}
                 </div>
                 <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
-                    <div className="flex items-center gap-2"><span className="text-[10px] text-slate-500 w-6 font-mono font-bold text-right">起</span><input type={isWeeklyMode ? 'text' : 'month'} value={startVal} onChange={(e) => handleDateChange('start', e.target.value)} placeholder={isWeeklyMode ? '2026-W15' : ''} title={isWeeklyMode ? '自然周：年-W周序号（周日为一周起点，第1周含1月1日）' : ''} className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-slate-200 flex-1 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 outline-none transition-colors font-mono tracking-tight" /></div>
-                    <div className="flex items-center gap-2"><span className="text-[10px] text-slate-500 w-6 font-mono font-bold text-right">止</span><input type={isWeeklyMode ? 'text' : 'month'} value={endVal} onChange={(e) => handleDateChange('end', e.target.value)} placeholder={isWeeklyMode ? '2026-W16' : ''} title={isWeeklyMode ? '自然周：年-W周序号' : ''} className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-slate-200 flex-1 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 outline-none transition-colors font-mono tracking-tight" /></div>
+                    <div className="flex items-center gap-2"><span className="text-[11px] text-slate-400 w-6 font-mono font-bold text-right">起</span><input type={isWeeklyMode ? 'text' : 'month'} value={startVal} onChange={(e) => handleDateChange('start', e.target.value)} placeholder={isWeeklyMode ? '2026-W15' : ''} title={isWeeklyMode ? '自然周：年-W周序号（周日为一周起点，第1周含1月1日）' : ''} className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-slate-200 flex-1 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 outline-none transition-colors font-mono tracking-tight" /></div>
+                    <div className="flex items-center gap-2"><span className="text-[11px] text-slate-400 w-6 font-mono font-bold text-right">止</span><input type={isWeeklyMode ? 'text' : 'month'} value={endVal} onChange={(e) => handleDateChange('end', e.target.value)} placeholder={isWeeklyMode ? '2026-W16' : ''} title={isWeeklyMode ? '自然周：年-W周序号' : ''} className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-slate-200 flex-1 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 outline-none transition-colors font-mono tracking-tight" /></div>
                 </div>
                 {warnings.length > 0 && (
-                    <div className="mt-3 rounded-2xl border border-amber-500/20 bg-amber-500/8 p-3 text-[10px]">
+                    <div className="mt-3 rounded-2xl border border-amber-500/20 bg-amber-500/8 p-3 text-[11px]">
                         <div className="flex items-center gap-1 text-amber-300 mb-1 font-bold"><AlertCircle className="w-3 h-3" /><span>异常提醒</span></div>
                         <div className="text-amber-100/80 leading-tight pl-1">{warnings[0]} {warnings.length > 1 && `(+${warnings.length - 1})`}</div>
                     </div>

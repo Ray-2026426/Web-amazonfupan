@@ -475,6 +475,18 @@ export const getCurrencySymbol = (country: string = '美国'): string => {
 };
 
 // --- Formatting ---
+/**
+ * 数值展示规范（全站统一，避免同一指标在不同模块出现不同精度）：
+ *
+ *   · 金额（money）   → Intl currency，千分位，默认 0 位小数（formatMoneyNoDecimals）
+ *                       需要精确到分时用 formatMoney。
+ *   · 数量（quantity）→ Intl en-US，千分位，整数（formatNumber）。
+ *   · 比率（percent） → 0~1 的小数 * 100，固定 2 位小数 + %（formatPercent）。
+ *   · 所有数字在表格/卡片中配合 `tabular-nums` 等宽字形，保证纵向对比不跳动。
+ *
+ * 注意：本产品数据源统一为美元，货币符号默认 '美国' / USD；
+ * 如需按国家切换币种，调用方显式传入 country 即可，不在格式化层自动推断。
+ */
 export const formatMoney = (amount: number | undefined, country: string = '美国'): string => {
     if (amount === undefined || amount === null) return getCurrencySymbol(country) + '0.00';
     const info = getCurrencyInfo(country);

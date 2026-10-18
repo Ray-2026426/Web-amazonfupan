@@ -227,25 +227,25 @@ const EXTRA_SECTION = `
  * 暗色下保持半透明白才是对的，因此不做覆盖；只有 60 以上（当作面板表面用）
  * 以及 hover/focus 态的纯白才需要变暗。
  */
-html.dark .bg-white { background-color: ${SURFACE.card} !important; }
-html.dark .bg-white\\/60 { background-color: rgba(22, 27, 34, 0.60) !important; }
-html.dark .bg-white\\/70 { background-color: rgba(22, 27, 34, 0.70) !important; }
-html.dark .bg-white\\/75 { background-color: rgba(22, 27, 34, 0.75) !important; }
-html.dark .bg-white\\/80 { background-color: rgba(22, 27, 34, 0.80) !important; }
-html.dark .bg-white\\/85 { background-color: rgba(22, 27, 34, 0.85) !important; }
-html.dark .bg-white\\/90 { background-color: rgba(22, 27, 34, 0.90) !important; }
-html.dark .bg-white\\/95 { background-color: rgba(22, 27, 34, 0.95) !important; }
+html.dark .bg-white { background-color: ${SURFACE.card}; }
+html.dark .bg-white\\/60 { background-color: rgba(22, 27, 34, 0.60); }
+html.dark .bg-white\\/70 { background-color: rgba(22, 27, 34, 0.70); }
+html.dark .bg-white\\/75 { background-color: rgba(22, 27, 34, 0.75); }
+html.dark .bg-white\\/80 { background-color: rgba(22, 27, 34, 0.80); }
+html.dark .bg-white\\/85 { background-color: rgba(22, 27, 34, 0.85); }
+html.dark .bg-white\\/90 { background-color: rgba(22, 27, 34, 0.90); }
+html.dark .bg-white\\/95 { background-color: rgba(22, 27, 34, 0.95); }
 html.dark .hover\\:bg-white:hover,
-html.dark .focus\\:bg-white:focus { background-color: ${SURFACE.card} !important; }
-html.dark .hover\\:bg-white\\/50:hover { background-color: rgba(${SURFACE.tint}, 0.12) !important; }
+html.dark .focus\\:bg-white:focus { background-color: ${SURFACE.card}; }
+html.dark .hover\\:bg-white\\/50:hover { background-color: rgba(${SURFACE.tint}, 0.12); }
 
 html.dark .border-white,
 html.dark .border-white\\/60,
 html.dark .border-white\\/70,
 html.dark .border-white\\/80,
-html.dark .border-white\\/90 { border-color: ${SURFACE.line} !important; }
+html.dark .border-white\\/90 { border-color: ${SURFACE.line}; }
 
-html.dark .ring-white\\/70 { --tw-ring-color: rgba(48, 54, 61, 0.90) !important; }
+html.dark .ring-white\\/70 { --tw-ring-color: rgba(48, 54, 61, 0.90); }
 
 /* ---------- 图表 / SVG ----------
  * 图表把颜色写在 SVG 属性上（stroke="#e2e8f0" 等），属性选择器 + CSS 属性
@@ -254,13 +254,13 @@ html.dark .ring-white\\/70 { --tw-ring-color: rgba(48, 54, 61, 0.90) !important;
 html.dark [stroke="#e2e8f0"],
 html.dark [stroke="#f1f5f9"],
 html.dark [stroke="#f8fafc"],
-html.dark [stroke="#cbd5e1"] { stroke: ${SURFACE.line} !important; }
+html.dark [stroke="#cbd5e1"] { stroke: ${SURFACE.line}; }
 
-html.dark [stroke="#94a3b8"] { stroke: #4d5762 !important; }
+html.dark [stroke="#94a3b8"] { stroke: #4d5762; }
 
 html.dark [fill="white"],
 html.dark [fill="#fff"],
-html.dark [fill="#ffffff"] { fill: ${SURFACE.text} !important; }
+html.dark [fill="#ffffff"] { fill: ${SURFACE.text}; }
 
 /* Recharts：坐标轴刻度、参考线、hover 指示线与 Tooltip 都是内联样式，
  * 内联样式不能被普通 CSS 覆盖，必须 !important。
@@ -351,7 +351,7 @@ function generate() {
         const items = grouped.get(prop);
         parts.push(`/* ---------- ${PROP_TITLE[prop] || prop} （${items.length} 条） ---------- */`);
         for (const { selector, decl } of items) {
-            parts.push(`${selector} { ${decl.prop}: ${decl.value} !important; }`);
+            parts.push(`${selector} { ${decl.prop}: ${decl.value}; }`);
         }
         parts.push('');
     }

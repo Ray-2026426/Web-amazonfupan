@@ -12,6 +12,7 @@ import {
 } from '../utils';
 import { Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart } from 'recharts';
 import { useEscClose } from './useEscClose';
+import { getTrendMetricsSelection, setTrendMetricsSelection } from './trendSelection';
 
 export interface TrendColumn {
     title: string;
@@ -52,20 +53,14 @@ const COLORS = [
 const DEFAULT_METRIC_TITLES = ['销量', '毛利率', '广告占比', '退款占比', '头程占比'];
 
 /** 跨趋势图共享的指标选择，仅在用户手动切换后写入；更新数据源时重置 */
-let persistedTrendMetrics: string[] | null = null;
-
-export function resetTrendChartMetricsSelection() {
-    persistedTrendMetrics = null;
-}
-
 const getDefaultMetrics = (columns: TrendColumn[]): string[] => {
     const preferred = DEFAULT_METRIC_TITLES.filter(t => columns.some(c => c.title === t));
     return preferred.length > 0 ? preferred : columns.slice(0, Math.min(5, columns.length)).map(c => c.title);
 };
 
 const resolveInitialMetrics = (columns: TrendColumn[]): string[] => {
-    if (persistedTrendMetrics) {
-        const valid = persistedTrendMetrics.filter(t => columns.some(c => c.title === t));
+    if (getTrendMetricsSelection()) {
+        const valid = getTrendMetricsSelection()!.filter(t => columns.some(c => c.title === t));
         if (valid.length > 0) return valid;
     }
     return getDefaultMetrics(columns);
@@ -197,7 +192,7 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
             } else {
                 next = [...prev, title];
             }
-            persistedTrendMetrics = next;
+            setTrendMetricsSelection(next);
             return next;
         });
     };
@@ -352,7 +347,7 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
     const hasPercent = selectedMetrics.some(m => columns.find(c => c.title === m)?.isPercent);
 
     return (
-        <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div role="dialog" aria-modal="true" aria-label="趋势图" tabIndex={-1} className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
             <div className="flex h-[88vh] w-full max-w-[min(96vw,86.4rem)] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
                 <div className="flex flex-shrink-0 items-center justify-between border-b border-slate-700/50 bg-slate-800 px-4 py-2.5 text-white">
                     <div className="flex min-w-0 items-center gap-2.5">

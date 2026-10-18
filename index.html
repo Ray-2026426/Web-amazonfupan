@@ -1,6 +1,5 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -16,56 +15,15 @@
         } catch (e) {}
       })();
     </script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 关键底色内联，防止样式包加载前出现白屏闪烁（完整样式由 index.tsx 注入） -->
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
-      
-      body {
-        font-family: 'Inter', sans-serif;
-        background-color: #f8fafc;
-      }
-      
-      .font-mono {
-        font-family: 'JetBrains Mono', monospace;
-      }
-
-      /* Custom Scrollbar for tables */
-      .custom-scroll::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      .custom-scroll::-webkit-scrollbar-track {
-        background: #f1f5f9; 
-      }
-      .custom-scroll::-webkit-scrollbar-thumb {
-        background: #cbd5e1; 
-        border-radius: 4px;
-      }
-      .custom-scroll::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8; 
-      }
+      html { background-color: #f8fafc; }
+      html.dark { background-color: #0d1117; }
+      body { margin: 0; }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "xlsx": "https://esm.sh/xlsx@0.18.5",
-    "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
-    "idb": "https://esm.sh/idb@^8.0.3",
-    "html2canvas": "https://esm.sh/html2canvas@1.4.1",
-    "jspdf": "https://esm.sh/jspdf@2.5.1"
-  }
-}
-</script>
-<link rel="stylesheet" href="/index.css">
-<!-- 暗色模式工具类覆盖表（由 scripts/gen-dark-theme.mjs 生成，必须排在 index.css 之后） -->
-<link rel="stylesheet" href="/dark-theme.css">
-</head>
+  </head>
   <body>
     <div id="root"></div>
-  <script type="module" src="/index.tsx"></script>
-</body>
+    <script type="module" src="/index.tsx"></script>
+  </body>
 </html>

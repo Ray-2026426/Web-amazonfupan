@@ -1,0 +1,8 @@
+/* 构建期 Tailwind 入口（取代 cdn.tailwindcss.com 的运行时注入）。
+ * 加载顺序（见 index.tsx）：tailwind.css → index.css → dark-theme.css。
+ * 因为 dark-theme.css 的规则都带 html.dark 前缀，选择器特异性高于普通工具类，
+ * 所以不再需要 !important 才能覆盖（Recharts 内联样式除外）。
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

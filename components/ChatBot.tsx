@@ -17,6 +17,7 @@ import {
 import { streamOpenAICompatibleChat } from './openaiChatStream';
 
 interface ChatBotProps {
+    initialOpen?: boolean;
     data: {
         current: AggregatedData;
         last: AggregatedData | null;
@@ -55,8 +56,8 @@ const DEFAULT_SYSTEM_PROMPT = `你是一个亚马逊资深数据与策略分析�
 你的任务是根据用户提供的【多维数据汇总】（包含负责人、站点、品牌、父ASIN等维度）和【核心单品明细】进行综合诊断。
 支持跨维度分析：例如用户问“张三表现如何”，请结合“负责人汇总”表中的数据回答；如果问“美国站哪个品牌卖得好”，请结合站点和品牌数据。`;
 
-export const ChatBot: React.FC<ChatBotProps> = ({ data, inventory, refunds, filters, rawPerformance, rawInventory }) => {
-    const [isOpen, setIsOpen] = useState(false);
+export const ChatBot: React.FC<ChatBotProps> = ({ data, inventory, refunds, filters, rawPerformance, rawInventory, initialOpen = false }) => {
+    const [isOpen, setIsOpen] = useState(initialOpen);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
         { id: 'init', role: 'model', text: '我是亚马逊资深数据与策略分析师。我已经读取了全维度的报表数据，请直接提出您的问题。' }
@@ -361,6 +362,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ data, inventory, refunds, filt
         <>
             {/* FAB Button */}
             <button
+                type="button" aria-label={isOpen ? '关闭 AI 顾问' : '打开 AI 顾问'}
                 onClick={() => setIsOpen(!isOpen)}
                 className={`fixed bottom-6 right-6 p-4 rounded-full shadow-xl transition-all duration-300 z-50 flex items-center justify-center
                     ${isOpen ? 'bg-slate-700 rotate-90' : 'bg-blue-600 hover:bg-blue-700 rotate-0'}

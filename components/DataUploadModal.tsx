@@ -10,6 +10,7 @@ export type DataUploadResult = {
     reports: DataSourceDebugInfo[];
     missingOptional: string[];
     unrecognizedNames: string[];
+    commit: () => Promise<void>;
 };
 
 interface DataUploadModalProps {
@@ -39,6 +40,7 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
     const [unrecognized, setUnrecognized] = useState<File[]>([]);
     const [error, setError] = useState<string>('');
     const [isUploading, setIsUploading] = useState(false);
+    const [isCommitting, setIsCommitting] = useState(false);
     const [result, setResult] = useState<DataUploadResult | null>(null);
     const [showGuide, setShowGuide] = useState(false);
     const [dataStartDate, setDataStartDate] = useState(DEFAULT_DATA_START);
@@ -129,9 +131,23 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
             } else {
                 setError('导入未完成：请确保已选择【月度业绩表】。');
             }
-        } catch {
+        } catch (e) {
             setIsUploading(false);
-            setError('解析发生未知错误，请检查文件格式。');
+            setError(e instanceof Error ? e.message : '解析失败，请检查文件格式。');
+        }
+    };
+
+    const handleCommit = async () => {
+        if (!result || isCommitting) return;
+        setIsCommitting(true);
+        setError('');
+        try {
+            await result.commit();
+            onClose();
+        } catch (e) {
+            setError(e instanceof Error ? `保存失败：${e.message}。原有数据未改变。` : '保存失败，原有数据未改变。');
+        } finally {
+            setIsCommitting(false);
         }
     };
 
@@ -197,7 +213,7 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
 
     if (showGuide) {
         return (
-            <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+            <div role="dialog" aria-modal="true" aria-label="表头匹配规范" tabIndex={-1} className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
                 <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-in fade-in zoom-in duration-200">
                     <div className="flex flex-shrink-0 items-center justify-between bg-slate-800 px-6 py-4">
                         <h2 className="flex items-center gap-2 text-lg font-bold text-white">
@@ -236,12 +252,12 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
 
     if (result) {
         return (
-            <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+            <div role="dialog" aria-modal="true" aria-label="导入解析预览" tabIndex={-1} className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
                 <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-in fade-in zoom-in duration-200">
                     <div className="flex flex-shrink-0 items-center justify-between bg-green-600 px-6 py-4">
                         <h2 className="flex items-center gap-2 text-lg font-bold text-white">
                             <CheckCircle className="h-5 w-5" />
-                            解析完成 ({result.reports.length} 个文件)
+                            解析预览 ({result.reports.length} 个文件)
                         </h2>
                         <button type="button" onClick={onClose} className="text-green-100 transition-colors hover:text-white">
                             <X className="h-5 w-5" />
@@ -249,6 +265,7 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
                     </div>
 
                     <div className="custom-scroll flex-1 space-y-4 overflow-y-auto p-6">
+                        <p className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">请核对有效行数和缺失的可选表。点击下方确认后才会替换当前数据。</p>
                         {(result.missingOptional.length > 0 || result.unrecognizedNames.length > 0) && (
                             <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                                 {result.missingOptional.length > 0 && (
@@ -292,9 +309,11 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
                         ))}
                     </div>
 
-                    <div className="flex flex-shrink-0 justify-end border-t border-gray-100 bg-gray-50 px-6 py-4">
-                        <button type="button" onClick={onClose} className="rounded bg-blue-600 px-6 py-2 font-medium text-white shadow-sm hover:bg-blue-700">
-                            开始分析
+                    {error && <p role="alert" className="mx-6 text-sm text-red-700">{error}</p>}
+                    <div className="flex flex-shrink-0 justify-end gap-3 border-t border-gray-100 bg-gray-50 px-6 py-4">
+                        <button type="button" onClick={onClose} disabled={isCommitting} className="px-4 py-2 text-sm text-slate-600">取消</button>
+                        <button type="button" onClick={handleCommit} disabled={isCommitting} className="rounded bg-blue-600 px-6 py-2 font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50">
+                            {isCommitting ? '正在安全保存…' : '确认替换并开始分析'}
                         </button>
                     </div>
                 </div>
@@ -305,7 +324,7 @@ export const DataUploadModal: React.FC<DataUploadModalProps> = ({ isOpen, onClos
     const missingPreview = listMissingOptionalSlots(slots);
 
     return (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+        <div role="dialog" aria-modal="true" aria-label="数据源导入" tabIndex={-1} className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
             <div className="max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-xl bg-white shadow-2xl animate-in fade-in zoom-in duration-200">
                 <div className="flex items-center justify-between bg-slate-800 px-6 py-4">
                     <h2 className="flex items-center gap-2 text-lg font-bold text-white">
