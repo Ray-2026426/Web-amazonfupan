@@ -15,7 +15,6 @@ import {
   analyzeTargetCompleteness,
   getISOWeekDateRange,
   formatDate,
-  formatMoneyNoDecimals,
   getCurrentWeekInfo,
   buildProductImageLookup,
   type ProductImageLookup,
@@ -561,26 +560,7 @@ const App: React.FC = () => {
                 </div>
             ) : (
                 <div className="max-w-[1680px] mx-auto space-y-6 pb-20">
-                    {processedData && <section className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm" aria-label="当前分析范围">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                                <div className="text-xs font-semibold text-slate-500">当前分析范围</div>
-                                <div className="mt-1 text-sm font-bold text-slate-900">{isWeeklyMode ? '周度' : '月度'} · {filters.startDate} 至 {filters.endDate}</div>
-                                <div className="mt-1 text-xs text-slate-500">数据截至 {dataEndDate || '未标注'} · 最近导入 {lastImportedAt ? new Date(lastImportedAt).toLocaleString('zh-CN') : '未记录'} · 本期 {processedData.currentRows.length} 行 · {processedData.warnings.length} 条完整性提示</div>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2 text-xs">
-                                {Object.entries(filters).filter(([key, value]) => !['startDate', 'endDate'].includes(key) && Array.isArray(value) && value.length > 0).map(([key, value]) => <span key={key} className="rounded-full bg-sky-50 px-2.5 py-1 font-medium text-sky-800">{key}: {(value as string[]).slice(0, 2).join('、')}{(value as string[]).length > 2 ? ` 等${(value as string[]).length}项` : ''}</span>)}
-                                <button type="button" onClick={() => setFilters(prev => ({...initialFilters, startDate: prev.startDate, endDate: prev.endDate}))} className="rounded-full border border-slate-200 px-2.5 py-1 text-slate-600 hover:bg-slate-50">清除维度筛选</button>
-                            </div>
-                        </div>
-                        {processedData.target.gross_profit > 0 && <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-700">毛利额距目标 <strong className="text-rose-700">{formatMoneyNoDecimals(Math.max(0, processedData.target.gross_profit - processedData.current.gross_profit))}</strong>{!isWeeklyMode && processedData.pacingRatio > 0 && processedData.pacingRatio < 1 && <> · 按当前进度预计期末 <strong>{formatMoneyNoDecimals(processedData.current.gross_profit / processedData.pacingRatio)}</strong></>}</p>}
-                    </section>}
                     {processedData && <nav aria-label="报表模块" className="flex gap-2 overflow-x-auto whitespace-nowrap text-xs font-semibold text-slate-600">{[['overview','业绩概览'],['issues','优先事项'],['pl','利润表'],['traffic','流量广告'],['inventory','库存']].map(([id,label]) => <a key={id} href={`#${id}`} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 hover:border-sky-300 hover:text-sky-700">{label}</a>)}</nav>}
-                    {processedData && <section aria-label="本期最值得处理的问题" className="rounded-2xl border border-slate-200 bg-white/90 p-4">
-                        <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-bold text-slate-900">本期最值得处理的 3 个问题</h2><a href="#issues" className="text-xs font-semibold text-sky-700">查看诊断与行动 →</a></div>
-                        {businessIssues.some(issue => issue.severity !== 'info') ? <div className="grid gap-2 md:grid-cols-3">{businessIssues.filter(issue => issue.severity !== 'info').slice(0, 3).map((issue, index) => <a key={issue.id} href="#issues" className="rounded-xl border border-slate-200 bg-slate-50 p-3 hover:border-sky-300"><span className="text-xs font-bold text-sky-700">#{index + 1} {issue.estimatedGrossProfitImpact !== undefined ? `估算影响 ${formatMoneyNoDecimals(issue.estimatedGrossProfitImpact)}` : '影响待量化'}</span><div className="mt-1 text-sm font-semibold text-slate-900">{issue.title}</div><p className="mt-1 line-clamp-2 text-xs text-slate-500">{issue.evidence}</p></a>)}</div> : <p className="text-sm text-emerald-700">本期未发现高优先级异常。{processedData.warnings.length ? `仍有 ${processedData.warnings.length} 条数据完整性提示，请核对后再做决策。` : '可从利润表查找可复制的高毛利商品。'}</p>}
-                    </section>}
-
                     
                     {/* 1. Overview Cards */}
                     {processedData && (
