@@ -1,8 +1,8 @@
 /*
  * dark-theme.css —— 暗色模式工具类覆盖表（自动生成，请勿手改）
  *
- * 由 scripts/gen-dark-theme.mjs 根据源码里实际用到的 373 个
- * 调色板工具类（共 2046 处）生成。
+ * 由 scripts/gen-dark-theme.mjs 根据源码里实际用到的 368 个
+ * 调色板工具类（共 1994 处）生成。
  * 重新生成： node scripts/gen-dark-theme.mjs
  * 校验覆盖率：node scripts/verify-dark-theme.mjs
  *
@@ -11,7 +11,7 @@
  */
 
 
-/* ---------- 背景色 bg-* （64 条） ---------- */
+/* ---------- 背景色 bg-* （63 条） ---------- */
 html.dark .bg-amber-50 { background-color: rgba(251, 191, 36, 0.15); }
 html.dark .bg-blue-100 { background-color: rgba(88, 166, 255, 0.22); }
 html.dark .bg-blue-50 { background-color: rgba(88, 166, 255, 0.15); }
@@ -35,7 +35,6 @@ html.dark .bg-sky-50 { background-color: rgba(56, 189, 248, 0.15); }
 html.dark .bg-sky-50\/70 { background-color: rgba(56, 189, 248, 0.105); }
 html.dark .bg-sky-50\/80 { background-color: rgba(56, 189, 248, 0.12); }
 html.dark .bg-slate-100 { background-color: #21262d; }
-html.dark .bg-slate-100\/70 { background-color: rgba(33, 38, 45, 0.7); }
 html.dark .bg-slate-200 { background-color: #2d333b; }
 html.dark .bg-slate-300 { background-color: #3e4651; }
 html.dark .bg-slate-400 { background-color: #4d5762; }
@@ -77,7 +76,7 @@ html.dark .hover\:bg-slate-800:hover { background-color: #161b22; }
 html.dark .hover\:bg-yellow-50:hover { background-color: rgba(250, 204, 21, 0.15); }
 html.dark .hover\:bg-yellow-50\/50:hover { background-color: rgba(250, 204, 21, 0.1); }
 
-/* ---------- 文字色 text-* （74 条） ---------- */
+/* ---------- 文字色 text-* （76 条） ---------- */
 html.dark .disabled\:text-slate-500:disabled { color: #8b949e; }
 html.dark .hover\:text-blue-500:hover { color: #79c0ff; }
 html.dark .hover\:text-blue-600:hover { color: #79c0ff; }
@@ -130,6 +129,7 @@ html.dark .text-red-500 { color: #f87171; }
 html.dark .text-red-600 { color: #f87171; }
 html.dark .text-red-700 { color: #fca5a5; }
 html.dark .text-red-800 { color: #fecaca; }
+html.dark .text-rose-500 { color: #fb7185; }
 html.dark .text-rose-600 { color: #fb7185; }
 html.dark .text-rose-700 { color: #fda4af; }
 html.dark .text-sky-500 { color: #38bdf8; }
@@ -147,6 +147,7 @@ html.dark .text-slate-700 { color: #c9d1d9; }
 html.dark .text-slate-800 { color: #e6edf3; }
 html.dark .text-slate-900 { color: #e6edf3; }
 html.dark .text-slate-950 { color: #e6edf3; }
+html.dark .text-violet-600 { color: #a78bfa; }
 html.dark .text-violet-700\/85 { color: rgba(196, 181, 253, 0.85); }
 html.dark .text-violet-900 { color: #ddd6fe; }
 html.dark .text-yellow-500 { color: #facc15; }
@@ -280,5 +281,5 @@ html.dark .recharts-legend-item-text { color: #c9d1d9 !important; }
 html.dark .recharts-reference-line line { stroke: #4d5762 !important; }
 
 /* ---------- 暗色下无需覆盖的类（原值已适配深色底，仅作核对） ----------
-   共 171 个：bg-amber-400/10、bg-amber-500、bg-amber-500/10、bg-amber-500/15、bg-amber-500/8、bg-blue-400、bg-blue-500、bg-blue-500/90、bg-blue-600、bg-emerald-500、bg-emerald-500/10、bg-emerald-600、bg-emerald-600/12、bg-green-400、bg-green-500、bg-green-600、bg-indigo-500、bg-indigo-600、bg-orange-400、bg-orange-500、bg-orange-600、bg-orange-700/50、bg-purple-600、bg-red-400、bg-red-500、bg-rose-400/10、bg-rose-500、bg-rose-500/10、bg-rose-600、bg-sky-400/10、bg-sky-500、bg-sky-500/10、bg-sky-500/15、bg-sky-600、bg-slate-700/50、bg-slate-800/30、bg-slate-800/40、bg-slate-800/60、bg-slate-800/70、bg-slate-800/80、bg-slate-800/95、bg-slate-900/30、bg-slate-900/50、bg-slate-900/60、bg-slate-900/70、bg-slate-950/40、bg-slate-950/45、bg-slate-950/50、bg-violet-400/10、bg-violet-500/15、bg-violet-600/12、bg-yellow-400、bg-yellow-500、bg-yellow-600、bg-yellow-700/50、border-amber-400/30、border-amber-500/20、border-blue-400、border-blue-500、border-blue-600、border-green-500、border-indigo-400、border-indigo-600、border-orange-500、border-red-500、border-rose-400/30、border-sky-400、border-sky-400/20、border-sky-400/30、border-sky-400/50、border-sky-400/60、border-sky-400/70、border-sky-500、border-sky-500/40、border-violet-400/20、border-yellow-500、border-yellow-600、disabled:hover:bg-blue-600、focus-within:border-blue-500、focus-within:ring-blue-500/30、focus:border-blue-400、focus:border-blue-500、focus:border-green-500、focus:border-orange-500、focus:border-purple-500、focus:border-sky-400、focus:border-yellow-500、focus:ring-blue-400/30、focus:ring-blue-500、focus:ring-green-500、focus:ring-purple-500、focus:ring-sky-400、from-amber-500、from-amber-500/12、from-blue-600、from-emerald-500、from-emerald-500/12、from-rose-500、from-rose-500/12、from-sky-50、from-sky-500、from-sky-500/12、from-slate-400、from-slate-400/10、hover:bg-blue-700、hover:bg-emerald-500、hover:bg-indigo-500、hover:bg-indigo-700、hover:bg-orange-700、hover:bg-sky-400、hover:bg-sky-500/10、hover:bg-sky-500/5、hover:bg-slate-700/80、hover:bg-slate-800/80、hover:bg-violet-500/25、hover:bg-yellow-600、hover:bg-yellow-700、hover:border-blue-400、hover:border-orange-500、hover:border-purple-500、hover:border-sky-500、hover:border-sky-500/40、hover:border-sky-500/60、hover:border-yellow-500、hover:text-rose-300、hover:text-sky-300、ring-amber-500/40、ring-emerald-500/35、ring-orange-500、ring-sky-400/30、ring-violet-500/35、ring-yellow-500、shadow-sky-500/20、shadow-slate-950/40、text-amber-100、text-amber-100/80、text-amber-300、text-blue-100、text-blue-300、text-blue-400、text-green-100、text-green-300、text-green-400、text-indigo-100、text-indigo-400、text-orange-100、text-orange-400、text-pink-400、text-purple-200、text-red-400、text-rose-100、text-rose-400、text-sky-100、text-sky-200、text-sky-300、text-sky-400、text-sky-400/70、text-violet-100、text-violet-200、text-yellow-100、text-yellow-400、to-cyan-400、to-indigo-700、to-orange-400、to-red-400、to-slate-300、to-teal-400、via-cyan-400/10、via-orange-400/10、via-red-400/10、via-teal-400/10
+   共 165 个：bg-amber-400/10、bg-amber-500/10、bg-amber-500/15、bg-amber-500/8、bg-blue-400、bg-blue-500、bg-blue-500/90、bg-blue-600、bg-emerald-500/10、bg-emerald-600、bg-emerald-600/12、bg-green-400、bg-green-500、bg-green-600、bg-indigo-500、bg-indigo-600、bg-orange-400、bg-orange-500、bg-orange-600、bg-orange-700/50、bg-purple-600、bg-red-400、bg-red-500、bg-rose-400/10、bg-rose-500、bg-rose-500/10、bg-rose-600、bg-sky-400/10、bg-sky-500、bg-sky-500/10、bg-sky-500/15、bg-sky-600、bg-slate-700/50、bg-slate-800/30、bg-slate-800/40、bg-slate-800/60、bg-slate-800/70、bg-slate-800/80、bg-slate-800/95、bg-slate-900/30、bg-slate-900/50、bg-slate-900/60、bg-slate-900/70、bg-slate-950/40、bg-slate-950/45、bg-slate-950/50、bg-violet-400/10、bg-violet-500/15、bg-violet-600/12、bg-yellow-400、bg-yellow-500、bg-yellow-600、bg-yellow-700/50、border-amber-400/30、border-amber-500/20、border-blue-400、border-blue-500、border-blue-600、border-green-500、border-indigo-400、border-indigo-600、border-orange-500、border-red-500、border-rose-400/30、border-sky-400、border-sky-400/20、border-sky-400/30、border-sky-400/50、border-sky-400/60、border-sky-400/70、border-sky-500/40、border-violet-400/20、border-yellow-500、border-yellow-600、disabled:hover:bg-blue-600、focus-within:border-blue-500、focus-within:ring-blue-500/30、focus:border-blue-400、focus:border-blue-500、focus:border-green-500、focus:border-orange-500、focus:border-purple-500、focus:border-sky-400、focus:border-yellow-500、focus:ring-blue-400/30、focus:ring-blue-500、focus:ring-green-500、focus:ring-purple-500、focus:ring-sky-400、from-amber-500、from-amber-500/12、from-blue-600、from-emerald-500、from-emerald-500/12、from-rose-500、from-rose-500/12、from-sky-50、from-sky-500、from-sky-500/12、hover:bg-blue-700、hover:bg-emerald-500、hover:bg-indigo-500、hover:bg-indigo-700、hover:bg-orange-700、hover:bg-sky-400、hover:bg-sky-500/10、hover:bg-sky-500/5、hover:bg-slate-700/80、hover:bg-slate-800/80、hover:bg-violet-500/25、hover:bg-yellow-600、hover:bg-yellow-700、hover:border-blue-400、hover:border-orange-500、hover:border-purple-500、hover:border-sky-500、hover:border-sky-500/40、hover:border-sky-500/60、hover:border-yellow-500、hover:text-rose-300、hover:text-sky-300、ring-amber-500/40、ring-emerald-500/35、ring-orange-500、ring-sky-400/30、ring-violet-500/35、ring-yellow-500、shadow-sky-500/20、shadow-slate-950/40、text-amber-100、text-amber-100/80、text-amber-300、text-blue-100、text-blue-300、text-blue-400、text-green-100、text-green-300、text-green-400、text-indigo-100、text-indigo-400、text-orange-100、text-orange-400、text-pink-400、text-purple-200、text-red-400、text-rose-100、text-rose-400、text-sky-100、text-sky-200、text-sky-300、text-sky-400、text-sky-400/70、text-violet-100、text-violet-200、text-yellow-100、text-yellow-400、to-cyan-400、to-indigo-700、to-orange-400、to-red-400、to-teal-400、via-cyan-400/10、via-orange-400/10、via-red-400/10、via-teal-400/10
 */

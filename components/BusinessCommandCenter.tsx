@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { ActionItem, ActionStatus, BusinessIssue, BusinessIssueCategory, BusinessRule } from '../types';
 import { formatMoneyNoDecimals } from '../utils';
-import { SEVERITY_TONE, ACTION_STATUS_TONE } from '../utils/semantics';
 
 interface BusinessCommandCenterProps {
     issues: BusinessIssue[];
@@ -38,11 +37,10 @@ const categoryLabel: Record<BusinessIssueCategory, string> = {
     data: '数据',
 };
 
-// 严重度与动作状态统一走语义 token（utils/semantics.ts），避免与「涨跌/达成」混用同一套颜色。
-const severityClass: Record<BusinessIssue['severity'], string> = {
-    critical: SEVERITY_TONE.critical.chip,
-    warning: SEVERITY_TONE.warning.chip,
-    info: SEVERITY_TONE.info.chip,
+const severityClass = {
+    critical: 'border-rose-200 bg-rose-50 text-rose-700',
+    warning: 'border-amber-200 bg-amber-50 text-amber-700',
+    info: 'border-sky-200 bg-sky-50 text-sky-700',
 };
 
 const statusLabel: Record<ActionStatus, string> = {
@@ -53,10 +51,10 @@ const statusLabel: Record<ActionStatus, string> = {
 };
 
 const statusClass: Record<ActionStatus, string> = {
-    open: ACTION_STATUS_TONE.open,
-    doing: ACTION_STATUS_TONE.doing,
-    done: ACTION_STATUS_TONE.done,
-    ignored: ACTION_STATUS_TONE.ignored,
+    open: 'bg-amber-50 text-amber-700 border-amber-200',
+    doing: 'bg-sky-50 text-sky-700 border-sky-200',
+    done: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    ignored: 'bg-slate-100 text-slate-500 border-slate-200',
 };
 
 const getIssueAction = (actions: ActionItem[], issueId: string) =>
@@ -155,7 +153,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                             <Gauge className="h-5 w-5 text-sky-300" />
                         </div>
                         <div>
-                            <div className="text-sm font-bold">经营异常雷达</div>
+                            <div className="text-sm font-bold tracking-[0.12em]">经营异常雷达</div>
                             <div className="mt-1 text-xs text-slate-400">毛利额为核心目标，其余指标作为 KR 拆解到责任动作</div>
                         </div>
                     </div>
@@ -289,7 +287,7 @@ export const BusinessCommandCenter: React.FC<BusinessCommandCenterProps> = ({
                                     <div className="rounded-2xl border border-white bg-white/80 p-3">
                                         <div className="flex flex-wrap items-center justify-between gap-2">
                                             <div className="text-sm font-bold text-slate-900">{step.label}</div>
-                                            <span className="text-[11px] font-semibold text-slate-500">
+                                            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                                                 {step.status === 'triggered' ? '已触发' : step.status === 'blocked' ? '缺数据' : '待核对'}
                                             </span>
                                         </div>

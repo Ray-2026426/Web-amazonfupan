@@ -1,41 +1,15 @@
 
-import React, { useState, lazy, Suspense } from 'react';
-import { AggregatedData, DataRow, FilterState, TargetRow } from '../types';
+import React, { useState } from 'react';
+import { AggregatedData } from '../types';
 import { formatNumber, formatPercent, formatPrice, formatMoneyNoDecimals } from '../utils';
-import { Search, Calculator, FileSearch, MessageSquare, Target, ArrowUp, ArrowDown, Minus, X } from 'lucide-react';
+import { Search, Calculator, FileSearch, MessageSquare, Target } from 'lucide-react';
 import { METRICS, metricValue } from '../utils/metrics';
-import { TREND_TONE, trendKeyOf } from '../utils/semantics';
-
-const MiniTrendChart = lazy(() => import('./MiniTrendChart').then(m => ({ default: m.MiniTrendChart })));
-
-type TrendConfig = {
-    key: string;
-    label: string;
-    isPercent: boolean;
-    isMoney: boolean;
-    targetKey?: string;
-};
-
-type TableColumn = {
-    header: string | React.ReactNode;
-    current: number | string;
-    last?: { val: number | undefined; diffType: 'percent' | 'absolute_val' | 'absolute_percent' };
-    year?: { val: number | undefined; diffType: 'percent' | 'absolute_val' | 'absolute_percent' };
-    formatter: (v: number) => string;
-    /** 若提供，点击指标值可展开该指标的历史趋势 */
-    trend?: TrendConfig;
-};
 
 interface TableProps {
   current: AggregatedData;
   last: AggregatedData | null;
   year: AggregatedData | null;
   target: AggregatedData;
-  /** 供表格内联趋势图使用（原始明细 + 当前筛选 + 目标） */
-  rawData?: DataRow[];
-  filters?: FilterState;
-  isWeeklyMode?: boolean;
-  targetRows?: TargetRow[];
   onOpenDetail?: () => void;
   onOpenCalculator?: () => void;
   onOpenRefundAnalysis?: () => void;
@@ -65,59 +39,63 @@ const ComparisonLine = ({
     //  - 仅 percent 类型才会涉及除以基期，absolute_val / absolute_percent 仍按差值显示
     const isRelative = type === 'percent';
     if (isRelative && baseline === 0) {
-        const tone = TREND_TONE[current > 0 ? 'up' : 'flat'];
+        const tone = current > 0
+            ? 'text-emerald-600 bg-emerald-500/10 border-emerald-200'
+            : 'text-slate-400 bg-slate-100 border-slate-200';
         const label2 = current > 0 ? 'New' : '—';
         return (
-            <div className="mt-1.5 flex items-center justify-end gap-1.5 whitespace-nowrap text-[11px] text-slate-500">
-                <span className="text-[10px] text-slate-500">{label}</span>
-                <span className="tabular-nums">{formatter(baseline)}</span>
-                <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 font-semibold ${tone.chip}`}>{label2}</span>
+            <div className="mt-1.5 flex items-center justify-end gap-1.5 whitespace-nowrap text-[10px] font-mono text-slate-400">
+                <span className="uppercase tracking-[0.2em] opacity-70">{label}</span>
+                <span>{formatter(baseline)}</span>
+                <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 font-semibold ${tone}`}>{label2}</span>
             </div>
         );
     }
 
-    const delta = isRelative
-        ? (current - baseline) / baseline
-        : (current - baseline);
-    const direction = trendKeyOf(delta);
-    const tone = TREND_TONE[direction];
-    const Icon = direction === 'up' ? ArrowUp : direction === 'down' ? ArrowDown : Minus;
-    const sign = delta > 0 ? '+' : '';
-    const deltaStr = type === 'absolute_val' ? formatter(delta) : (delta * 100).toFixed(2) + '%';
+    const pct = type === 'absolute_percent' || type === 'absolute_val'
+        ? (current - baseline)
+        : ((current - baseline) / baseline);
+
+    const isPositive = pct > 0;
+    const isZero = pct === 0;
+    
+    const tone = isPositive
+        ? 'text-emerald-600 bg-emerald-500/10 border-emerald-200'
+        : isZero
+            ? 'text-slate-400 bg-slate-100 border-slate-200'
+            : 'text-rose-600 bg-rose-500/10 border-rose-200';
+    const sign = isPositive ? '+' : '';
+    const pctStr = type === 'absolute_val' ? formatter(pct) : (pct * 100).toFixed(2) + '%';
 
     return (
-        <div className="mt-1.5 flex items-center justify-end gap-1.5 whitespace-nowrap text-[11px] text-slate-500">
-            <span className="text-[10px] text-slate-500">{label}</span>
-            <span className="tabular-nums">{formatter(baseline)}</span>
-            <span className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 font-semibold tabular-nums ${tone.chip}`}>
-                <Icon className="h-2.5 w-2.5" aria-hidden="true" />
-                {sign}{deltaStr}
-            </span>
+        <div className="mt-1.5 flex items-center justify-end gap-1.5 whitespace-nowrap text-[10px] font-mono text-slate-400">
+            <span className="uppercase tracking-[0.2em] opacity-70">{label}</span>
+            <span>{formatter(baseline)}</span>
+            <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 font-semibold ${tone}`}>{sign}{pctStr}</span>
         </div>
     );
 };
 
 // Transposed Table Component
-type ColumnGroup = { label: string; from: number; to: number };
-
 const TransposedTable = ({ 
     title, 
     columns,
-    groups = [],
-    trendContext,
     onOpenDetail,
     customAction
 }: { 
     title: string, 
-    columns: TableColumn[],
-    groups?: ColumnGroup[],
-    trendContext?: { rawData: DataRow[]; filters: FilterState; isWeeklyMode: boolean; targetRows: TargetRow[] },
+    columns: { 
+        header: string | React.ReactNode, 
+        current: number | string, 
+        last?: { val: number | undefined, diffType: 'percent' | 'absolute_val' | 'absolute_percent' },
+        year?: { val: number | undefined, diffType: 'percent' | 'absolute_val' | 'absolute_percent' },
+        formatter: (v: number) => string 
+    }[],
     onOpenDetail?: () => void,
     customAction?: React.ReactNode // New prop for custom header buttons
 }) => {
     const [hiddenColumns, setHiddenColumns] = useState<Set<number>>(() => new Set());
     const [showColumns, setShowColumns] = useState(false);
-    const [openTrendKey, setOpenTrendKey] = useState<string | null>(null);
     const visibleColumns = columns.map((col, index) => ({col, index})).filter(({index}) => !hiddenColumns.has(index));
     const columnName = (node: React.ReactNode, fallback: string): string => {
         if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -125,23 +103,11 @@ const TransposedTable = ({
         if (React.isValidElement<{children?: React.ReactNode}>(node)) return columnName(node.props.children, fallback);
         return fallback;
     };
-    const groupSpans = groups
-        .map(group => ({
-            ...group,
-            count: visibleColumns.filter(({index}) => index >= group.from && index <= group.to).length,
-        }))
-        .filter(group => group.count > 0);
-
-    // 内联趋势：点击指标值即可在表格下方展开该指标最近 12 期走势。
-    const openTrend = openTrendKey ? columns.find(col => col.trend?.key === openTrendKey)?.trend : undefined;
-    const trendFormatter = (trend: TrendConfig) =>
-        trend.isPercent ? formatPercent : trend.isMoney ? formatMoneyNoDecimals : formatNumber;
-
     return (
         <div className="overflow-hidden rounded-3xl border border-white/80 bg-white shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] ring-1 ring-slate-200/70">
             <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 bg-[linear-gradient(135deg,#0f172a_0%,#172554_100%)] px-5 py-4 text-white">
                 <div>
-                    <div className="mt-1 text-sm font-bold">{title}</div>
+                    <div className="mt-1 text-sm font-bold tracking-[0.08em]">{title}</div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
                     <button type="button" onClick={() => setShowColumns(v => !v)} className="rounded-2xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-semibold text-white">显示列</button>
@@ -159,20 +125,11 @@ const TransposedTable = ({
             </div>
             {showColumns && <div className="flex flex-wrap gap-2 border-b border-slate-200 bg-slate-50 p-3 text-xs">{columns.map((col, index) => <label key={index} className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1"><input type="checkbox" checked={!hiddenColumns.has(index)} disabled={!hiddenColumns.has(index) && visibleColumns.length === 1} onChange={() => setHiddenColumns(prev => { const next = new Set(prev); if (next.has(index)) next.delete(index); else next.add(index); return next; })} />{columnName(col.header, `指标 ${index + 1}`)}</label>)}</div>}
             <div className="overflow-x-auto custom-scroll">
-                <table className="min-w-max text-left text-sm">
+                <table className="min-w-max text-sm text-left">
                     <thead>
-                        {groupSpans.length > 0 && (
-                            <tr className="border-b border-slate-200 bg-slate-100/70">
-                                {groupSpans.map(group => (
-                                    <th key={group.label} colSpan={group.count} className="border-r border-slate-200 px-4 py-2 text-left text-[11px] font-semibold text-slate-600 last:border-0">
-                                        {group.label}
-                                    </th>
-                                ))}
-                            </tr>
-                        )}
                         <tr className="border-b border-slate-200 bg-slate-50/80">
                             {visibleColumns.map(({col, index}, displayIndex) => (
-                                <th key={index} className={`min-w-[168px] border-r border-slate-100 px-4 py-3.5 text-right text-[11px] font-semibold text-slate-500 last:border-0 ${displayIndex === 0 ? 'sticky left-0 z-10 bg-slate-50' : ''}`}>
+                                <th key={index} className={`min-w-[168px] border-r border-slate-100 px-4 py-3.5 text-right text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 last:border-0 ${displayIndex === 0 ? 'sticky left-0 z-10 bg-slate-50' : ''}`}>
                                     {col.header}
                                 </th>
                             ))}
@@ -182,21 +139,9 @@ const TransposedTable = ({
                         <tr className="bg-white">
                             {visibleColumns.map(({col, index}, displayIndex) => (
                                 <td key={index} className={`border-r border-slate-100 px-4 py-4 text-right align-top last:border-0 even:bg-slate-50/35 ${displayIndex === 0 ? 'sticky left-0 z-10 bg-white' : ''}`}>
-                                    {typeof col.current === 'number' && col.trend && trendContext ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => setOpenTrendKey(prev => prev === col.trend!.key ? null : col.trend!.key)}
-                                            aria-expanded={openTrendKey === col.trend.key}
-                                            title={`查看「${col.trend.label}」历史趋势`}
-                                            className="font-mono text-lg font-bold tracking-tight text-slate-900 tabular-nums underline-offset-4 transition-colors hover:text-sky-700 hover:underline"
-                                        >
-                                            {col.formatter(col.current)}
-                                        </button>
-                                    ) : (
-                                        <div className="text-lg font-bold tracking-tight text-slate-900 font-mono tabular-nums">
-                                            {typeof col.current === 'number' ? col.formatter(col.current) : col.current}
-                                        </div>
-                                    )}
+                                    <div className="text-lg font-bold text-slate-900 font-mono tracking-tight">
+                                        {typeof col.current === 'number' ? col.formatter(col.current) : col.current}
+                                    </div>
                                     {typeof col.current === 'number' && col.last && (
                                         <ComparisonLine 
                                             label="环比" 
@@ -221,57 +166,12 @@ const TransposedTable = ({
                     </tbody>
                 </table>
             </div>
-            {openTrend && trendContext && (
-                <div className="border-t border-slate-200 bg-slate-50/60 p-4">
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-bold text-slate-700">{openTrend.label} · 历史趋势</span>
-                            <span className="text-[11px] text-slate-500">（最近 12 {trendContext.isWeeklyMode ? '周' : '个月'}）</span>
-                        </div>
-                        <button
-                            type="button"
-                            aria-label="关闭趋势图"
-                            onClick={() => setOpenTrendKey(null)}
-                            className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
-                        >
-                            <X className="h-4 w-4" />
-                        </button>
-                    </div>
-                    <Suspense fallback={<p className="py-8 text-center text-sm text-slate-500">正在加载趋势图…</p>}>
-                        <MiniTrendChart
-                            rawData={trendContext.rawData}
-                            filters={trendContext.filters}
-                            metricKey={openTrend.key}
-                            metricLabel={openTrend.label}
-                            formatter={trendFormatter(openTrend)}
-                            isPercent={openTrend.isPercent}
-                            isMoney={openTrend.isMoney}
-                            isWeekly={trendContext.isWeeklyMode}
-                            targetRows={trendContext.targetRows}
-                            targetKey={openTrend.targetKey}
-                        />
-                    </Suspense>
-                </div>
-            )}
         </div>
     );
 };
 
-export const PLTable: React.FC<TableProps> = ({ current, last, year, rawData, filters, isWeeklyMode, targetRows, onOpenDetail, onOpenCalculator, onOpenRefundAnalysis, onOpenReviewAnalysis }) => {
-    // 成本结构默认收拢，避免 14 列一屏横向滚动；一键展开可查看全部占比。
-    const [showCosts, setShowCosts] = useState(false);
-
-    // 核心列的指标趋势配置（按 coreColumns 顺序一一对应；成本占比类为率值，不提供趋势）
-    const PL_TREND: (TrendConfig | undefined)[] = [
-        { key: 'sales_quantity', label: '销量', isPercent: false, isMoney: false, targetKey: 'sales_quantity_target' },
-        { key: 'sales_amount', label: '销售额', isPercent: false, isMoney: true, targetKey: 'sales_amount_target' },
-        { key: 'gross_profit', label: '毛利额', isPercent: false, isMoney: true, targetKey: 'gross_profit_target' },
-        { key: 'gross_margin', label: '毛利率', isPercent: true, isMoney: false },
-        { key: 'fba_sellable_qty', label: 'FBA可售', isPercent: false, isMoney: false },
-        { key: 'avg_ticket', label: '客单均价', isPercent: false, isMoney: true },
-        { key: 'average_rating', label: '平均评分', isPercent: false, isMoney: false },
-    ];
-
+export const PLTable: React.FC<TableProps> = ({ current, last, year, onOpenDetail, onOpenCalculator, onOpenRefundAnalysis, onOpenReviewAnalysis }) => {
+    
     const getVal = (obj: AggregatedData | null, key: keyof AggregatedData): number | undefined => {
         return obj ? obj[key] : undefined;
     };
@@ -281,7 +181,7 @@ export const PLTable: React.FC<TableProps> = ({ current, last, year, rawData, fi
         return obj[denKey] ? obj[numKey] / obj[denKey] : 0;
     };
 
-    const coreColumns = [
+    const columns = [
         { 
             header: "销量", 
             current: current.sales_quantity, 
@@ -424,45 +324,12 @@ export const PLTable: React.FC<TableProps> = ({ current, last, year, rawData, fi
         },
     ];
 
-    const coreWithTrend = coreColumns.map((col, index) => ({ ...col, trend: PL_TREND[index] }));
-    const columns = showCosts ? [...coreWithTrend, ...costColumns] : coreWithTrend;
-    const groups = showCosts
-        ? [
-            { label: '核心业绩', from: 0, to: 3 },
-            { label: '商品与口碑', from: 4, to: 6 },
-            { label: '成本结构', from: 7, to: 13 },
-        ]
-        : [
-            { label: '核心业绩', from: 0, to: 3 },
-            { label: '商品与口碑', from: 4, to: 6 },
-        ];
-    const trendContext = rawData && filters
-        ? { rawData, filters, isWeeklyMode: Boolean(isWeeklyMode), targetRows: targetRows || [] }
-        : undefined;
+    const allColumns = [...columns, ...costColumns];
 
-    return (
-        <React.Fragment key={showCosts ? 'pl-costs' : 'pl-core'}>
-            <TransposedTable
-                title="表格 1：P&L 核心业绩"
-                columns={columns}
-                groups={groups}
-                trendContext={trendContext}
-                onOpenDetail={onOpenDetail}
-                customAction={
-                    <button
-                        type="button"
-                        onClick={() => setShowCosts(v => !v)}
-                        className="rounded-2xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/15"
-                    >
-                        {showCosts ? '收起成本结构' : '成本结构（7 项）'}
-                    </button>
-                }
-            />
-        </React.Fragment>
-    );
+    return <TransposedTable title="表格 1：P&L 核心业绩" columns={allColumns} onOpenDetail={onOpenDetail} />;
 };
 
-export const TrafficTable: React.FC<TableProps> = ({ current, last, year, rawData, filters, isWeeklyMode, targetRows, onOpenDetail, onOpenKeywordAnalysis }) => {
+export const TrafficTable: React.FC<TableProps> = ({ current, last, year, onOpenDetail, onOpenKeywordAnalysis }) => {
     
     const getVal = (obj: AggregatedData | null, key: keyof AggregatedData): number | undefined => {
         return obj ? obj[key] : undefined;
@@ -477,7 +344,7 @@ export const TrafficTable: React.FC<TableProps> = ({ current, last, year, rawDat
         return d.natural_orders / d.natural_clicks;
     };
 
-    const trafficColumns = [
+    const columns = [
         { 
             header: "广告花费", 
             current: current.ad_spend, 
@@ -558,37 +425,10 @@ export const TrafficTable: React.FC<TableProps> = ({ current, last, year, rawDat
         },
     ];
 
-    // 流量表列的指标趋势配置（顺序与 trafficColumns 一致；效率类为率值，不提供趋势）
-    const TRAFFIC_TREND: (TrendConfig | undefined)[] = [
-        { key: 'ad_spend', label: '广告花费', isPercent: false, isMoney: true, targetKey: 'ad_spend_target' },
-        { key: 'ad_sales', label: '广告销售额', isPercent: false, isMoney: true },
-        { key: 'sp_spend', label: 'SP花费', isPercent: false, isMoney: true },
-        { key: 'sp_sales', label: 'SP销售额', isPercent: false, isMoney: true },
-        { key: 'sd_spend', label: 'SD花费', isPercent: false, isMoney: true },
-        { key: 'sd_sales', label: 'SD销售额', isPercent: false, isMoney: true },
-        { key: 'sb_spend', label: 'SB花费', isPercent: false, isMoney: true },
-        { key: 'sb_sales', label: 'SB销售额', isPercent: false, isMoney: true },
-        { key: 'sbv_spend', label: 'SBV花费', isPercent: false, isMoney: true },
-        { key: 'sbv_sales', label: 'SBV销售额', isPercent: false, isMoney: true },
-        { key: 'impressions', label: '展示量', isPercent: false, isMoney: false },
-        { key: 'clicks', label: '点击', isPercent: false, isMoney: false },
-    ];
-    const columns = trafficColumns.map((col, index) => ({ ...col, trend: TRAFFIC_TREND[index] }));
-    const trendContext = rawData && filters
-        ? { rawData, filters, isWeeklyMode: Boolean(isWeeklyMode), targetRows: targetRows || [] }
-        : undefined;
-
     return (
         <TransposedTable 
             title="表格 2：流量与广告效率" 
             columns={columns} 
-            groups={[
-                { label: '广告总览', from: 0, to: 1 },
-                { label: '分类型花费与销售（SP / SD / SB / SBV）', from: 2, to: 9 },
-                { label: '流量规模', from: 10, to: 11 },
-                { label: '效率指标', from: 12, to: 17 },
-            ]}
-            trendContext={trendContext}
             onOpenDetail={onOpenDetail} 
             customAction={
                 onOpenKeywordAnalysis ? (

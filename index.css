@@ -108,21 +108,12 @@ html[data-table-density="compact"] table td { padding-top: 0.45rem !important; p
 html[data-table-density="comfortable"] table th,
 html[data-table-density="comfortable"] table td { padding-top: 0.85rem; padding-bottom: 0.85rem; }
 
-/* ---------- 数字对齐 ----------
- * 表格与等宽数字统一使用等宽字形（tabular-nums），避免金额/百分比纵向对比时数位漂移。
- */
-table,
-.font-mono {
-    font-variant-numeric: tabular-nums;
-}
-
 /* ---------- 层级 token（视觉一致性） ----------
  * 只保留两个层级，避免「28px / 24px / 3xl」混用导致层级模糊：
  *   · panel（页头、三张主表、经营雷达、加载/空状态）：
  *       rounded-3xl + shadow 0 24px 70px -42px rgba(15,23,42,.45)
  *   · card（指标卡、内嵌信息块）：
  *       rounded-2xl + shadow 0 18px 50px -30px rgba(15,23,42,.35)
- * 颜色语义见 utils/semantics.ts（涨跌 / 达成 / 严重度 / 状态四套分离）。
  */
 
 :focus-visible { outline: 2px solid #0284c7; outline-offset: 2px; }

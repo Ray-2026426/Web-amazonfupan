@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useRef, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 import { ActionItem, BusinessIssue, DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot, DataCoverage, AppMeta } from './types';
 import { 
   calculatePeriodDates, 
@@ -16,6 +16,7 @@ import {
   getISOWeekDateRange,
   formatDate,
   formatMoneyNoDecimals,
+  getCurrentWeekInfo,
   buildProductImageLookup,
   type ProductImageLookup,
 } from './utils';
@@ -64,25 +65,68 @@ const initialFilters: FilterState = {
   productNames: []
 };
 
-// 筛选 chip 的中文标签（此前直接渲染 countries / brands 等英文字段名）
-const FILTER_KEY_LABELS: Record<string, string> = {
-  countries: '国家',
-  shops: '店铺',
-  brands: '品牌',
-  managers: '负责人',
-  subCategories: '二级分类',
-  parentAsins: '父ASIN',
-  childAsins: '子ASIN',
-  productNames: '品名',
-};
+// --- World Clock Component ---
+const WorldClock = () => {
+    const [times, setTimes] = useState<Record<string, string>>({});
+    const [weekLine, setWeekLine] = useState<string>(() => {
+        const { week, rangeCompact } = getCurrentWeekInfo();
+        return `第 ${week} 周（${rangeCompact}）`;
+    });
 
-const REPORT_SECTIONS: { id: string; label: string }[] = [
-  { id: 'overview', label: '业绩概览' },
-  { id: 'issues', label: '优先事项' },
-  { id: 'pl', label: '利润表' },
-  { id: 'traffic', label: '流量广告' },
-  { id: 'inventory', label: '库存' },
-];
+    useEffect(() => {
+        const updateTime = () => {
+            const now = new Date();
+            const { week, rangeCompact } = getCurrentWeekInfo();
+            setWeekLine(`第 ${week} 周（${rangeCompact}）`);
+
+            const format = (date: Date) => {
+                const m = date.getMonth() + 1;
+                const d = date.getDate();
+                const h = date.getHours().toString().padStart(2, '0');
+                const min = date.getMinutes().toString().padStart(2, '0');
+                return `${m}.${d} ${h}:${min}`;
+            };
+
+            const getTzTime = (tz: string) => new Date(now.toLocaleString("en-US", { timeZone: tz }));
+
+            setTimes({
+                CN: format(getTzTime("Asia/Shanghai")),
+                EU: format(getTzTime("Europe/Berlin")), // Using Germany as central EU time
+                US: format(getTzTime("America/Los_Angeles")) // Using PST/PDT (Amazon HQ)
+            });
+        };
+
+        updateTime();
+        const interval = setInterval(updateTime, 60000); // Update every minute
+        return () => clearInterval(interval);
+    }, []);
+
+    if (!times.CN) return null;
+
+    return (
+        <div className="hidden 2xl:flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white/70 px-3 py-2 text-[10px] font-mono font-medium text-slate-500 shadow-sm">
+            <div className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
+                <CalendarDays className="w-3 h-3" />
+                <span>{weekLine}</span>
+            </div>
+            <div className="w-px h-4 bg-slate-200"></div>
+            <div className="flex items-center gap-1.5">
+                <span className="font-bold text-rose-500">CN</span>
+                <span className="text-slate-700">{times.CN}</span>
+            </div>
+            <div className="w-px h-4 bg-slate-200"></div>
+            <div className="flex items-center gap-1.5">
+                <span className="font-bold text-sky-600">EU</span>
+                <span className="text-slate-700">{times.EU}</span>
+            </div>
+            <div className="w-px h-4 bg-slate-200"></div>
+            <div className="flex items-center gap-1.5">
+                <span className="font-bold text-violet-600">US</span>
+                <span className="text-slate-700">{times.US}</span>
+            </div>
+        </div>
+    );
+};
 
 const App: React.FC = () => {
   // Data States
@@ -445,29 +489,6 @@ const App: React.FC = () => {
       });
   }, [processedData, isWeeklyMode]);
 
-  // --- Scroll spy：滚动时高亮当前模块，避免长页面丢失位置感 ---
-  const mainRef = useRef<HTMLElement | null>(null);
-  const [activeSection, setActiveSection] = useState('overview');
-
-  useEffect(() => {
-      if (!processedData) return;
-      const root = mainRef.current;
-      if (!root || typeof IntersectionObserver === 'undefined') return;
-      const els = REPORT_SECTIONS
-          .map(({ id }) => root.querySelector<HTMLElement>(`#${id}`))
-          .filter((el): el is HTMLElement => Boolean(el));
-      if (!els.length) return;
-      const observer = new IntersectionObserver((entries) => {
-          const visible = entries
-              .filter(entry => entry.isIntersecting)
-              .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-          const next = visible[0]?.target.id;
-          if (next) setActiveSection(next);
-      }, { root, rootMargin: '-20% 0px -65% 0px', threshold: 0 });
-      els.forEach(el => observer.observe(el));
-      return () => observer.disconnect();
-  }, [processedData]);
-
   return (
     <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#e0f2fe_0%,#eff6ff_22%,#f8fafc_52%,#f8fafc_100%)] font-sans text-slate-900">
       {sidebarOpen && <button type="button" aria-label="关闭筛选侧栏" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-slate-950/50 xl:hidden" />}
@@ -512,16 +533,8 @@ const App: React.FC = () => {
             </div>
             
             <div className="flex items-center gap-2 sm:gap-3">
-                <div className="hidden items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-slate-600 lg:flex">
-                    <span className="flex items-center gap-1.5">
-                        <CalendarDays className="h-3 w-3" />
-                        {isWeeklyMode ? '周度' : '月度'} · {filters.startDate || '--'} 至 {filters.endDate || '--'}
-                    </span>
-                    <span className="h-4 w-px bg-slate-200" />
-                    <span>数据截至 {dataEndDate || '未标注'}</span>
-                    <span className="h-4 w-px bg-slate-200" />
-                    <span>更新 {lastImportedAt ? new Date(lastImportedAt).toLocaleString('zh-CN') : '未记录'}</span>
-                </div>
+                <WorldClock />
+                <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block"></div>
 
                 <AppSettingsButton />
 
@@ -538,7 +551,7 @@ const App: React.FC = () => {
         </header>
 
         {/* Scrollable Content */}
-        <main ref={mainRef} className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">
             {persistenceError && <div role="alert" className="mx-auto mb-3 flex max-w-[1680px] items-center justify-between rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"><span>{persistenceError}</span><button type="button" onClick={() => setPersistenceError('')} className="ml-3 font-bold">关闭</button></div>}
             {isRestoringData ? (
                 <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/80 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
@@ -556,49 +569,17 @@ const App: React.FC = () => {
                                 <div className="mt-1 text-xs text-slate-500">数据截至 {dataEndDate || '未标注'} · 最近导入 {lastImportedAt ? new Date(lastImportedAt).toLocaleString('zh-CN') : '未记录'} · 本期 {processedData.currentRows.length} 行 · {processedData.warnings.length} 条完整性提示</div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2 text-xs">
-                                {Object.entries(filters).filter(([key, value]) => !['startDate', 'endDate'].includes(key) && Array.isArray(value) && value.length > 0).map(([key, value]) => {
-                                    const vals = value as string[];
-                                    const label = FILTER_KEY_LABELS[key] || key;
-                                    const noneSelected = vals.includes('__NONE__');
-                                    const summary = noneSelected ? '未选' : `${vals.slice(0, 2).join('、')}${vals.length > 2 ? ` 等${vals.length}项` : ''}`;
-                                    return (
-                                        <span key={key} className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 font-medium text-sky-800">
-                                            {label}：{summary}
-                                            <button
-                                                type="button"
-                                                aria-label={`移除${label}筛选`}
-                                                onClick={() => setFilters(prev => ({ ...prev, [key]: [] } as FilterState))}
-                                                className="rounded-full p-0.5 text-sky-600 transition-colors hover:bg-sky-100"
-                                            >
-                                                <X className="h-3 w-3" />
-                                            </button>
-                                        </span>
-                                    );
-                                })}
+                                {Object.entries(filters).filter(([key, value]) => !['startDate', 'endDate'].includes(key) && Array.isArray(value) && value.length > 0).map(([key, value]) => <span key={key} className="rounded-full bg-sky-50 px-2.5 py-1 font-medium text-sky-800">{key}: {(value as string[]).slice(0, 2).join('、')}{(value as string[]).length > 2 ? ` 等${(value as string[]).length}项` : ''}</span>)}
                                 <button type="button" onClick={() => setFilters(prev => ({...initialFilters, startDate: prev.startDate, endDate: prev.endDate}))} className="rounded-full border border-slate-200 px-2.5 py-1 text-slate-600 hover:bg-slate-50">清除维度筛选</button>
                             </div>
                         </div>
-                        {processedData.target.gross_profit > 0 && <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-700">毛利额距目标 <strong className="tabular-nums text-rose-700">{formatMoneyNoDecimals(Math.max(0, processedData.target.gross_profit - processedData.current.gross_profit))}</strong>{!isWeeklyMode && processedData.pacingRatio > 0 && processedData.pacingRatio < 1 && <> · 按当前进度预计期末 <strong className="tabular-nums">{formatMoneyNoDecimals(processedData.current.gross_profit / processedData.pacingRatio)}</strong></>}</p>}
-                        {businessIssues.some(issue => issue.severity !== 'info') && (
-                            <a href="#issues" className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-xs font-semibold">
-                                <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-700">严重 {businessIssues.filter(issue => issue.severity === 'critical').length}</span>
-                                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700">预警 {businessIssues.filter(issue => issue.severity === 'warning').length}</span>
-                                <span className="text-sky-700">查看优先事项与建议动作 →</span>
-                            </a>
-                        )}
+                        {processedData.target.gross_profit > 0 && <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-700">毛利额距目标 <strong className="text-rose-700">{formatMoneyNoDecimals(Math.max(0, processedData.target.gross_profit - processedData.current.gross_profit))}</strong>{!isWeeklyMode && processedData.pacingRatio > 0 && processedData.pacingRatio < 1 && <> · 按当前进度预计期末 <strong>{formatMoneyNoDecimals(processedData.current.gross_profit / processedData.pacingRatio)}</strong></>}</p>}
                     </section>}
-                    {processedData && <nav aria-label="报表模块" className="sticky top-0 z-20 -mx-1 flex gap-2 overflow-x-auto whitespace-nowrap rounded-2xl bg-white/90 px-1 py-2 text-xs font-semibold text-slate-600 backdrop-blur">
-                        {REPORT_SECTIONS.map(({ id, label }) => (
-                            <a
-                                key={id}
-                                href={`#${id}`}
-                                aria-current={activeSection === id ? 'true' : undefined}
-                                className={`rounded-full border px-3 py-1.5 transition-colors ${activeSection === id ? 'border-sky-500 bg-sky-600 text-white' : 'border-slate-200 bg-white hover:border-sky-300 hover:text-sky-700'}`}
-                            >
-                                {label}
-                            </a>
-                        ))}
-                    </nav>}
+                    {processedData && <nav aria-label="报表模块" className="flex gap-2 overflow-x-auto whitespace-nowrap text-xs font-semibold text-slate-600">{[['overview','业绩概览'],['issues','优先事项'],['pl','利润表'],['traffic','流量广告'],['inventory','库存']].map(([id,label]) => <a key={id} href={`#${id}`} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 hover:border-sky-300 hover:text-sky-700">{label}</a>)}</nav>}
+                    {processedData && <section aria-label="本期最值得处理的问题" className="rounded-2xl border border-slate-200 bg-white/90 p-4">
+                        <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-bold text-slate-900">本期最值得处理的 3 个问题</h2><a href="#issues" className="text-xs font-semibold text-sky-700">查看诊断与行动 →</a></div>
+                        {businessIssues.some(issue => issue.severity !== 'info') ? <div className="grid gap-2 md:grid-cols-3">{businessIssues.filter(issue => issue.severity !== 'info').slice(0, 3).map((issue, index) => <a key={issue.id} href="#issues" className="rounded-xl border border-slate-200 bg-slate-50 p-3 hover:border-sky-300"><span className="text-xs font-bold text-sky-700">#{index + 1} {issue.estimatedGrossProfitImpact !== undefined ? `估算影响 ${formatMoneyNoDecimals(issue.estimatedGrossProfitImpact)}` : '影响待量化'}</span><div className="mt-1 text-sm font-semibold text-slate-900">{issue.title}</div><p className="mt-1 line-clamp-2 text-xs text-slate-500">{issue.evidence}</p></a>)}</div> : <p className="text-sm text-emerald-700">本期未发现高优先级异常。{processedData.warnings.length ? `仍有 ${processedData.warnings.length} 条数据完整性提示，请核对后再做决策。` : '可从利润表查找可复制的高毛利商品。'}</p>}
+                    </section>}
 
                     
                     {/* 1. Overview Cards */}
@@ -635,10 +616,6 @@ const App: React.FC = () => {
                             last={processedData.last}
                             year={processedData.year}
                             target={processedData.target}
-                            rawData={isWeeklyMode ? weeklyData : performanceData}
-                            filters={filters}
-                            isWeeklyMode={isWeeklyMode}
-                            targetRows={targetData}
                             onOpenDetail={() => { setDetailType('PL'); setDetailModalOpen(true); }}
                             onOpenCalculator={() => handleOpenCalculator()}
                             onOpenRefundAnalysis={() => handleOpenRefundAnalysis()}
@@ -653,10 +630,6 @@ const App: React.FC = () => {
                             last={processedData.last}
                             year={processedData.year}
                             target={processedData.target}
-                            rawData={isWeeklyMode ? weeklyData : performanceData}
-                            filters={filters}
-                            isWeeklyMode={isWeeklyMode}
-                            targetRows={targetData}
                             onOpenDetail={() => { setDetailType('Traffic'); setDetailModalOpen(true); }}
                             onOpenKeywordAnalysis={() => setKeywordModalOpen(true)}
                         /></section>
