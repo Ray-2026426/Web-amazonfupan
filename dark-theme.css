@@ -2,7 +2,7 @@
  * dark-theme.css —— 暗色模式工具类覆盖表（自动生成，请勿手改）
  *
  * 由 scripts/gen-dark-theme.mjs 根据源码里实际用到的 359 个
- * 调色板工具类（共 1968 处）生成。
+ * 调色板工具类（共 2615 处）生成。
  * 重新生成： node scripts/gen-dark-theme.mjs
  * 校验覆盖率：node scripts/verify-dark-theme.mjs
  *

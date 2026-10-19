@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { X, TrendingUp } from 'lucide-react';
+import { X, TrendingUp, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { DataRow, TargetRow } from '../types';
 import {
     aggregateData,
@@ -12,11 +12,12 @@ import {
     allocateWeeklyTargetsLegacy,
 } from '../utils';
 import {
-    Area,
+    Bar,
     CartesianGrid,
+    Cell,
     ComposedChart,
+    LabelList,
     Line,
-    ReferenceDot,
     ResponsiveContainer,
     Tooltip,
     XAxis,
@@ -26,6 +27,9 @@ import { useEscClose } from './useEscClose';
 import { getTrendMetricsSelection, setTrendMetricsSelection } from './trendSelection';
 import {
     buildAxisTickLabels,
+    buildNiceAxis,
+    compactCount,
+    compactNumber,
     compactTick,
     formatDelta,
     formatPeriodLabel,
@@ -33,6 +37,8 @@ import {
     useChartTheme,
 } from './chartTheme';
 import { ChartTooltipCard, TooltipRow } from './ChartTooltip';
+import { MetricSparkline } from './MetricSparkline';
+import { buildTrendInsight, isCostMetric } from '../utils/trendInsight';
 
 export interface TrendColumn {
     title: string;
@@ -66,6 +72,7 @@ interface TrendChartModalProps {
 }
 
 const DEFAULT_METRIC_TITLES = ['销量', '毛利率', '广告占比', '退款占比', '头程占比'];
+const MAX_METRICS = 7;
 
 /** 跨趋势图共享的指标选择，仅在用户手动切换后写入；更新数据源时重置 */
 const getDefaultMetrics = (columns: TrendColumn[]): string[] => {
@@ -74,14 +81,15 @@ const getDefaultMetrics = (columns: TrendColumn[]): string[] => {
 };
 
 const resolveInitialMetrics = (columns: TrendColumn[]): string[] => {
-    if (getTrendMetricsSelection()) {
-        const valid = getTrendMetricsSelection()!.filter(t => columns.some(c => c.title === t));
-        if (valid.length > 0) return valid;
+    const persisted = getTrendMetricsSelection();
+    if (persisted) {
+        const valid = persisted.filter(t => columns.some(c => c.title === t));
+        if (valid.length > 0) return valid.slice(0, MAX_METRICS);
     }
     return getDefaultMetrics(columns);
 };
 
-/** 指标分组：单选一组展示，避免三行 9px 小标签挤在一起 */
+/** 指标分组：单选一组展示，避免三行小标签挤在一起 */
 const METRIC_GROUPS: { key: 'result' | 'process' | 'target'; label: string }[] = [
     { key: 'result', label: '结果' },
     { key: 'process', label: '过程' },
@@ -189,9 +197,13 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
     targetRows = []
 }) => {
     const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
+    const [mode, setMode] = useState<'single' | 'multi'>('single');
     const [chartWeekly, setChartWeekly] = useState(false);
     const [metricGroup, setMetricGroup] = useState<'result' | 'process' | 'target'>('result');
     const [rangeCount, setRangeCount] = useState<number>(12);
+    const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+    const [tableExpanded, setTableExpanded] = useState(false);
+    const [copyState, setCopyState] = useState<'idle' | 'ok' | 'err'>('idle');
     const wasTrendOpenRef = useRef(false);
     const theme = useChartTheme();
 
@@ -200,9 +212,12 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
         if (isOpen && !wasTrendOpenRef.current) {
             const initial = resolveInitialMetrics(columns);
             setSelectedMetrics(initial);
-            // 打开时落在「有已选指标」的分组，避免默认停在空分组上
+            setMode(initial.length >= 2 ? 'multi' : 'single');
             const firstSelectedCol = columns.find(c => c.title === initial[0]);
             if (firstSelectedCol?.metricGroup) setMetricGroup(firstSelectedCol.metricGroup);
+            setTableExpanded(false);
+            setCopyState('idle');
+            setHoverIndex(null);
         }
         wasTrendOpenRef.current = isOpen;
     }, [isOpen, columns]);
@@ -212,20 +227,37 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
         if (isOpen) setChartWeekly(sidebarWeeklyMode);
     }, [isOpen, sidebarWeeklyMode]);
 
-    const toggleMetric = (title: string) => {
+    const commitSelection = (next: string[]) => {
+        setSelectedMetrics(next);
+        setTrendMetricsSelection(next);
+    };
+
+    /** 单指标模式 = 单选；对比模式 = 多选（至少保留 1 项） */
+    const pickMetric = (title: string) => {
+        if (mode === 'single') {
+            commitSelection([title]);
+            return;
+        }
         setSelectedMetrics(prev => {
-            let next: string[];
             if (prev.includes(title)) {
                 if (prev.length === 1) return prev;
-                next = prev.filter(m => m !== title);
-            } else if (prev.length >= 7) {
-                return prev;
-            } else {
-                next = [...prev, title];
+                const next = prev.filter(m => m !== title);
+                setTrendMetricsSelection(next);
+                return next;
             }
+            if (prev.length >= MAX_METRICS) return prev;
+            const next = [...prev, title];
             setTrendMetricsSelection(next);
             return next;
         });
+    };
+
+    /** 从「对比」切回「单指标」时只保留第一个，避免图表与选中态不一致 */
+    const switchMode = (next: 'single' | 'multi') => {
+        setMode(next);
+        if (next === 'single' && selectedMetrics.length > 1) {
+            commitSelection(selectedMetrics.slice(0, 1));
+        }
     };
 
     const baseRaw = chartWeekly ? rawWeekly : rawMonthly;
@@ -339,7 +371,7 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
             };
         });
 
-        /** 期数裁剪：只留最近 N 期（含未来目标月），横轴才不会被 3 年历史压成一团 */
+        /** 期数裁剪：只留最近 N 期（含未来目标月），横轴才不会被多年历史压成一团 */
         const sliced = rangeCount > 0 && withTargets.length > rangeCount
             ? withTargets.slice(-rangeCount)
             : withTargets;
@@ -365,75 +397,203 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
 
     const seriesKeyOf = (col: TrendColumn) => col.dataKey || col.title;
 
-    const formatSeriesValue = (col: TrendColumn | undefined, value: number) => {
-        if (!col) return formatNumber(value);
-        if (col.isPercent) return formatPercent(value);
-        if (col.isMoney) {
-            return Math.abs(value) >= 100 ? formatMoneyNoDecimals(value) : formatMoney(value);
-        }
-        if (col.title === 'CPC') return `$${value.toFixed(2)}`;
-        if (col.title === '评分') return value.toFixed(1);
-        return formatNumber(value);
-    };
+    /** 目标列 → 对应的实际列（按 shortLabel / 去掉「（目标）」后的标题匹配） */
+    const targetKeyByLabel = new Map<string, string>();
+    columns
+        .filter(c => c.metricGroup === 'target' && c.dataKey)
+        .forEach(c => {
+            const label = c.shortLabel || c.title.replace('（目标）', '');
+            targetKeyByLabel.set(label, c.dataKey!);
+        });
 
     const chipLabel = (col: TrendColumn) => {
         if (col.metricGroup === 'target') return `${col.shortLabel || col.title.replace('（目标）', '')}目标`;
         return col.shortLabel || col.title;
     };
 
+    const unitOf = (col: TrendColumn) => (col.isPercent ? '%' : col.isMoney ? '美元' : '件');
+
+    /** 大字/自然读法：金额与计数带千分位，比率 1~2 位小数 */
+    const fmtKpi = (col: TrendColumn, v: number) => {
+        if (!Number.isFinite(v)) return '—';
+        if (col.isPercent) return `${(v * 100).toFixed(Math.abs(v * 100) < 10 ? 2 : 1)}%`;
+        if (col.isMoney) return formatMoneyNoDecimals(v);
+        return formatNumber(v);
+    };
+
+    /** 图内标注：尽量短（$412k / 1.2万 / 32.4%） */
+    const fmtLabel = (col: TrendColumn, v: number) => {
+        if (!Number.isFinite(v)) return '';
+        if (col.isPercent) return `${(v * 100).toFixed(1)}%`;
+        if (col.isMoney) return `$${compactNumber(v)}`;
+        return compactCount(v);
+    };
+
+    const axisTick = (col: TrendColumn, v: number) =>
+        compactTick(v, { isMoney: col.isMoney, isPercent: col.isPercent, isCount: !col.isMoney && !col.isPercent });
+
     const selectedCols = selectedMetrics
         .map(t => columns.find(c => c.title === t))
         .filter((c): c is TrendColumn => Boolean(c));
 
-    const hasAbsolute = selectedCols.some(c => !c.isPercent);
-    const hasPercent = selectedCols.some(c => c.isPercent);
-    const allAbsoluteAreMoney = selectedCols.filter(c => !c.isPercent).every(c => c.isMoney);
-    const singleSeries = selectedCols.length === 1;
+    const activeCol = selectedCols[0];
+    const activeKey = activeCol ? seriesKeyOf(activeCol) : '';
+    const activeTargetKey = activeCol ? targetKeyByLabel.get(activeCol.shortLabel || activeCol.title) : undefined;
 
-    const lastRow = chartData[chartData.length - 1];
+    const lastRow: any = chartData[chartData.length - 1];
+    const prevRow: any = chartData[chartData.length - 2];
+    const lastValue = lastRow && activeCol ? Number(lastRow[activeKey] ?? 0) : 0;
+    const prevValue = prevRow ? Number(prevRow[activeKey] ?? 0) : undefined;
+    const lastTarget = activeTargetKey && lastRow ? Number(lastRow[activeTargetKey] ?? 0) : 0;
+
+    const delta = formatDelta(lastValue, prevValue);
+    const costMetric = activeCol ? isCostMetric(activeCol.title) : false;
+    /** 环比颜色带语义：成本类指标「涨」为坏 */
+    const deltaTone = !delta || delta.direction === 'flat'
+        ? theme.textSubtle
+        : (delta.direction === 'up') === !costMetric
+          ? theme.positive
+          : theme.negative;
+
+    const insight = useMemo(
+        () =>
+            activeCol
+                ? buildTrendInsight({
+                      points: chartData.map((r: any) => ({ time: r.time, value: Number(r[activeKey] ?? 0) })),
+                      formatter: v => fmtKpi(activeCol, v),
+                      target: activeTargetKey ? lastTarget : undefined,
+                      higherIsBetter: !costMetric,
+                      periodLabel: t => {
+                          const found = chartData.find((r: any) => r.time === t) as any;
+                          return found?.__tick ?? t;
+                      },
+                  })
+                : [],
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [chartData, activeKey, activeTargetKey, lastTarget, costMetric, activeCol?.title]
+    );
+
+    /** 单指标图：柱（量）或线（率），刻度取整数，柱顶直接标数值 */
+    const singleAxis = (() => {
+        if (!activeCol || chartData.length === 0) return buildNiceAxis(0, 1, 4);
+        const values = chartData.map((r: any) => Number(r[activeKey] ?? 0)).filter((v: number) => Number.isFinite(v));
+        const maxV = Math.max(...values, activeTargetKey ? lastTarget : 0);
+        if (activeCol.isPercent) {
+            const minV = Math.min(...values, activeTargetKey ? lastTarget : Infinity);
+            const span = maxV - minV || Math.abs(maxV) * 0.1 || 0.01;
+            return buildNiceAxis(Math.max(0, minV - span * 0.25), maxV + span * 0.25, 4);
+        }
+        return buildNiceAxis(0, maxV * 1.08, 4);
+    })();
+
+    const showValueLabels = chartData.length > 0 && chartData.length <= 14;
 
     const groupColumns = columns.filter(c => (c.metricGroup || 'result') === metricGroup);
     const rangeLabel = (n: number) => (n === 0 ? '全部' : `近${n}${chartWeekly ? '周' : '月'}`);
 
-    const renderTooltip = ({ active, payload, label }: any) => {
-        if (!active || !payload || payload.length === 0) return null;
-        const index = chartData.findIndex(d => d.time === label);
+    /** 单指标 tooltip */
+    const renderSingleTooltip = ({ active, payload, label }: any) => {
+        if (!active || !payload || payload.length === 0 || !activeCol) return null;
+        const index = chartData.findIndex((d: any) => d.time === label);
         if (index < 0) return null;
         const row: any = chartData[index];
         const prev: any = index > 0 ? chartData[index - 1] : undefined;
+        const value = Number(row[activeKey] ?? 0);
+        const prevVal = prev ? Number(prev[activeKey] ?? 0) : undefined;
         const period = formatPeriodLabel(String(label), getBusinessWeekRangeFromYearWeek);
+        const rowTarget = activeTargetKey ? Number(row[activeTargetKey] ?? 0) : 0;
 
-        const rows: TooltipRow[] = selectedCols.map((col, idx) => {
-            const seriesKey = seriesKeyOf(col);
-            const value = Number(row[seriesKey] ?? 0);
-            const delta = prev ? formatDelta(value, Number(prev[seriesKey] ?? 0)) : null;
-            return {
-                key: col.title,
-                color: seriesColor(theme, idx),
-                label: chipLabel(col),
-                value: formatSeriesValue(col, value),
-                hollow: col.metricGroup === 'target',
-                muted: col.metricGroup === 'target',
-                delta: delta ?? undefined,
-            };
-        });
+        const rows: TooltipRow[] = [
+            { key: 'value', color: seriesColor(theme, 0), label: chipLabel(activeCol), value: fmtKpi(activeCol, value) },
+        ];
+        if (rowTarget > 0) {
+            rows.push({
+                key: 'target',
+                color: theme.target,
+                label: '目标',
+                value: fmtKpi(activeCol, rowTarget),
+                hollow: true,
+                muted: true,
+            });
+        }
+        const achievement = rowTarget > 0 ? (value / rowTarget) * 100 : null;
 
-        const single = rows.length === 1;
         return (
             <ChartTooltipCard
                 theme={theme}
                 title={period.title}
                 subtitle={period.subtitle}
-                delta={single ? rows[0].delta : undefined}
-                rows={rows.map(r => (single ? { ...r, delta: undefined } : r))}
+                delta={prevVal === undefined ? null : formatDelta(value, prevVal)}
+                rows={rows}
+                footer={
+                    achievement === null ? undefined : (
+                        <span>
+                            达成率{' '}
+                            <span className="font-mono font-semibold" style={{ color: theme.textMuted }}>
+                                {achievement.toFixed(1)}%
+                            </span>
+                        </span>
+                    )
+                }
             />
         );
     };
 
+    /** 数据表：最新在上，默认 6 行 */
+    const tableRows = useMemo(() => {
+        if (!activeCol) return [];
+        return chartData
+            .map((row: any, i: number) => {
+                const value = Number(row[activeKey] ?? 0);
+                const prev = i > 0 ? (chartData[i - 1] as any) : null;
+                const prevVal = prev ? Number(prev[activeKey] ?? 0) : undefined;
+                const target = activeTargetKey ? Number(row[activeTargetKey] ?? 0) : 0;
+                return {
+                    time: row.time as string,
+                    tick: (row as any).__tick as string,
+                    value,
+                    target,
+                    achievement: target > 0 ? (value / target) * 100 : null,
+                    delta: prevVal === undefined ? null : formatDelta(value, prevVal),
+                };
+            })
+            .reverse();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [chartData, activeKey, activeTargetKey, activeCol?.title]);
+
+    const visibleTableRows = tableExpanded ? tableRows : tableRows.slice(0, 6);
+
+    const copyTable = async () => {
+        if (!activeCol || tableRows.length === 0) return;
+        const header = ['月份', chipLabel(activeCol), '目标', '达成率', '环比'].join('\t');
+        const body = tableRows
+            .map(r =>
+                [
+                    r.tick ?? r.time,
+                    fmtKpi(activeCol, r.value),
+                    r.target > 0 ? fmtKpi(activeCol, r.target) : '—',
+                    r.achievement === null ? '—' : `${r.achievement.toFixed(1)}%`,
+                    r.delta ? r.delta.text.replace(/\s/g, '') : '—',
+                ].join('\t')
+            )
+            .join('\n');
+        try {
+            await navigator.clipboard.writeText(`${header}\n${body}`);
+            setCopyState('ok');
+        } catch {
+            setCopyState('err');
+        }
+        window.setTimeout(() => setCopyState('idle'), 1600);
+    };
+
+    /** 对比模式：悬浮某一格 → 顶部条与所有格子对齐到同一期 */
+    const focusIndex = hoverIndex !== null && hoverIndex < chartData.length ? hoverIndex : chartData.length - 1;
+    const focusRow: any = chartData[focusIndex];
+
     return (
         <div role="dialog" aria-modal="true" aria-label="趋势图" tabIndex={-1} className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-            <div className="flex h-[88vh] w-full max-w-[min(96vw,86.4rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/10">
-                {/* 顶栏：与「详细数据分析」保持同一套深色头部 */}
+            <div className="flex max-h-[88vh] w-full max-w-[min(96vw,88rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/10">
+                {/* 顶栏 */}
                 <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-700/50 bg-gradient-to-r from-slate-800 to-slate-700 px-4 py-2.5 text-white">
                     <div className="flex min-w-0 items-center gap-2.5">
                         <div className="flex-shrink-0 rounded-lg bg-white/10 p-1.5 ring-1 ring-white/15">
@@ -441,7 +601,11 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
                         </div>
                         <div className="min-w-0">
                             <h2 className="truncate text-sm font-semibold tracking-tight">趋势 · {title}</h2>
-                            <p className="truncate text-[10px] text-slate-300/80">实线为实际、虚线为目标 · 最多同时对比 7 项</p>
+                            <p className="truncate text-[10px] text-slate-300/80">
+                                {mode === 'single'
+                                    ? `柱 = 实际 · 虚线 = 目标 · 单位 ${activeCol ? unitOf(activeCol) : '—'}`
+                                    : '每个指标独立缩放 · 悬浮任意一格，全部对齐到同一期'}
+                            </p>
                         </div>
                     </div>
                     <button type="button" onClick={onClose} className="flex-shrink-0 rounded-full p-1.5 text-slate-300 transition-colors hover:bg-white/10 hover:text-white">
@@ -449,293 +613,465 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
                     </button>
                 </div>
 
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50">
-                    {/* 指标选择：分组切换 + 单行 chips，替代原来的三行 9px 小标签 */}
-                    <div className="flex-shrink-0 border-b border-slate-200/90 bg-white px-3 py-2">
-                        <div className="flex items-center gap-2">
-                            <div className="inline-flex shrink-0 rounded-lg bg-slate-100 p-0.5">
-                                {METRIC_GROUPS.map(g => {
-                                    const active = metricGroup === g.key;
-                                    const count = columns.filter(
-                                        c => (c.metricGroup || 'result') === g.key && selectedMetrics.includes(c.title)
-                                    ).length;
-                                    return (
-                                        <button
-                                            key={g.key}
-                                            type="button"
-                                            onClick={() => setMetricGroup(g.key)}
-                                            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
-                                                active
-                                                    ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200/70'
-                                                    : 'text-slate-500 hover:text-slate-700'
-                                            }`}
+                {/* 工具条：模式 / 分组 / 指标 / 粒度 / 期数 */}
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-slate-200/90 bg-white px-3 py-2">
+                    <div className="inline-flex shrink-0 rounded-lg bg-slate-100 p-0.5">
+                        <button
+                            type="button"
+                            onClick={() => switchMode('single')}
+                            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
+                                mode === 'single' ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200/70' : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            单指标
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => switchMode('multi')}
+                            className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
+                                mode === 'multi' ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200/70' : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            对比
+                        </button>
+                    </div>
+
+                    <div className="h-4 w-px shrink-0 bg-slate-200" aria-hidden />
+
+                    <div className="inline-flex shrink-0 rounded-lg bg-slate-100 p-0.5">
+                        {METRIC_GROUPS.map(g => {
+                            const active = metricGroup === g.key;
+                            const count = columns.filter(
+                                c => (c.metricGroup || 'result') === g.key && selectedMetrics.includes(c.title)
+                            ).length;
+                            return (
+                                <button
+                                    key={g.key}
+                                    type="button"
+                                    onClick={() => setMetricGroup(g.key)}
+                                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${
+                                        active ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-200/70' : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                                >
+                                    {g.label}
+                                    {count > 0 && (
+                                        <span className={`ml-1 font-mono text-[9px] ${active ? 'text-sky-600' : 'text-slate-400'}`}>{count}</span>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <div className="h-4 w-px shrink-0 bg-slate-200" aria-hidden />
+
+                    <div className="custom-scroll flex min-w-[8rem] flex-1 gap-1 overflow-x-auto pb-0.5">
+                        {groupColumns.map(col => {
+                            const selectedIdx = selectedMetrics.indexOf(col.title);
+                            const isSelected = selectedIdx >= 0;
+                            const color = isSelected
+                                ? seriesColor(theme, selectedIdx)
+                                : col.metricGroup === 'target'
+                                  ? theme.target
+                                  : theme.textSubtle;
+                            return (
+                                <button
+                                    key={col.title}
+                                    type="button"
+                                    onClick={() => pickMetric(col.title)}
+                                    title={mode === 'single' ? `查看 ${col.title}` : `加入对比：${col.title}`}
+                                    className="flex flex-shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-all hover:-translate-y-px"
+                                    style={{
+                                        borderColor: isSelected ? `${color}66` : 'transparent',
+                                        backgroundColor: isSelected ? `${color}14` : 'rgba(148,163,184,0.10)',
+                                        color: isSelected ? theme.text : theme.textMuted,
+                                    }}
+                                >
+                                    <span
+                                        aria-hidden
+                                        className="h-1.5 w-1.5 rounded-full"
+                                        style={{ backgroundColor: color, opacity: isSelected ? 1 : 0.45 }}
+                                    />
+                                    {chipLabel(col)}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <div className="inline-flex shrink-0 rounded-md bg-slate-100 p-0.5">
+                        <button
+                            type="button"
+                            disabled={!canMonthly}
+                            onClick={() => canMonthly && setChartWeekly(false)}
+                            className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
+                                !chartWeekly ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                            } disabled:cursor-not-allowed disabled:opacity-40`}
+                        >
+                            月
+                        </button>
+                        <button
+                            type="button"
+                            disabled={!canWeekly}
+                            onClick={() => canWeekly && setChartWeekly(true)}
+                            className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
+                                chartWeekly ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                            } disabled:cursor-not-allowed disabled:opacity-40`}
+                        >
+                            周
+                        </button>
+                    </div>
+                    <div className="inline-flex shrink-0 rounded-md bg-slate-100 p-0.5">
+                        {RANGE_OPTIONS.map(n => (
+                            <button
+                                key={n}
+                                type="button"
+                                onClick={() => setRangeCount(n)}
+                                className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
+                                    rangeCount === n ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                                }`}
+                            >
+                                {rangeLabel(n)}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="custom-scroll min-h-0 flex-1 overflow-y-auto bg-slate-50 p-3">
+                    {chartData.length === 0 ? (
+                        <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-slate-200/90 bg-white">
+                            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" className="text-slate-300" aria-hidden>
+                                <path d="M4 19V5M4 19h16" strokeLinecap="round" />
+                                <path d="M7 15l3.5-4 3 2.4L19 7" strokeLinecap="round" strokeLinejoin="round" opacity="0.5" />
+                            </svg>
+                            <p className="text-sm text-slate-400">暂无历史趋势数据</p>
+                            <p className="text-[11px] text-slate-300">上传月度或周度业绩表后即可查看趋势</p>
+                        </div>
+                    ) : mode === 'single' && activeCol ? (
+                        <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm">
+                            {/* KPI：大字 + 语义化 pill */}
+                            <div className="flex flex-wrap items-end gap-x-3 gap-y-1 px-4 pb-1 pt-3">
+                                <span className="font-mono text-[28px] font-bold leading-none tracking-tight tabular-nums" style={{ color: theme.text }}>
+                                    {fmtKpi(activeCol, lastValue)}
+                                </span>
+                                <span className="pb-0.5 text-[11px] font-medium" style={{ color: theme.textSubtle }}>
+                                    {unitOf(activeCol)}
+                                </span>
+                                <div className="flex flex-wrap items-center gap-1.5 pb-0.5">
+                                    {delta && (
+                                        <span
+                                            className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold"
+                                            style={{ color: deltaTone, borderColor: `${deltaTone}55`, backgroundColor: `${deltaTone}14` }}
                                         >
-                                            {g.label}
-                                            {count > 0 && (
-                                                <span className={`ml-1 font-mono text-[9px] ${active ? 'text-sky-600' : 'text-slate-400'}`}>
-                                                    {count}
-                                                </span>
-                                            )}
+                                            {delta.text} 较上期
+                                        </span>
+                                    )}
+                                    {lastTarget > 0 && (
+                                        <>
+                                            <span
+                                                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold"
+                                                style={{
+                                                    color: lastValue >= lastTarget ? theme.positive : theme.negative,
+                                                    borderColor: `${lastValue >= lastTarget ? theme.positive : theme.negative}55`,
+                                                    backgroundColor: `${lastValue >= lastTarget ? theme.positive : theme.negative}14`,
+                                                }}
+                                            >
+                                                达成 {((lastValue / lastTarget) * 100).toFixed(1)}%
+                                            </span>
+                                            <span className="text-[10.5px]" style={{ color: theme.textMuted }}>
+                                                目标 {fmtKpi(activeCol, lastTarget)}
+                                            </span>
+                                        </>
+                                    )}
+                                    <span className="text-[10.5px]" style={{ color: theme.textSubtle }}>
+                                        · {lastRow?.__tick ?? ''}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* 一句话结论 */}
+                            <p className="px-4 pb-1 text-[11.5px] leading-relaxed" style={{ color: theme.textMuted }}>
+                                {insight.map((span, i) => (
+                                    <span
+                                        key={i}
+                                        style={{
+                                            color:
+                                                span.tone === 'pos'
+                                                    ? theme.positive
+                                                    : span.tone === 'neg'
+                                                      ? theme.negative
+                                                      : span.tone === 'strong'
+                                                        ? theme.text
+                                                        : undefined,
+                                            fontWeight: span.tone === 'strong' ? 700 : undefined,
+                                        }}
+                                    >
+                                        {span.text}
+                                    </span>
+                                ))}
+                            </p>
+
+                            {/* 图表 */}
+                            <div className="h-[clamp(240px,42vh,400px)] px-2 pb-1 pt-1">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <ComposedChart data={chartData} margin={{ top: 26, right: 18, left: 4, bottom: 2 }}>
+                                        <CartesianGrid horizontal vertical={false} stroke={theme.grid} strokeWidth={1} />
+                                        <XAxis
+                                            dataKey="time"
+                                            tickFormatter={(v: string) => {
+                                                const found = chartData.find((d: any) => d.time === v) as any;
+                                                return found?.__tick ?? v;
+                                            }}
+                                            tick={{ fontSize: 11, fill: theme.axisTick }}
+                                            tickMargin={8}
+                                            axisLine={false}
+                                            tickLine={false}
+                                            interval="preserveStartEnd"
+                                            minTickGap={14}
+                                        />
+                                        <YAxis
+                                            domain={singleAxis.domain}
+                                            ticks={singleAxis.ticks}
+                                            tickFormatter={(v: number) => axisTick(activeCol, v)}
+                                            tick={{ fontSize: 11, fill: theme.axisTick }}
+                                            axisLine={false}
+                                            tickLine={false}
+                                            width={56}
+                                        />
+                                        <Tooltip
+                                            content={renderSingleTooltip}
+                                            cursor={{ fill: 'rgba(148,163,184,0.10)' }}
+                                            wrapperStyle={{ outline: 'none', zIndex: 40 }}
+                                        />
+
+                                        {activeTargetKey && (
+                                            <Line
+                                                type="linear"
+                                                dataKey={activeTargetKey}
+                                                name="目标"
+                                                stroke={theme.target}
+                                                strokeWidth={1.6}
+                                                strokeDasharray="4 4"
+                                                dot={false}
+                                                activeDot={false}
+                                                isAnimationActive={false}
+                                            />
+                                        )}
+
+                                        {activeCol.isPercent ? (
+                                            <Line
+                                                type="linear"
+                                                dataKey={activeKey}
+                                                name={chipLabel(activeCol)}
+                                                stroke={seriesColor(theme, 0)}
+                                                strokeWidth={2.4}
+                                                strokeLinecap="round"
+                                                dot={{ r: 2.6, strokeWidth: 0, fill: seriesColor(theme, 0) }}
+                                                activeDot={{ r: 5, strokeWidth: 3, stroke: theme.surface, fill: seriesColor(theme, 0) }}
+                                                isAnimationActive={false}
+                                            >
+                                                {showValueLabels && (
+                                                    <LabelList
+                                                        dataKey={activeKey}
+                                                        position="top"
+                                                        offset={9}
+                                                        fontSize={10}
+                                                        fontWeight={600}
+                                                        fill={theme.textMuted}
+                                                        formatter={(v: any) => fmtLabel(activeCol, Number(v))}
+                                                    />
+                                                )}
+                                            </Line>
+                                        ) : (
+                                            <Bar
+                                                dataKey={activeKey}
+                                                name={chipLabel(activeCol)}
+                                                isAnimationActive={false}
+                                                radius={[3, 3, 0, 0]}
+                                                maxBarSize={46}
+                                            >
+                                                {chartData.map((row: any, i: number) => (
+                                                    <Cell
+                                                        key={row.time}
+                                                        fill={seriesColor(theme, 0)}
+                                                        fillOpacity={i === chartData.length - 1 ? 1 : 0.34}
+                                                    />
+                                                ))}
+                                                {showValueLabels && (
+                                                    <LabelList
+                                                        dataKey={activeKey}
+                                                        position="top"
+                                                        offset={6}
+                                                        fontSize={10}
+                                                        fontWeight={600}
+                                                        fill={theme.textMuted}
+                                                        formatter={(v: any) => fmtLabel(activeCol, Number(v))}
+                                                    />
+                                                )}
+                                            </Bar>
+                                        )}
+                                    </ComposedChart>
+                                </ResponsiveContainer>
+                            </div>
+
+                            {/* 数据表：可以直接读数、复制到飞书 */}
+                            <div className="border-t border-slate-100">
+                                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[11px] font-semibold" style={{ color: theme.textMuted }}>
+                                            数据表（{tableRows.length} 期）
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setTableExpanded(v => !v)}
+                                            className="inline-flex items-center gap-1 rounded border border-slate-200 px-1.5 py-0.5 text-[10.5px] text-slate-600 transition-colors hover:bg-slate-50"
+                                        >
+                                            {tableExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                            {tableExpanded ? '收起' : '展开全部'}
                                         </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => void copyTable()}
+                                            className="inline-flex items-center gap-1 rounded border border-slate-200 px-1.5 py-0.5 text-[10.5px] text-slate-600 transition-colors hover:bg-slate-50"
+                                        >
+                                            {copyState === 'ok' ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                                            {copyState === 'ok' ? '已复制' : copyState === 'err' ? '复制失败' : '复制到飞书'}
+                                        </button>
+                                    </div>
+                                    <span className="text-[10px]" style={{ color: theme.textSubtle }}>
+                                        等宽数字 · 最新在上
+                                    </span>
+                                </div>
+                                <div className="custom-scroll overflow-x-auto">
+                                    <table className="w-full text-[11px]">
+                                        <thead>
+                                            <tr className="bg-slate-50 text-[10px] text-slate-500">
+                                                <th className="px-3 py-1.5 text-left font-semibold">月份</th>
+                                                <th className="px-3 py-1.5 text-right font-semibold">{chipLabel(activeCol)}</th>
+                                                <th className="px-3 py-1.5 text-right font-semibold">目标</th>
+                                                <th className="px-3 py-1.5 text-right font-semibold">达成率</th>
+                                                <th className="px-3 py-1.5 text-right font-semibold">环比</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {visibleTableRows.map(row => (
+                                                <tr key={row.time}>
+                                                    <td className="px-3 py-1 font-mono tabular-nums text-slate-500">{row.tick ?? row.time}</td>
+                                                    <td className="px-3 py-1 text-right font-mono font-semibold tabular-nums" style={{ color: theme.text }}>
+                                                        {fmtKpi(activeCol, row.value)}
+                                                    </td>
+                                                    <td className="px-3 py-1 text-right font-mono tabular-nums text-slate-500">
+                                                        {row.target > 0 ? fmtKpi(activeCol, row.target) : '—'}
+                                                    </td>
+                                                    <td
+                                                        className="px-3 py-1 text-right font-mono tabular-nums"
+                                                        style={{
+                                                            color:
+                                                                row.achievement === null
+                                                                    ? undefined
+                                                                    : row.achievement >= 100
+                                                                      ? theme.positive
+                                                                      : theme.negative,
+                                                        }}
+                                                    >
+                                                        {row.achievement === null ? '—' : `${row.achievement.toFixed(1)}%`}
+                                                    </td>
+                                                    <td className="px-3 py-1 text-right font-mono tabular-nums" style={{ color: theme.textMuted }}>
+                                                        {row.delta ? row.delta.text : '—'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        /* 对比模式：小多图 */
+                        <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-3 py-2">
+                                <span className="font-mono text-[11px] font-semibold" style={{ color: theme.textMuted }}>
+                                    {focusRow ? String((focusRow as any).__tick ?? (focusRow as any).time) : '—'}
+                                </span>
+                                {selectedCols.map((col, idx) => {
+                                    const key = seriesKeyOf(col);
+                                    const value = focusRow ? Number((focusRow as any)[key] ?? 0) : 0;
+                                    return (
+                                        <span key={col.title} className="inline-flex items-center gap-1.5 text-[10.5px]" style={{ color: theme.textMuted }}>
+                                            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: seriesColor(theme, idx) }} />
+                                            {chipLabel(col)}
+                                            <span className="font-mono font-semibold tabular-nums" style={{ color: theme.text }}>
+                                                {fmtKpi(col, value)}
+                                            </span>
+                                        </span>
                                     );
                                 })}
+                                <span className="ml-auto text-[10px]" style={{ color: theme.textSubtle }}>
+                                    {hoverIndex === null ? '最新一期（悬浮查看其他月份）' : '正在查看该期'}
+                                </span>
                             </div>
-                            <div className="h-4 w-px shrink-0 bg-slate-200" aria-hidden />
-                            <div className="custom-scroll flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5">
-                                {groupColumns.map(col => {
-                                    const selectedIdx = selectedMetrics.indexOf(col.title);
-                                    const isSelected = selectedIdx >= 0;
-                                    const color = isSelected
-                                        ? seriesColor(theme, selectedIdx)
-                                        : col.metricGroup === 'target'
-                                          ? theme.target
-                                          : theme.textSubtle;
+
+                            <div
+                                className="grid gap-2 p-2.5"
+                                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}
+                                onMouseLeave={() => setHoverIndex(null)}
+                            >
+                                {selectedCols.map((col, idx) => {
+                                    const key = seriesKeyOf(col);
+                                    const values = chartData.map((r: any) => Number(r[key] ?? 0));
+                                    /** 悬浮时整格变成「该期读数」，与顶部对齐条同一期，避免「条上是 2 月、格里是 9 月」 */
+                                    const displayIndex = hoverIndex !== null && hoverIndex < values.length ? hoverIndex : values.length - 1;
+                                    const displayValue = values[displayIndex] ?? 0;
+                                    const baseValue = displayIndex > 0 ? values[displayIndex - 1] : undefined;
+                                    const d = formatDelta(displayValue, baseValue);
+                                    const cost = isCostMetric(col.title);
+                                    const dTone =
+                                        !d || d.direction === 'flat'
+                                            ? theme.textSubtle
+                                            : (d.direction === 'up') === !cost
+                                              ? theme.positive
+                                              : theme.negative;
+                                    const tKey = targetKeyByLabel.get(col.shortLabel || col.title);
+                                    const targetSeries = tKey ? chartData.map((r: any) => Number(r[tKey] ?? 0)) : undefined;
+                                    const color = seriesColor(theme, idx);
                                     return (
-                                        <button
+                                        <div
                                             key={col.title}
-                                            type="button"
-                                            onClick={() => toggleMetric(col.title)}
-                                            title={col.title}
-                                            className="flex flex-shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-all hover:-translate-y-px"
+                                            className="rounded-lg border px-2.5 pb-1.5 pt-2 transition-shadow"
                                             style={{
-                                                borderColor: isSelected ? `${color}66` : 'transparent',
-                                                backgroundColor: isSelected ? `${color}14` : 'rgba(148,163,184,0.10)',
-                                                color: isSelected ? theme.text : theme.textMuted,
+                                                borderColor: hoverIndex !== null ? `${color}55` : undefined,
+                                                boxShadow: hoverIndex !== null ? `0 0 0 2px ${color}22` : undefined,
                                             }}
                                         >
-                                            <span
-                                                aria-hidden
-                                                className="h-1.5 w-1.5 rounded-full"
-                                                style={{ backgroundColor: color, opacity: isSelected ? 1 : 0.45 }}
+                                            <div className="flex items-baseline justify-between gap-2">
+                                                <span className="truncate text-[10.5px] font-medium" style={{ color: theme.textMuted }}>
+                                                    {chipLabel(col)}
+                                                </span>
+                                                <span className="shrink-0 text-[9px]" style={{ color: theme.textSubtle }}>
+                                                    {unitOf(col)}
+                                                </span>
+                                            </div>
+                                            <div className="mt-0.5 flex items-baseline gap-2">
+                                                <span className="font-mono text-[17px] font-bold leading-tight tracking-tight tabular-nums" style={{ color: theme.text }}>
+                                                    {fmtKpi(col, displayValue)}
+                                                </span>
+                                                <span className="font-mono text-[9.5px] font-semibold" style={{ color: dTone }}>
+                                                    {d ? d.text : ''}
+                                                </span>
+                                            </div>
+                                            <MetricSparkline
+                                                values={values}
+                                                target={targetSeries}
+                                                color={color}
+                                                theme={theme}
+                                                height={76}
+                                                hoverIndex={hoverIndex}
+                                                onHover={setHoverIndex}
                                             />
-                                            {chipLabel(col)}
-                                        </button>
+                                        </div>
                                     );
                                 })}
                             </div>
                         </div>
-                    </div>
-
-                    <div className="min-h-0 flex-1 overflow-hidden p-3">
-                        {chartData.length === 0 ? (
-                            <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-slate-200/90 bg-white">
-                                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" className="text-slate-300" aria-hidden>
-                                    <path d="M4 19V5M4 19h16" strokeLinecap="round" />
-                                    <path d="M7 15l3.5-4 3 2.4L19 7" strokeLinecap="round" strokeLinejoin="round" opacity="0.5" />
-                                </svg>
-                                <p className="text-sm text-slate-400">暂无历史趋势数据</p>
-                                <p className="text-[11px] text-slate-300">上传月度或周度业绩表后即可查看趋势</p>
-                            </div>
-                        ) : (
-                            <div className="flex h-full flex-col rounded-xl border border-slate-200/90 bg-white shadow-sm">
-                                {/* 图例 + 当前值（同时充当范围/粒度控制条） */}
-                                <div className="flex flex-shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-100 px-3 py-2">
-                                    <div className="custom-scroll flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-0.5">
-                                        {selectedCols.map((col, idx) => {
-                                            const color = seriesColor(theme, idx);
-                                            const lastValue = lastRow ? Number((lastRow as any)[seriesKeyOf(col)] ?? 0) : 0;
-                                            return (
-                                                <button
-                                                    key={col.title}
-                                                    type="button"
-                                                    onClick={() => toggleMetric(col.title)}
-                                                    title="点击从图表中移除"
-                                                    className="group inline-flex flex-shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10.5px] font-medium transition-colors"
-                                                    style={{
-                                                        borderColor: `${color}40`,
-                                                        backgroundColor: `${color}0d`,
-                                                        color: theme.text,
-                                                    }}
-                                                >
-                                                    <span
-                                                        aria-hidden
-                                                        className="shrink-0 rounded-full"
-                                                        style={
-                                                            col.metricGroup === 'target'
-                                                                ? { width: 7, height: 7, border: `2px solid ${color}` }
-                                                                : { width: 7, height: 7, backgroundColor: color }
-                                                        }
-                                                    />
-                                                    <span className="whitespace-nowrap">{chipLabel(col)}</span>
-                                                    <span
-                                                        className="whitespace-nowrap font-mono tabular-nums"
-                                                        style={{ color: theme.textMuted }}
-                                                    >
-                                                        {formatSeriesValue(col, lastValue)}
-                                                    </span>
-                                                    <X
-                                                        className="h-2.5 w-2.5 opacity-0 transition-opacity group-hover:opacity-50"
-                                                        aria-hidden
-                                                    />
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                    <div className="flex flex-shrink-0 items-center gap-2">
-                                        <div className="inline-flex rounded-md bg-slate-100 p-0.5">
-                                            <button
-                                                type="button"
-                                                disabled={!canMonthly}
-                                                onClick={() => canMonthly && setChartWeekly(false)}
-                                                className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
-                                                    !chartWeekly ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                                } disabled:cursor-not-allowed disabled:opacity-40`}
-                                            >
-                                                月
-                                            </button>
-                                            <button
-                                                type="button"
-                                                disabled={!canWeekly}
-                                                onClick={() => canWeekly && setChartWeekly(true)}
-                                                className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
-                                                    chartWeekly ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                                } disabled:cursor-not-allowed disabled:opacity-40`}
-                                            >
-                                                周
-                                            </button>
-                                        </div>
-                                        <div className="inline-flex rounded-md bg-slate-100 p-0.5">
-                                            {RANGE_OPTIONS.map(n => (
-                                                <button
-                                                    key={n}
-                                                    type="button"
-                                                    onClick={() => setRangeCount(n)}
-                                                    className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
-                                                        rangeCount === n ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                                    }`}
-                                                >
-                                                    {rangeLabel(n)}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="min-h-0 flex-1 px-1.5 pb-1 pt-2">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <ComposedChart data={chartData} margin={{ top: 12, right: 14, left: 4, bottom: 2 }}>
-                                            <defs>
-                                                {selectedCols.map((col, idx) => {
-                                                    const color = seriesColor(theme, idx);
-                                                    return (
-                                                        <linearGradient key={col.title} id={`trend-grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                                            <stop offset="0%" stopColor={color} stopOpacity={0.18} />
-                                                            <stop offset="100%" stopColor={color} stopOpacity={0} />
-                                                        </linearGradient>
-                                                    );
-                                                })}
-                                            </defs>
-                                            <CartesianGrid
-                                                horizontal
-                                                vertical={false}
-                                                stroke={theme.grid}
-                                                strokeWidth={1}
-                                            />
-                                            <XAxis
-                                                dataKey="time"
-                                                tickFormatter={(v: string) => {
-                                                    const found = chartData.find(d => d.time === v);
-                                                    return found ? (found as any).__tick : v;
-                                                }}
-                                                tick={{ fontSize: 11, fill: theme.axisTick }}
-                                                tickMargin={8}
-                                                axisLine={false}
-                                                tickLine={false}
-                                                minTickGap={16}
-                                                interval="preserveStartEnd"
-                                            />
-
-                                            {hasAbsolute && (
-                                                <YAxis
-                                                    yAxisId="left"
-                                                    tickFormatter={(v: number) => compactTick(v, { isMoney: allAbsoluteAreMoney })}
-                                                    tick={{ fontSize: 11, fill: theme.axisTick }}
-                                                    axisLine={false}
-                                                    tickLine={false}
-                                                    width={54}
-                                                    tickCount={5}
-                                                />
-                                            )}
-
-                                            {hasPercent && (
-                                                <YAxis
-                                                    yAxisId="right"
-                                                    orientation="right"
-                                                    tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
-                                                    tick={{ fontSize: 11, fill: theme.axisTick }}
-                                                    axisLine={false}
-                                                    tickLine={false}
-                                                    width={44}
-                                                    tickCount={4}
-                                                />
-                                            )}
-
-                                            <Tooltip
-                                                content={renderTooltip}
-                                                cursor={{ stroke: theme.cursor, strokeWidth: 1, strokeDasharray: '3 3' }}
-                                                wrapperStyle={{ outline: 'none', zIndex: 40 }}
-                                            />
-
-                                            {/* 单指标时铺一层极淡渐变，给主指标一点视觉重量；多指标互相叠加会糊，故不加 */}
-                                            {singleSeries && !selectedCols[0].isPercent && (
-                                                <Area
-                                                    yAxisId="left"
-                                                    type="linear"
-                                                    dataKey={seriesKeyOf(selectedCols[0])}
-                                                    stroke="none"
-                                                    fill="url(#trend-grad-0)"
-                                                    isAnimationActive={false}
-                                                    activeDot={false}
-                                                />
-                                            )}
-
-                                            {selectedCols.map((col, idx) => {
-                                                const color = seriesColor(theme, idx);
-                                                const isTarget = col.metricGroup === 'target';
-                                                return (
-                                                    <Line
-                                                        key={col.title}
-                                                        yAxisId={col.isPercent ? 'right' : 'left'}
-                                                        type="linear"
-                                                        dataKey={seriesKeyOf(col)}
-                                                        name={chipLabel(col)}
-                                                        stroke={color}
-                                                        strokeWidth={isTarget ? 1.6 : 2.25}
-                                                        strokeDasharray={isTarget ? '4 4' : undefined}
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
-                                                        dot={false}
-                                                        isAnimationActive={false}
-                                                        activeDot={{ r: 4.5, strokeWidth: 3, stroke: theme.surface, fill: color }}
-                                                    />
-                                                );
-                                            })}
-
-                                            {/* 末端点：只标「最新一期」，避免每个点都带白心圆点 */}
-                                            {selectedCols.map((col, idx) => {
-                                                const seriesKey = seriesKeyOf(col);
-                                                const lastValue = lastRow ? Number((lastRow as any)[seriesKey] ?? 0) : NaN;
-                                                if (!lastRow || col.metricGroup === 'target' || !Number.isFinite(lastValue)) return null;
-                                                return (
-                                                    <ReferenceDot
-                                                        key={`dot-${col.title}`}
-                                                        yAxisId={col.isPercent ? 'right' : 'left'}
-                                                        x={(lastRow as any).time}
-                                                        y={lastValue}
-                                                        r={3.4}
-                                                        fill={seriesColor(theme, idx)}
-                                                        stroke={theme.surface}
-                                                        strokeWidth={2}
-                                                        isFront
-                                                    />
-                                                );
-                                            })}
-                                        </ComposedChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    )}
                 </div>
             </div>
         </div>

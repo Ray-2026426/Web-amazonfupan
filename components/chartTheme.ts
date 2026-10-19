@@ -128,16 +128,58 @@ export function compactNumber(value: number): string {
     return String(Math.round(value));
 }
 
-/** 坐标轴刻度：金额加货币符号，比率转百分比，其余走紧凑数字 */
+/** 计数类数字（件数）用中文单位，运营读「1.2万」比「12.5k」快 */
+export function compactCount(value: number): string {
+    const abs = Math.abs(value);
+    if (abs >= 100_000_000) return `${(value / 100_000_000).toFixed(abs >= 1_000_000_000 ? 0 : 1)}亿`;
+    if (abs >= 10_000) return `${(value / 10_000).toFixed(abs >= 100_000 ? 0 : 1)}万`;
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
+}
+
+/** 坐标轴刻度：金额加货币符号，比率转百分比，计数走万/亿，其余走紧凑数字 */
 export function compactTick(
     value: number,
-    opts: { isMoney?: boolean; isPercent?: boolean; symbol?: string } = {}
+    opts: { isMoney?: boolean; isPercent?: boolean; isCount?: boolean; symbol?: string } = {}
 ): string {
     if (!Number.isFinite(value)) return '';
     if (opts.isPercent) return `${(value * 100).toFixed(0)}%`;
+    if (opts.isCount) return compactCount(value);
     const body = compactNumber(value);
     if (opts.isMoney) return `${opts.symbol ?? '$'}${body}`;
     return body;
+}
+
+/**
+ * 让刻度落在整数上（0 / 150k / 300k / 450k，而不是 153k / 307k / 460k）。
+ *
+ * 为什么不用 recharts 的自动刻度：它以 dataMax 为上限均分，读数永远是奇数；
+ * 而「看得清数字」的前提是刻度本身好读。
+ */
+export function buildNiceAxis(
+    minValue: number,
+    maxValue: number,
+    tickCount = 4
+): { ticks: number[]; domain: [number, number] } {
+    let min = minValue;
+    let max = maxValue;
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return { ticks: [0], domain: [0, 1] };
+    if (max === min) max = min + (Math.abs(min) * 0.1 || 1);
+    if (max < min) [min, max] = [max, min];
+
+    const span = max - min;
+    const rawStep = span / Math.max(tickCount - 1, 1);
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+    const normalized = rawStep / magnitude;
+    const niceStep =
+        (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10) * magnitude;
+
+    const niceMin = Math.floor(min / niceStep) * niceStep;
+    const niceMax = Math.ceil(max / niceStep) * niceStep;
+    const ticks: number[] = [];
+    for (let v = niceMin; v <= niceMax + niceStep * 1e-6; v += niceStep) {
+        ticks.push(Number(v.toPrecision(12)));
+    }
+    return { ticks, domain: [niceMin, niceMax] };
 }
 
 /**

@@ -21,6 +21,9 @@ import { metricValue } from '../utils/metrics';
 import {
     ChartTheme,
     buildAxisTickLabels,
+    buildNiceAxis,
+    compactCount,
+    compactNumber,
     compactTick,
     formatDelta,
     formatPeriodLabel,
@@ -147,6 +150,31 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
     const hasTarget = chartData.some(d => d.target !== undefined && d.target > 0);
     const lastPoint = chartData[chartData.length - 1];
 
+    /** 刻度取整（0/150k/300k），并保证目标线也在可视范围内 */
+    const yAxis = (() => {
+        const values = chartData.map(d => d.value).filter(v => Number.isFinite(v));
+        const targets = chartData
+            .map(d => d.target)
+            .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0);
+        const all = [...values, ...targets];
+        const maxV = Math.max(...all, 0);
+        if (isPercent) {
+            const minV = Math.min(...all, maxV);
+            const span = maxV - minV || Math.abs(maxV) * 0.1 || 0.01;
+            return buildNiceAxis(Math.max(0, minV - span * 0.2), maxV + span * 0.2, 4);
+        }
+        return buildNiceAxis(0, maxV * 1.06, 4);
+    })();
+
+    /** 末端数值标签：只标「最新一期」，省得为了读一个数去悬停 */
+    const lastValueLabel = lastPoint
+        ? isPercent
+            ? `${(lastPoint.value * 100).toFixed(1)}%`
+            : isMoney
+              ? `$${compactNumber(lastPoint.value)}`
+              : compactCount(lastPoint.value)
+        : '';
+
     const renderTooltip = ({ active, payload, label }: any) => {
         if (!active || !payload || payload.length === 0) return null;
         const index = chartData.findIndex(d => d.time === label);
@@ -213,7 +241,7 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
             </div>
             <div className="h-44 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+                    <ComposedChart data={chartData} margin={{ top: 16, right: 44, left: 0, bottom: 0 }}>
                         <defs>
                             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="0%" stopColor={mainColor} stopOpacity={0.22} />
@@ -232,7 +260,7 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
                                 const found = chartData.find(d => d.time === v);
                                 return found ? found.tick : v;
                             }}
-                            tick={{ fontSize: 10, fill: theme.axisTick }}
+                            tick={{ fontSize: 10.5, fill: theme.axisTick }}
                             tickMargin={8}
                             axisLine={false}
                             tickLine={false}
@@ -241,14 +269,14 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
                         />
                         <YAxis
                             tickFormatter={(v: number) =>
-                                compactTick(v, { isMoney, isPercent })
+                                compactTick(v, { isMoney, isPercent, isCount: !isMoney && !isPercent })
                             }
-                            tick={{ fontSize: 10, fill: theme.axisTick }}
+                            tick={{ fontSize: 10.5, fill: theme.axisTick }}
                             axisLine={false}
                             tickLine={false}
-                            width={44}
-                            tickCount={4}
-                            domain={isPercent ? ['auto', 'auto'] : [0, 'auto']}
+                            width={46}
+                            domain={yAxis.domain}
+                            ticks={yAxis.ticks}
                         />
                         <Tooltip
                             content={renderTooltip}
@@ -302,6 +330,14 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
                                 strokeWidth={2}
                                 isFront
                                 ifOverflow="extendDomain"
+                                label={{
+                                    value: lastValueLabel,
+                                    position: 'top',
+                                    offset: 5,
+                                    fill: theme.textMuted,
+                                    fontSize: 10,
+                                    fontWeight: 600,
+                                }}
                             />
                         ) : null}
                     </ComposedChart>
