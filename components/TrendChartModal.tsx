@@ -455,23 +455,24 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
           ? theme.positive
           : theme.negative;
 
-    const insight = useMemo(
-        () =>
-            activeCol
-                ? buildTrendInsight({
-                      points: chartData.map((r: any) => ({ time: r.time, value: Number(r[activeKey] ?? 0) })),
-                      formatter: v => fmtKpi(activeCol, v),
-                      target: activeTargetKey ? lastTarget : undefined,
-                      higherIsBetter: !costMetric,
-                      periodLabel: t => {
-                          const found = chartData.find((r: any) => r.time === t) as any;
-                          return found?.__tick ?? t;
-                      },
-                  })
-                : [],
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [chartData, activeKey, activeTargetKey, lastTarget, costMetric, activeCol?.title]
-    );
+    /**
+     * 注意：这里不能用 useMemo —— 本组件由父级常驻挂载（isOpen 只是 prop），
+     * 上面已有 `if (!isOpen) return null` 早退；在早退之后调用 hook 会让
+     * 「关→开」时的 hook 数量变化，React 直接抛错并卸载整棵树（表现为白屏）。
+     * 结论文案只有十几行，直接算即可。
+     */
+    const insight = activeCol
+        ? buildTrendInsight({
+              points: chartData.map((r: any) => ({ time: r.time, value: Number(r[activeKey] ?? 0) })),
+              formatter: v => fmtKpi(activeCol, v),
+              target: activeTargetKey ? lastTarget : undefined,
+              higherIsBetter: !costMetric,
+              periodLabel: t => {
+                  const found = chartData.find((r: any) => r.time === t) as any;
+                  return found?.__tick ?? t;
+              },
+          })
+        : [];
 
     /** 单指标图：柱（量）或线（率），刻度取整数，柱顶直接标数值 */
     const singleAxis = (() => {
@@ -539,27 +540,25 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
         );
     };
 
-    /** 数据表：最新在上，默认 6 行 */
-    const tableRows = useMemo(() => {
-        if (!activeCol) return [];
-        return chartData
-            .map((row: any, i: number) => {
-                const value = Number(row[activeKey] ?? 0);
-                const prev = i > 0 ? (chartData[i - 1] as any) : null;
-                const prevVal = prev ? Number(prev[activeKey] ?? 0) : undefined;
-                const target = activeTargetKey ? Number(row[activeTargetKey] ?? 0) : 0;
-                return {
-                    time: row.time as string,
-                    tick: (row as any).__tick as string,
-                    value,
-                    target,
-                    achievement: target > 0 ? (value / target) * 100 : null,
-                    delta: prevVal === undefined ? null : formatDelta(value, prevVal),
-                };
-            })
-            .reverse();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [chartData, activeKey, activeTargetKey, activeCol?.title]);
+    /** 数据表：最新在上，默认 6 行（同上：不能用 useMemo，早退之后不能调 hook） */
+    const tableRows = activeCol
+        ? chartData
+              .map((row: any, i: number) => {
+                  const value = Number(row[activeKey] ?? 0);
+                  const prev = i > 0 ? (chartData[i - 1] as any) : null;
+                  const prevVal = prev ? Number(prev[activeKey] ?? 0) : undefined;
+                  const target = activeTargetKey ? Number(row[activeTargetKey] ?? 0) : 0;
+                  return {
+                      time: row.time as string,
+                      tick: (row as any).__tick as string,
+                      value,
+                      target,
+                      achievement: target > 0 ? (value / target) * 100 : null,
+                      delta: prevVal === undefined ? null : formatDelta(value, prevVal),
+                  };
+              })
+              .reverse()
+        : [];
 
     const visibleTableRows = tableExpanded ? tableRows : tableRows.slice(0, 6);
 

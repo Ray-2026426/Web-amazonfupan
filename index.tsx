@@ -5,6 +5,7 @@ import './styles/tailwind.css';
 import './index.css';
 import './dark-theme.css';
 import App from './App';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { applyAppSettings, loadAppSettings } from './components/appSettings';
 
 applyAppSettings(loadAppSettings());
@@ -17,6 +18,9 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    {/* 兜住渲染期异常：组件抛错时给一张可读的错误卡片，而不是整页白屏 */}
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );
