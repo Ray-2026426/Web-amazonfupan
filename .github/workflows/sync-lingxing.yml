@@ -1,0 +1,89 @@
+name: 领星数据自动同步
+
+# 每天北京时间 08:10（= UTC 00:10）拉取前几天的数据并写入数据库。
+# 电脑关机也照跑：任务在 GitHub 的机器上执行。
+on:
+  schedule:
+    - cron: '10 0 * * *'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '补几天（默认 3，最多 90）'
+        required: false
+        default: '3'
+      from:
+        description: '起始日期 YYYY-MM-DD（留空则按 days 自动算）'
+        required: false
+        default: ''
+      to:
+        description: '结束日期 YYYY-MM-DD（留空则按 days 自动算）'
+        required: false
+        default: ''
+
+concurrency:
+  group: lingxing-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: 取出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 同步（领星 → 数据库）
+        env:
+          LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
+          LINGXING_CURRENCY: ${{ vars.LINGXING_CURRENCY || 'USD' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LINGXING_MCP_KEY:-}" ]; then
+            echo "::error::缺少 LINGXING_MCP_KEY，请在仓库 Settings → Secrets 里添加"
+            exit 1
+          fi
+          DAYS="${{ github.event.inputs.days || '3' }}"
+          FROM="${{ github.event.inputs.from }}"
+          TO="${{ github.event.inputs.to }}"
+          if [ -n "$FROM" ] && [ -n "$TO" ]; then
+            node scripts/sync/run.mjs --from "$FROM" --to "$TO" --out data/snapshot --upload
+          else
+            node scripts/sync/run.mjs --days "$DAYS" --out data/snapshot --upload
+          fi
+
+      - name: 保存审计日志（不含业务数据）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-log-${{ github.run_id }}
+          path: |
+            data/snapshot/manifest.json
+            data/snapshot/runs/*.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: 失败时开 Issue 提醒
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `领星同步失败 ${new Date().toISOString().slice(0, 10)}`;
+            const body = [
+              '自动同步任务失败了，看板会继续显示上一次成功的数据。',
+              '',
+              `运行日志：${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              '',
+              '常见原因：',
+              '- 领星 MCP 密钥过期或权限被改',
+              '- Supabase 密钥/URL 配错，或数据库配额满',
+              '- 领星接口临时风控（QPS 限制）',
+            ].join('\n');
+            await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body });
