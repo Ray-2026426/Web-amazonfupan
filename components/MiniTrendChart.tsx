@@ -1,21 +1,33 @@
-import React, { useMemo } from 'react';
+import React, { useId, useMemo } from 'react';
 import { DataRow, FilterState, TargetRow } from '../types';
 import {
     aggregateData,
     formatBusinessWeekFromDateStr,
+    getBusinessWeekRangeFromYearWeek,
     filterData,
-    formatDate,
 } from '../utils';
 import {
+    Area,
+    CartesianGrid,
+    ComposedChart,
     Line,
+    ReferenceDot,
+    ResponsiveContainer,
+    Tooltip,
     XAxis,
     YAxis,
-    CartesianGrid,
-    Tooltip,
-    Legend,
-    ResponsiveContainer,
-    ComposedChart,
 } from 'recharts';
+import { metricValue } from '../utils/metrics';
+import {
+    ChartTheme,
+    buildAxisTickLabels,
+    compactTick,
+    formatDelta,
+    formatPeriodLabel,
+    seriesColor,
+    useChartTheme,
+} from './chartTheme';
+import { ChartLegendItem, ChartTooltipCard, TooltipRow } from './ChartTooltip';
 
 interface MiniTrendChartProps {
     rawData: DataRow[];
@@ -28,9 +40,9 @@ interface MiniTrendChartProps {
     isWeekly: boolean;
     targetRows?: TargetRow[];
     targetKey?: string;
+    /** 横轴期数：默认近 12 期，传 0 表示全部 */
+    rangeCount?: number;
 }
-
-const CHART_COLORS = ['#3b82f6', '#ef4444', '#10b981'];
 
 /** 获取数据中最早的日期，向前扩展 12 个月作为宽范围 */
 const getWideDateRange = (data: DataRow[]) => {
@@ -54,7 +66,12 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
     isWeekly,
     targetRows = [],
     targetKey,
+    rangeCount = 12,
 }) => {
+    const theme: ChartTheme = useChartTheme();
+    const gradientId = `mini-trend-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+    const mainColor = seriesColor(theme, 0);
+
     const chartData = useMemo(() => {
         if (rawData.length === 0) return [];
 
@@ -96,8 +113,11 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
             });
         }
 
-        // 只显示最近 12 个时间点，避免图表过挤
-        const showKeys = sortedKeys.length > 12 ? sortedKeys.slice(-12) : sortedKeys;
+        // 只显示最近 N 个时间点，避免图表过挤
+        const showKeys =
+            rangeCount > 0 && sortedKeys.length > rangeCount ? sortedKeys.slice(-rangeCount) : sortedKeys;
+
+        const tickLabels = buildAxisTickLabels(showKeys, isWeekly);
 
         return showKeys.map(timeKey => {
             const agg = aggregateData(timeGroups[timeKey] || []);
@@ -105,103 +125,188 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
 
             // 特殊处理毛利率（从 gross_profit / sales_amount 计算）
             if (metricKey === 'gross_margin') {
-                value = agg.sales_amount > 0 ? agg.gross_profit / agg.sales_amount : 0;
+                value = metricValue('gross_margin', { current: agg }) ?? 0;
             } else if (metricKey === 'ad_spend') {
                 value = agg.ad_spend;
             } else {
                 value = (agg as any)[metricKey] || 0;
             }
 
-            const targetVal = (!isWeekly && targetKey)
-                ? (targetByMonth[timeKey] || 0)
-                : undefined;
+            const targetVal =
+                !isWeekly && targetKey ? targetByMonth[timeKey] || 0 : undefined;
 
             return {
-                time: isWeekly ? timeKey.replace(/^\d{4}-/, '') : timeKey,
+                time: timeKey,
+                tick: tickLabels[timeKey],
                 value,
                 target: targetVal,
             };
         });
-    }, [rawData, filters, metricKey, isWeekly, targetRows, targetKey]);
+    }, [rawData, filters, metricKey, isWeekly, targetRows, targetKey, rangeCount]);
+
+    const hasTarget = chartData.some(d => d.target !== undefined && d.target > 0);
+    const lastPoint = chartData[chartData.length - 1];
+
+    const renderTooltip = ({ active, payload, label }: any) => {
+        if (!active || !payload || payload.length === 0) return null;
+        const index = chartData.findIndex(d => d.time === label);
+        if (index < 0) return null;
+        const row = chartData[index];
+        const prev = index > 0 ? chartData[index - 1] : undefined;
+        const period = formatPeriodLabel(String(label), getBusinessWeekRangeFromYearWeek);
+
+        const rows: TooltipRow[] = [
+            { key: 'value', color: mainColor, label: metricLabel, value: formatter(row.value) },
+        ];
+        if (hasTarget && row.target !== undefined) {
+            rows.push({
+                key: 'target',
+                color: theme.target,
+                label: '目标',
+                value: formatter(row.target),
+                hollow: true,
+                muted: true,
+            });
+        }
+
+        const achievement =
+            hasTarget && row.target && row.target > 0 ? (row.value / row.target) * 100 : null;
+
+        return (
+            <ChartTooltipCard
+                theme={theme}
+                title={period.title}
+                subtitle={period.subtitle}
+                delta={prev ? formatDelta(row.value, prev.value) : null}
+                rows={rows}
+                footer={
+                    achievement === null ? undefined : (
+                        <span>
+                            达成率{' '}
+                            <span className="font-mono font-semibold" style={{ color: theme.textMuted }}>
+                                {achievement.toFixed(1)}%
+                            </span>
+                        </span>
+                    )
+                }
+            />
+        );
+    };
 
     if (chartData.length === 0) {
         return (
-            <div className="flex items-center justify-center h-40 text-xs text-slate-400">
-                暂无趋势数据
+            <div className="flex h-44 flex-col items-center justify-center gap-1.5 text-slate-400">
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+                    <path d="M4 19V5M4 19h16" strokeLinecap="round" />
+                    <path d="M7 15l3.5-4 3 2.4L19 7" strokeLinecap="round" strokeLinejoin="round" opacity="0.55" />
+                </svg>
+                <span className="text-xs">所选范围暂无趋势数据</span>
             </div>
         );
     }
 
-    const hasTarget = chartData.some(d => d.target !== undefined && d.target > 0);
-
-    const formatTooltipValue = (val: number, name: string) => {
-        if (name === 'target') return formatter(val);
-        return formatter(val);
-    };
-
     return (
-        <div className="h-48 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis
-                        dataKey="time"
-                        tick={{ fontSize: 10, fill: '#94a3b8' }}
-                        tickMargin={4}
-                        interval="preserveStartEnd"
-                    />
-                    <YAxis
-                        tickFormatter={(v) => {
-                            if (isPercent) return `${(v * 100).toFixed(0)}%`;
-                            if (Math.abs(v) >= 1000000) return `${(v / 1000000).toFixed(1)}M`;
-                            if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}k`;
-                            return v;
-                        }}
-                        tick={{ fontSize: 10, fill: '#94a3b8' }}
-                        width={50}
-                    />
-                    <Tooltip
-                        formatter={(val: number, name: string) => {
-                            if (name === 'target') return [formatter(val), '目标'];
-                            return [formatter(val), metricLabel];
-                        }}
-                        labelStyle={{ color: '#1e293b', fontWeight: 600, fontSize: 12 }}
-                        contentStyle={{
-                            borderRadius: 8,
-                            border: '1px solid rgba(148,163,184,0.3)',
-                            backgroundColor: 'rgba(255,255,255,0.95)',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                            fontSize: 11,
-                        }}
-                    />
-                    {hasTarget && (
-                        <Legend
-                            wrapperStyle={{ fontSize: 10, paddingTop: 0 }}
-                            iconSize={8}
+        <div className="w-full">
+            <div className="mb-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-500">
+                <ChartLegendItem color={mainColor} label={metricLabel} />
+                {hasTarget ? <ChartLegendItem color={theme.target} label="目标" dashed /> : null}
+            </div>
+            <div className="h-44 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+                        <defs>
+                            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={mainColor} stopOpacity={0.22} />
+                                <stop offset="100%" stopColor={mainColor} stopOpacity={0} />
+                            </linearGradient>
+                        </defs>
+                        <CartesianGrid
+                            horizontal
+                            vertical={false}
+                            stroke={theme.grid}
+                            strokeWidth={1}
                         />
-                    )}
-                    <Line
-                        type="monotone"
-                        dataKey="value"
-                        name={metricLabel}
-                        stroke={CHART_COLORS[0]}
-                        strokeWidth={2}
-                        dot={{ r: 2, strokeWidth: 1, fill: '#fff' }}
-                        activeDot={{ r: 4, strokeWidth: 0 }}
-                    />
-                    {hasTarget && (
+                        <XAxis
+                            dataKey="time"
+                            tickFormatter={(v: string) => {
+                                const found = chartData.find(d => d.time === v);
+                                return found ? found.tick : v;
+                            }}
+                            tick={{ fontSize: 10, fill: theme.axisTick }}
+                            tickMargin={8}
+                            axisLine={false}
+                            tickLine={false}
+                            interval="preserveStartEnd"
+                            minTickGap={12}
+                        />
+                        <YAxis
+                            tickFormatter={(v: number) =>
+                                compactTick(v, { isMoney, isPercent })
+                            }
+                            tick={{ fontSize: 10, fill: theme.axisTick }}
+                            axisLine={false}
+                            tickLine={false}
+                            width={44}
+                            tickCount={4}
+                            domain={isPercent ? ['auto', 'auto'] : [0, 'auto']}
+                        />
+                        <Tooltip
+                            content={renderTooltip}
+                            cursor={{ stroke: theme.cursor, strokeWidth: 1, strokeDasharray: '3 3' }}
+                            wrapperStyle={{ outline: 'none', zIndex: 30 }}
+                        />
+                        {hasTarget ? (
+                            <Line
+                                type="linear"
+                                dataKey="target"
+                                name="目标"
+                                stroke={theme.target}
+                                strokeWidth={1.5}
+                                strokeDasharray="4 4"
+                                dot={false}
+                                activeDot={false}
+                                isAnimationActive={false}
+                            />
+                        ) : null}
+                        <Area
+                            type="linear"
+                            dataKey="value"
+                            stroke="none"
+                            fill={`url(#${gradientId})`}
+                            isAnimationActive={false}
+                            activeDot={false}
+                        />
                         <Line
-                            type="monotone"
-                            dataKey="target"
-                            name="目标"
-                            stroke={CHART_COLORS[1]}
-                            strokeWidth={1.5}
-                            strokeDasharray="5 3"
+                            type="linear"
+                            dataKey="value"
+                            name={metricLabel}
+                            stroke={mainColor}
+                            strokeWidth={2.25}
+                            strokeLinecap="round"
                             dot={false}
+                            isAnimationActive={false}
+                            activeDot={{
+                                r: 4.5,
+                                strokeWidth: 3,
+                                stroke: theme.surface,
+                                fill: mainColor,
+                            }}
                         />
-                    )}
-                </ComposedChart>
-            </ResponsiveContainer>
+                        {lastPoint ? (
+                            <ReferenceDot
+                                x={lastPoint.time}
+                                y={lastPoint.value}
+                                r={3.2}
+                                fill={mainColor}
+                                stroke={theme.surface}
+                                strokeWidth={2}
+                                isFront
+                                ifOverflow="extendDomain"
+                            />
+                        ) : null}
+                    </ComposedChart>
+                </ResponsiveContainer>
+            </div>
         </div>
     );
 };

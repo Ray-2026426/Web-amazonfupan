@@ -288,6 +288,8 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     pacingRatio = 1,
 }) => {
     const [expandedMetric, setExpandedMetric] = useState<MetricCardKey | null>(null);
+    /** 趋势面板的期数范围：6 / 12 / 0=全部 */
+    const [trendRange, setTrendRange] = useState<number>(12);
 
     const handleCardClick = (key: MetricCardKey) => {
         setExpandedMetric(prev => (prev === key ? null : key));
@@ -313,25 +315,43 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     const renderTrendPanel = () => {
         if (!expandedMetric || !hasChartData) return null;
         const cfg = getMetricConfig(expandedMetric);
+        const rangeText = trendRange === 0 ? '全部' : `近${trendRange}${isWeeklyMode ? '周' : '个月'}`;
 
         return (
-            <div className="rounded-3xl border border-sky-200/60 bg-white p-5 shadow-[0_20px_60px_-30px_rgba(14,165,233,0.2)] ring-1 ring-sky-100/80">
-                <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-sky-500" />
-                        <span className="text-sm font-bold text-slate-700">
+            <div className="rounded-3xl border border-sky-200/60 bg-white p-4 shadow-[0_20px_60px_-30px_rgba(14,165,233,0.2)] ring-1 ring-sky-100/80 sm:p-5">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                        <TrendingUp className="h-4 w-4 shrink-0 text-sky-500" />
+                        <span className="truncate text-sm font-bold text-slate-700">
                             {isWeeklyMode ? `本周${cfg.label}` : `${cfg.label}`} 历史趋势
                         </span>
-                        <span className="text-[10px] text-slate-400">
-                            （最近12{isWeeklyMode ? '周' : '个月'}）
-                        </span>
+                        <span className="whitespace-nowrap text-[10px] text-slate-400">（{rangeText}）</span>
                     </div>
-                    <button
-                        onClick={() => setExpandedMetric(null)}
-                        className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <div className="inline-flex rounded-md bg-slate-100 p-0.5">
+                            {([6, 12, 0] as const).map(n => (
+                                <button
+                                    key={n}
+                                    type="button"
+                                    onClick={e => {
+                                        e.stopPropagation();
+                                        setTrendRange(n);
+                                    }}
+                                    className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
+                                        trendRange === n ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                                    }`}
+                                >
+                                    {n === 0 ? '全部' : `${n}`}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            onClick={() => setExpandedMetric(null)}
+                            className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
                 <Suspense fallback={<p className="py-8 text-center text-sm text-slate-500">正在加载趋势图…</p>}><MiniTrendChart
                     rawData={rawData!}
@@ -344,6 +364,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                     isWeekly={isWeeklyMode}
                     targetRows={targetRows}
                     targetKey={cfg.targetKey}
+                    rangeCount={trendRange}
                 /></Suspense>
             </div>
         );

@@ -280,7 +280,9 @@ console.log('\n[4/5] 结构与冲突');
     if (conflicts.length === 0) ok('没有同选择器属性冲突');
     else fail('选择器内属性冲突', conflicts.slice(0, 10).join('\n      '));
 
-    // 关键回归点：这批类曾经在暗色下保持近白色，是「刺眼」的直接原因
+    // 关键回归点：这批类曾经在暗色下保持近白色，是「刺眼」的直接原因。
+    // 只对「源码里仍在使用的类」要求覆盖规则——类被删掉后生成器不会再为它产出规则，
+    // 若仍无条件要求，删掉一段 UI 就会让校验误报（第 1 步已保证所有在用类都有覆盖）。
     const regressions = [
         'bg-red-50', 'bg-orange-50', 'bg-amber-50', 'bg-yellow-50', 'bg-green-50',
         'bg-blue-50', 'bg-indigo-50', 'bg-purple-50', 'bg-emerald-50', 'bg-sky-50',
@@ -290,8 +292,11 @@ console.log('\n[4/5] 结构与冲突');
         'border-red-100', 'border-orange-100', 'border-blue-100', 'border-gray-100',
         'bg-white/95',
     ];
-    const missing = regressions.filter((cls) => !coveredClasses.has(cls));
-    if (missing.length === 0) ok('历史刺眼类全部已有规则', `抽查 ${regressions.length} 个`);
+    const { tokens: liveTokens } = scanPalette();
+    const liveClasses = new Set(liveTokens.map((t) => t.token));
+    const stillUsed = regressions.filter((cls) => liveClasses.has(cls));
+    const missing = stillUsed.filter((cls) => !coveredClasses.has(cls));
+    if (missing.length === 0) ok('历史刺眼类全部已有规则', `抽查 ${stillUsed.length} 个仍在使用的类`);
     else fail('历史刺眼类仍未被覆盖', missing.join(', '));
 }
 
