@@ -2,16 +2,21 @@
 
 目标：电脑关机后，云端仍每天从领星拉取数据。看板打开后自动读取最新业绩，无需每天下载、上传 Excel。
 
+## 已经完成
+
+- 2026-10-20 已在 `Ray’AI WorkSpace` 新建独立项目 `amazon-performance-dashboard`，区域为新加坡，项目 URL 是 `https://ywbxdzsqymztlvknltbn.supabase.co`。
+- 已运行 [db/schema.sql](db/schema.sql)：数据表、管理规则表、只读视图和按天原子替换函数都已建好。真实查询确认匿名角色无权读取业务表，测试写入已回滚。
+
 ## 你要做的事（只需配置一次）
 
 1. **准备领星 MCP 密钥。** 在领星开放平台启用 MCP，生成可读取店铺、产品表现、订单利润的 `X-Mcp-Key`。密钥只填在 GitHub Secret 中，不要发到聊天里。[领星官方说明](https://www.lingxing.com/help/article/mcp)
-2. **创建 Supabase 项目。** 在 [Supabase](https://supabase.com/) 新建项目，进入 SQL Editor，把 [db/schema.sql](db/schema.sql) 全文运行一次。以后若更新本仓库数据库结构，也重新运行这份脚本。到项目的 API Keys 页面复制 Project URL 和服务端用的 **secret key**（通常以 `sb_secret_` 开头）。不要使用浏览器公开的 publishable key。
+2. **复制 Supabase 服务端密钥。** 项目和数据库已由我建好。打开 [这个 Supabase 项目](https://supabase.com/dashboard/project/ywbxdzsqymztlvknltbn)，在 API Keys 页面复制 **secret key**（通常以 `sb_secret_` 开头）。不要使用浏览器公开的 publishable key，也不要把密钥发到聊天里。
 3. **给 GitHub 仓库配置三个 Secrets。** 在仓库 Settings → Secrets and variables → Actions → New repository secret 中填写：
 
    | 名称 | 填入的值 |
    | --- | --- |
    | `LINGXING_MCP_KEY` | 第 1 步的领星密钥 |
-   | `SUPABASE_URL` | 第 2 步的 Project URL |
+   | `SUPABASE_URL` | `https://ywbxdzsqymztlvknltbn.supabase.co` |
    | `SUPABASE_SECRET_KEY` | 第 2 步的 Supabase secret key |
 
 4. **给 Vercel 项目配置五个环境变量。** 在 Vercel Project → Settings → Environment Variables 中填写：
@@ -19,7 +24,7 @@
    | 名称 | 填入的值 |
    | --- | --- |
    | `VITE_CLOUD_SYNC_ENABLED` | `true` |
-   | `SUPABASE_URL` | 同一个 Supabase Project URL |
+   | `SUPABASE_URL` | `https://ywbxdzsqymztlvknltbn.supabase.co` |
    | `SUPABASE_SECRET_KEY` | 同一个 Supabase secret key |
    | `DASHBOARD_READ_TOKEN` | 自己生成的一串至少 24 位随机字符，作为看板只读密码 |
    | `DASHBOARD_ADMIN_TOKEN` | 另一串不同的至少 24 位随机字符，作为数据管理密码 |
