@@ -33,6 +33,7 @@ const ReviewAnalysisModal = lazy(() => import('./components/ReviewAnalysisModal'
 const KeywordAnalysisModal = lazy(() => import('./components/KeywordAnalysisModal').then(m => ({default: m.KeywordAnalysisModal})));
 const ChatBot = lazy(() => import('./components/ChatBot').then(m => ({default: m.ChatBot})));
 import { AppSettingsButton } from './components/AppSettingsButton';
+const CloudAdminPanel = lazy(() => import('./components/CloudAdminPanel').then(m => ({ default: m.CloudAdminPanel })));
 import { BusinessCommandCenter } from './components/BusinessCommandCenter';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles } from 'lucide-react';
@@ -160,6 +161,7 @@ const App: React.FC = () => {
   const [cloudToken, setCloudToken] = useState(() => CLOUD_ENABLED ? getCloudToken() : '');
   const [cloudTokenInput, setCloudTokenInput] = useState('');
   const [showCloudLogin, setShowCloudLogin] = useState(false);
+  const [showCloudAdmin, setShowCloudAdmin] = useState(false);
   const [cloudRows, setCloudRows] = useState<DataRow[]>([]);
   const [cloudRowsRange, setCloudRowsRange] = useState('');
   const [cloudConnected, setCloudConnected] = useState(false);
@@ -616,6 +618,7 @@ const App: React.FC = () => {
                 <AppSettingsButton />
 
                 {CLOUD_ENABLED && <button type="button" onClick={() => setShowCloudLogin(true)} className={`rounded-xl border px-3 py-2 text-xs font-bold ${cloudConnected ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-sky-200 bg-white text-sky-700'}`}>{cloudLoading ? '云端加载中…' : cloudConnected ? '云端数据已连接' : '连接云端数据'}</button>}
+                {CLOUD_ENABLED && <button type="button" onClick={() => setShowCloudAdmin(true)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">数据管理</button>}
 
                 <button 
                     onClick={() => setShowUploadModal(true)}
@@ -628,6 +631,7 @@ const App: React.FC = () => {
                 </button>
             </div>
         </header>
+        {showCloudAdmin && <Suspense fallback={null}><CloudAdminPanel onClose={() => setShowCloudAdmin(false)} /></Suspense>}
 
         {/* Scrollable Content */}
         <main className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">

@@ -70,11 +70,11 @@ export function isActiveRow(row) {
  * @param {object} [args.cost] 同一 (sid, asin) 的成本（来自订单利润归并）
  * @param {string} args.date   YYYY-MM-DD
  */
-export function toDataRow({ shop, row, cost, date }) {
+export function toDataRow({ shop, row, cost, date, override }) {
     const meta = shopMeta(shop, row);
     const c = cost || EMPTY_COST;
     const asin = row.asin || '-';
-    return {
+    const data = {
         id: `${meta.sid}|${asin}|${date}`,
         date,
         /** 数据库主键用的两个维度（DataRow 本身不需要，但入库需要） */
@@ -127,15 +127,20 @@ export function toDataRow({ shop, row, cost, date }) {
         rating: num(row.avg_star),
         review_count: num(row.reviews_count),
     };
+    for (const field of ['brand', 'manager', 'sub_category', 'parent_asin', 'product_name']) {
+        if (override?.[field] !== null && override?.[field] !== undefined) data[field] = override[field];
+    }
+    return data;
 }
 
 /** 订单利润行（msku 粒度）→ key `${sid}|${asin}` → 累加成本 */
-export function mergeOrderProfit(opRows, { firstMileField = 'logistics_costs' } = {}) {
+export function mergeOrderProfit(opRows, { firstMileField = 'logistics_costs', asinRules = new Map() } = {}) {
     const map = new Map();
     for (const r of opRows || []) {
         const pl = (r.price_list || [])[0] || {};
-        const asin = pl.asin;
         const sid = String((r.sids || [])[0] ?? pl.sid ?? '');
+        const localSku = String(pl.local_sku || pl.seller_sku || r.msku || '');
+        const asin = asinRules.get(`${sid}|${localSku}`) || pl.asin;
         if (!asin || !sid) continue;
         const key = `${sid}|${asin}`;
         const cur = map.get(key) || { ...EMPTY_COST };

@@ -58,13 +58,15 @@ jobs:
             echo "::error::缺少 SUPABASE_URL 或 SUPABASE_SECRET_KEY，请在仓库 Settings → Secrets 里添加"
             exit 1
           fi
-          DAYS="${{ github.event.inputs.days || '3' }}"
+          DAYS="${{ github.event.inputs.days }}"
           FROM="${{ github.event.inputs.from }}"
           TO="${{ github.event.inputs.to }}"
           if [ -n "$FROM" ] && [ -n "$TO" ]; then
             node scripts/sync/run.mjs --from "$FROM" --to "$TO" --out data/snapshot --upload
-          else
+          elif [ -n "$DAYS" ]; then
             node scripts/sync/run.mjs --days "$DAYS" --out data/snapshot --upload
+          else
+            node scripts/sync/run.mjs --out data/snapshot --upload
           fi
 
       - name: 保存审计日志（不含业务数据）

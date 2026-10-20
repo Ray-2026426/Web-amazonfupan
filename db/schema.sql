@@ -212,3 +212,38 @@ $$;
 
 revoke all on function public.replace_fact_daily(date, text, jsonb) from public, anon, authenticated;
 grant execute on function public.replace_fact_daily(date, text, jsonb) to service_role;
+
+-- 管理后台配置。浏览器只调用受管理密码保护的 Vercel API。
+create table if not exists sync_settings (
+    id integer primary key default 1 check (id = 1),
+    enabled boolean not null default true,
+    lookback_days integer not null default 3 check (lookback_days between 1 and 14),
+    updated_at timestamptz not null default now()
+);
+insert into sync_settings (id) values (1) on conflict (id) do nothing;
+
+create table if not exists cost_asin_rules (
+    sid text not null,
+    local_sku text not null,
+    asin text not null,
+    updated_at timestamptz not null default now(),
+    primary key (sid, local_sku)
+);
+
+create table if not exists product_overrides (
+    sid text not null,
+    asin text not null,
+    brand text,
+    manager text,
+    sub_category text,
+    parent_asin text,
+    product_name text,
+    updated_at timestamptz not null default now(),
+    primary key (sid, asin)
+);
+
+alter table sync_settings enable row level security;
+alter table cost_asin_rules enable row level security;
+alter table product_overrides enable row level security;
+revoke all on table sync_settings, cost_asin_rules, product_overrides from anon, authenticated;
+grant select, insert, update, delete on table sync_settings, cost_asin_rules, product_overrides to service_role;

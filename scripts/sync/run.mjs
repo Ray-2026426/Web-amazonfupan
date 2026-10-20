@@ -49,14 +49,14 @@ const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SER
 const KEEP_ZERO = has('include-zero');
 const SHOP_LIMIT = Number(arg('shops-limit', '0')) || 0;
 const PAGE = Number(arg('page', '1000')) || 1000;
-const DAYS = Number(arg('days', '0')) || 0;
+const CLI_DAYS = Number(arg('days', '0')) || 0;
 
 /** 默认同步窗口：T-3 ~ T-1（领星的流量/广告数据有回填延迟，T-1 可能不完整，T-2 已稳定） */
-function defaultRange() {
+function defaultRange(days) {
     const to = new Date();
     to.setDate(to.getDate() - 1);
     const from = new Date(to);
-    from.setDate(from.getDate() - (DAYS > 0 ? DAYS - 1 : 2));
+    from.setDate(from.getDate() - (days - 1));
     return { from: iso(from), to: iso(to) };
 }
 function iso(d) {
@@ -73,11 +73,9 @@ function datesBetween(from, to) {
     return out;
 }
 
-const range = arg('from') && arg('to') ? { from: arg('from'), to: arg('to') } : defaultRange();
-const dates = datesBetween(range.from, range.to);
-
 const log = (msg) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
 let calls = 0;
+let runContext = null;
 
 /* --------------------------- 取数：MCP --------------------------- */
 let client = null;
@@ -165,7 +163,39 @@ async function postgrest(pathname, body, onConflict) {
     }
 }
 
-async function uploadToSupabase({ dailyRows, currency, startedAt, range, report }) {
+async function readControlTable(table) {
+    const rows = [];
+    for (let offset = 0; offset <= 10000; offset += 1000) {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*&limit=1000&offset=${offset}`, {
+            headers: {
+                apikey: SUPABASE_KEY,
+                ...(SUPABASE_KEY.startsWith('eyJ') ? { Authorization: `Bearer ${SUPABASE_KEY}` } : {}),
+            },
+        });
+        if (!response.ok) throw new Error(`读取 ${table} 失败：HTTP ${response.status}`);
+        const page = await response.json();
+        if (!Array.isArray(page)) throw new Error(`读取 ${table} 返回格式错误`);
+        rows.push(...page);
+        if (page.length < 1000) return rows;
+    }
+    throw new Error(`${table} 规则超过 10000 条，请先清理`);
+}
+
+async function loadControls() {
+    if (!SUPABASE_URL || !SUPABASE_KEY) return { settings: { enabled: true, lookback_days: 3 }, asinRules: new Map(), productOverrides: new Map() };
+    const [settingsRows, costRows, productRows] = await Promise.all([
+        readControlTable('sync_settings'),
+        readControlTable('cost_asin_rules'),
+        readControlTable('product_overrides'),
+    ]);
+    return {
+        settings: settingsRows.find((item) => item.id === 1) || { enabled: true, lookback_days: 3 },
+        asinRules: new Map(costRows.map((r) => [`${r.sid}|${r.local_sku}`, r.asin])),
+        productOverrides: new Map(productRows.map((r) => [`${r.sid}|${r.asin}`, r])),
+    };
+}
+
+async function uploadToSupabase({ dailyRows, currency, startedAt, range, dates, report }) {
     if (!SUPABASE_URL || !SUPABASE_KEY) {
         log('未配置 SUPABASE_URL / SUPABASE_SECRET_KEY，跳过上传（只写本地文件）');
         return false;
@@ -203,6 +233,16 @@ async function uploadToSupabase({ dailyRows, currency, startedAt, range, report 
 /* --------------------------- 主流程 --------------------------- */
 async function main() {
     const startedAt = new Date().toISOString();
+    const controls = FIXTURES ? { settings: { enabled: true, lookback_days: 3 }, asinRules: new Map(), productOverrides: new Map() } : await loadControls();
+    const explicitRange = arg('from') && arg('to');
+    if (!controls.settings.enabled && !explicitRange && !CLI_DAYS) {
+        log('管理后台已暂停自动同步，本次定时任务跳过');
+        return;
+    }
+    const range = explicitRange ? { from: arg('from'), to: arg('to') } : defaultRange(CLI_DAYS || controls.settings.lookback_days || 3);
+    const dates = datesBetween(range.from, range.to);
+    if (!dates.length || dates.length > 90) throw new Error('同步日期范围必须是 1–90 天');
+    runContext = { startedAt, range };
     log(`范围 ${range.from} ~ ${range.to}（${dates.length} 天），币种 ${CURRENCY}${FIXTURES ? '，离线模式' : ''}`);
 
     const shops = FIXTURES ? fixtureShops() : (await getClient().call('get_my_sids', null)).list || [];
@@ -235,7 +275,7 @@ async function main() {
                 service_type: 1,
             });
         }
-        const costMap = mergeOrderProfit(op.list);
+        const costMap = mergeOrderProfit(op.list, { asinRules: controls.asinRules });
         costByDate.set(date, costMap);
         log(`${date} 订单利润 ${op.list.length} 行 → ${costMap.size} 个 (店铺,ASIN) 成本`);
 
@@ -284,6 +324,7 @@ async function main() {
                         row,
                         cost: costMap.get(`${sid}|${row.asin}`),
                         date,
+                        override: controls.productOverrides.get(`${sid}|${row.asin}`),
                     })
                 );
             }
@@ -406,6 +447,7 @@ async function main() {
             currency: CURRENCY,
             startedAt,
             range,
+            dates,
             report,
         });
     }
@@ -413,7 +455,23 @@ async function main() {
     return { snapshot: mergedSnapshot, report };
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
     console.error(`✗ 同步失败：${e.message}`);
+    if (!FIXTURES && runContext && SUPABASE_URL && SUPABASE_KEY) {
+        try {
+            await postgrest('sync_runs', [{
+                started_at: runContext.startedAt,
+                finished_at: new Date().toISOString(),
+                range_from: runContext.range.from,
+                range_to: runContext.range.to,
+                status: 'failed',
+                mcp_calls: calls,
+                duration_ms: Date.now() - Date.parse(runContext.startedAt),
+                error: String(e.message).slice(0, 300),
+            }]);
+        } catch (writeError) {
+            console.error(`✗ 写入失败记录也失败：${writeError.message}`);
+        }
+    }
     process.exit(1);
 });

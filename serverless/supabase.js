@@ -9,10 +9,36 @@ const numberFields = [
 ];
 
 export function authorized(req) {
-  const configured = process.env.DASHBOARD_READ_TOKEN || '';
+  return tokenMatches(req, process.env.DASHBOARD_READ_TOKEN || '');
+}
+
+export function adminAuthorized(req) {
+  return tokenMatches(req, process.env.DASHBOARD_ADMIN_TOKEN || '');
+}
+
+function tokenMatches(req, configured) {
   const supplied = String(req.headers.authorization || '').replace(/^Bearer /i, '');
   if (configured.length < 24 || supplied.length !== configured.length) return false;
   return timingSafeEqual(Buffer.from(supplied), Buffer.from(configured));
+}
+
+export async function writeTable(path, method, body, query = {}, upsert = false) {
+  const base = process.env.SUPABASE_URL?.replace(/\/$/, '');
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
+  if (!base || !key) throw new Error('Supabase server credentials are missing');
+  const url = new URL(`${base}/rest/v1/${path}`);
+  for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
+  const response = await fetch(url, {
+    method,
+    headers: {
+      apikey: key,
+      ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}),
+      'Content-Type': 'application/json',
+      Prefer: upsert ? 'resolution=merge-duplicates,return=minimal' : 'return=minimal',
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  if (!response.ok) throw new Error(`Supabase ${path}: HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
 }
 
 export function respond(req, res, work) {

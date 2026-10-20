@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toDataRow, validateSnapshot } from './mapper.mjs';
+import { mergeOrderProfit, toDataRow, validateSnapshot } from './mapper.mjs';
 import { authorized, isValidDate, rowsForRange, splitRange } from '../../serverless/supabase.js';
+import adminHandler from '../../api/admin.js';
 
 test('Lingxing product name comes from price_list, not Amazon title', () => {
   const row = toDataRow({
@@ -24,6 +25,22 @@ test('failed shop queries reject a publishable snapshot', () => {
   });
   assert.equal(result.ok, false);
   assert.match(result.errors.join(','), /店铺查询失败/);
+});
+
+test('admin cost and product rules change the next sync result', () => {
+  const costs = mergeOrderProfit([{
+    sids: [7], price_list: [{ local_sku: 'SKU-1', asin: 'BOLD000001' }], gross_profit: 23,
+  }], { asinRules: new Map([['7|SKU-1', 'BNEW000001']]) });
+  assert.equal(costs.has('7|BOLD000001'), false);
+  assert.equal(costs.get('7|BNEW000001').gross_profit, 23);
+  const data = toDataRow({
+    date: '2026-10-18', shop: { id: 7, name: '店铺' },
+    row: { asin: 'BNEW000001', brands: ['旧品牌'], amount: 50 }, cost: costs.get('7|BNEW000001'),
+    override: { brand: '新品牌', product_name: '更正品名' },
+  });
+  assert.equal(data.brand, '新品牌');
+  assert.equal(data.product_name, '更正品名');
+  assert.equal(data.gross_profit, 23);
 });
 
 test('long ranges keep partial months at daily grain', () => {
@@ -61,5 +78,43 @@ test('cloud read queries use bounded dates and keep the database key server-side
     if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
     if (oldKey === undefined) delete process.env.SUPABASE_SECRET_KEY; else process.env.SUPABASE_SECRET_KEY = oldKey;
     if (oldToken === undefined) delete process.env.DASHBOARD_READ_TOKEN; else process.env.DASHBOARD_READ_TOKEN = oldToken;
+  }
+});
+
+test('admin API requires its own password and saves a cost rule server-side', async () => {
+  const oldFetch = globalThis.fetch;
+  const oldAdmin = process.env.DASHBOARD_ADMIN_TOKEN;
+  const oldUrl = process.env.SUPABASE_URL;
+  const oldKey = process.env.SUPABASE_SECRET_KEY;
+  const calls = [];
+  process.env.DASHBOARD_ADMIN_TOKEN = 'separate-admin-token-long-enough';
+  process.env.SUPABASE_URL = 'https://example.supabase.co';
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_test-only';
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: new URL(url), options });
+    return { ok: true, status: 204, text: async () => '' };
+  };
+  const response = () => ({
+    code: 200, body: null,
+    setHeader() { return this; },
+    status(code) { this.code = code; return this; },
+    json(body) { this.body = body; return this; },
+  });
+  try {
+    const denied = response();
+    await adminHandler({ method: 'POST', headers: { authorization: 'Bearer wrong' }, body: { action: 'settings' } }, denied);
+    assert.equal(denied.code, 401);
+    assert.equal(calls.length, 0);
+    const allowed = response();
+    await adminHandler({ method: 'POST', headers: { authorization: 'Bearer separate-admin-token-long-enough' }, body: { action: 'cost_rule', sid: '7', local_sku: 'SKU-1', asin: 'BNEW000001' } }, allowed);
+    assert.equal(allowed.code, 200);
+    assert.equal(calls[0].url.pathname, '/rest/v1/cost_asin_rules');
+    assert.equal(calls[0].options.headers.apikey, 'sb_secret_test-only');
+    assert.equal(JSON.parse(calls[0].options.body).asin, 'BNEW000001');
+  } finally {
+    globalThis.fetch = oldFetch;
+    for (const [name, value] of [['DASHBOARD_ADMIN_TOKEN', oldAdmin], ['SUPABASE_URL', oldUrl], ['SUPABASE_SECRET_KEY', oldKey]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
   }
 });
