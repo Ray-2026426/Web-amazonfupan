@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { mergeOrderProfit, toDataRow, validateSnapshot } from './mapper.mjs';
 import { authorized, isValidDate, rowsForRange, splitRange } from '../../serverless/supabase.js';
 import adminHandler from '../../api/admin.js';
+import exportHandler from '../../api/export.js';
+import targetsHandler from '../../api/targets.js';
 
 test('Lingxing product name comes from price_list, not Amazon title', () => {
   const row = toDataRow({
@@ -114,6 +116,88 @@ test('admin API requires its own password and saves a cost rule server-side', as
   } finally {
     globalThis.fetch = oldFetch;
     for (const [name, value] of [['DASHBOARD_ADMIN_TOKEN', oldAdmin], ['SUPABASE_URL', oldUrl], ['SUPABASE_SECRET_KEY', oldKey]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
+});
+
+test('target upload remains staged until all rows are received and activation is requested', async () => {
+  const oldFetch = globalThis.fetch;
+  const oldAdmin = process.env.DASHBOARD_ADMIN_TOKEN;
+  const oldUrl = process.env.SUPABASE_URL;
+  const oldKey = process.env.SUPABASE_SECRET_KEY;
+  const calls = [];
+  process.env.DASHBOARD_ADMIN_TOKEN = 'separate-admin-token-long-enough';
+  process.env.SUPABASE_URL = 'https://example.supabase.co';
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_test-only';
+  globalThis.fetch = async (url, options = {}) => {
+    const target = new URL(url);
+    calls.push({ target, options });
+    if (target.pathname.endsWith('/target_imports') && options.method !== 'POST') {
+      const rows = target.searchParams.get('offset') === '0' ? [{ id: target.searchParams.get('id')?.slice(3), status: 'staging', expected_rows: 1 }] : [];
+      return { ok: true, json: async () => rows };
+    }
+    return { ok: true, status: 204, text: async () => '' };
+  };
+  const response = () => ({ code: 200, body: null, setHeader() { return this; }, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
+  const auth = { authorization: 'Bearer separate-admin-token-long-enough' };
+  try {
+    const start = response();
+    await adminHandler({ method: 'POST', headers: auth, body: { action: 'targets_start', source_filename: '目标.xlsx', expected_rows: 1 } }, start);
+    assert.equal(start.code, 200);
+    assert.match(start.body.import_id, /^[0-9a-f-]{36}$/);
+    const batch = response();
+    await adminHandler({ method: 'POST', headers: auth, body: { action: 'targets_batch', import_id: start.body.import_id, rows: [{ row_no: 0, payload: { month: '2026-10', shop_name: '店铺', sales_amount_target: 100 } }] } }, batch);
+    assert.equal(batch.code, 200);
+    assert.equal(calls.find(call => call.target.pathname.endsWith('/target_rows')).options.method, 'POST');
+    const activate = response();
+    await adminHandler({ method: 'POST', headers: auth, body: { action: 'targets_activate', import_id: start.body.import_id } }, activate);
+    assert.equal(activate.code, 200);
+    assert.equal(calls.at(-1).target.pathname, '/rest/v1/rpc/activate_target_import');
+  } finally {
+    globalThis.fetch = oldFetch;
+    for (const [name, value] of [['DASHBOARD_ADMIN_TOKEN', oldAdmin], ['SUPABASE_URL', oldUrl], ['SUPABASE_SECRET_KEY', oldKey]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
+});
+
+test('daily export and target reads require separate passwords and paginate by date', async () => {
+  const oldFetch = globalThis.fetch;
+  const oldAdmin = process.env.DASHBOARD_ADMIN_TOKEN;
+  const oldRead = process.env.DASHBOARD_READ_TOKEN;
+  const oldUrl = process.env.SUPABASE_URL;
+  const oldKey = process.env.SUPABASE_SECRET_KEY;
+  const calls = [];
+  process.env.DASHBOARD_ADMIN_TOKEN = 'separate-admin-token-long-enough';
+  process.env.DASHBOARD_READ_TOKEN = 'read-only-token-long-enough';
+  process.env.SUPABASE_URL = 'https://example.supabase.co';
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_test-only';
+  globalThis.fetch = async (url) => {
+    const target = new URL(url);
+    calls.push(target);
+    if (target.pathname.endsWith('/target_imports')) return { ok: true, json: async () => target.searchParams.get('offset') === '0' ? [{ id: '00000000-0000-4000-8000-000000000001' }] : [] };
+    if (target.pathname.endsWith('/target_rows')) return { ok: true, json: async () => [{ payload: { month: '2026-10', sales_amount_target: 100 } }] };
+    return { ok: true, json: async () => [{ date: '2026-10-19', sales_amount: 50 }] };
+  };
+  const response = () => ({ code: 200, body: null, setHeader() { return this; }, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
+  try {
+    const invalid = response();
+    await exportHandler({ method: 'GET', headers: { authorization: 'Bearer separate-admin-token-long-enough' }, url: '/api/export?from=2026-09-01&to=2026-10-19' }, invalid);
+    assert.equal(invalid.code, 400);
+    assert.equal(calls.length, 0);
+    const daily = response();
+    await exportHandler({ method: 'GET', headers: { authorization: 'Bearer separate-admin-token-long-enough' }, url: '/api/export?from=2026-10-19&to=2026-10-19' }, daily);
+    assert.equal(daily.code, 200);
+    assert.equal(daily.body.rows.length, 1);
+    assert.deepEqual(calls[0].searchParams.getAll('date'), ['gte.2026-10-19', 'lte.2026-10-19']);
+    const targets = response();
+    await targetsHandler({ method: 'GET', headers: { authorization: 'Bearer read-only-token-long-enough' }, url: '/api/targets?from=2026-10&to=2026-10&offset=0' }, targets);
+    assert.equal(targets.code, 200);
+    assert.equal(targets.body.rows[0].sales_amount_target, 100);
+  } finally {
+    globalThis.fetch = oldFetch;
+    for (const [name, value] of [['DASHBOARD_ADMIN_TOKEN', oldAdmin], ['DASHBOARD_READ_TOKEN', oldRead], ['SUPABASE_URL', oldUrl], ['SUPABASE_SECRET_KEY', oldKey]]) {
       if (value === undefined) delete process.env[name]; else process.env[name] = value;
     }
   }

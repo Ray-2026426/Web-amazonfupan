@@ -13,6 +13,7 @@ export interface DataRow {
   
   // Metrics
   sales_quantity: number;
+  order_quantity?: number;
   sales_amount: number;
   gross_profit: number;
   fba_sellable_qty: number;

@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 
 const numberFields = [
-  'sales_quantity', 'sales_amount', 'gross_profit', 'fba_sellable_qty', 'sessions',
+  'sales_quantity', 'order_quantity', 'sales_amount', 'gross_profit', 'fba_sellable_qty', 'sessions',
   'first_mile_cost', 'procurement_cost', 'storage_fee', 'fba_fee', 'refund_cost',
   'platform_commission', 'ad_spend', 'ad_sales', 'ad_orders', 'sp_spend', 'sp_sales',
   'sd_spend', 'sd_sales', 'sb_spend', 'sb_sales', 'sbv_spend', 'sbv_sales',
@@ -79,6 +79,22 @@ export async function fetchTable(table, params, maxRows = 60000) {
     }
     if (page.length < pageSize) break;
   }
+  return rows;
+}
+
+export async function fetchPage(table, params, limit = 1000, offset = 0) {
+  const base = process.env.SUPABASE_URL?.replace(/\/$/, '');
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
+  if (!base || !key) throw new Error('Supabase server credentials are missing');
+  const query = new URLSearchParams(params);
+  query.set('limit', String(limit));
+  query.set('offset', String(offset));
+  const response = await fetch(`${base}/rest/v1/${table}?${query}`, {
+    headers: { apikey: key, ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}) },
+  });
+  if (!response.ok) throw new Error(`Supabase ${table}: HTTP ${response.status}`);
+  const rows = await response.json();
+  if (!Array.isArray(rows)) throw new Error(`Supabase ${table}: invalid response`);
   return rows;
 }
 

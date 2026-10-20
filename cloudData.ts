@@ -1,4 +1,4 @@
-import type { DataRow } from './types';
+import type { DataRow, TargetRow } from './types';
 import { calculatePeriodDates, formatDate } from './utils';
 
 export const CLOUD_API_URL = (import.meta.env.VITE_CLOUD_API_URL || '').replace(/\/$/, '');
@@ -45,4 +45,21 @@ export async function fetchCloudRows(startDate: string, endDate: string, token: 
     for (const row of response.rows) seen.set(`${row.date}|${row.id}`, row);
   }
   return [...seen.values()];
+}
+
+export async function fetchCloudTargets(startDate: string, endDate: string, token: string, signal?: AbortSignal): Promise<{ active: boolean; rows: TargetRow[] }> {
+  const from = startDate.slice(0, 7);
+  const to = endDate.slice(0, 7);
+  const rows: TargetRow[] = [];
+  let offset = 0;
+  for (let page = 0; page < 101; page++) {
+    const result = await request<{ active: boolean; rows: TargetRow[]; nextOffset: number | null }>(
+      `/api/targets?from=${from}&to=${to}&offset=${offset}`, token, signal,
+    );
+    if (!result.active) return { active: false, rows: [] };
+    rows.push(...result.rows);
+    if (result.nextOffset === null) return { active: true, rows };
+    offset = result.nextOffset;
+  }
+  throw new Error('目标表数据量超出单次读取上限，请缩短日期范围');
 }

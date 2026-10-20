@@ -39,7 +39,7 @@ import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parse
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles } from 'lucide-react';
 import { saveToDB, loadFromDB, replaceImportedData } from './db';
 import { DEFAULT_BUSINESS_RULES, generateBusinessIssues, updateActionForIssue } from './utils/businessRules';
-import { CLOUD_ENABLED, clearCloudToken, fetchCloudFreshness, fetchCloudRows, getCloudToken, saveCloudToken } from './cloudData';
+import { CLOUD_ENABLED, clearCloudToken, fetchCloudFreshness, fetchCloudRows, fetchCloudTargets, getCloudToken, saveCloudToken } from './cloudData';
 
 const DEFAULT_DATA_START = '2025-01-01';
 const SAMPLE_HEADERS = '日期,ASIN,国家,店铺,负责人,销售额,销量,毛利润,广告花费,广告销售额,Sessions';
@@ -134,6 +134,8 @@ const App: React.FC = () => {
   const [performanceData, setPerformanceData] = useState<DataRow[]>([]);
   const [weeklyData, setWeeklyData] = useState<DataRow[]>([]);
   const [targetData, setTargetData] = useState<TargetRow[]>([]);
+  const [cloudTargetData, setCloudTargetData] = useState<TargetRow[]>([]);
+  const [cloudTargetActive, setCloudTargetActive] = useState(false);
   const [inventoryData, setInventoryData] = useState<InventoryRow[]>([]);
   const [refundData, setRefundData] = useState<RefundRow[]>([]);
   const [reviewData, setReviewData] = useState<ReviewRow[]>([]);
@@ -279,14 +281,19 @@ const App: React.FC = () => {
                   setFilters(prev => ({ ...prev, startDate: `${latest.slice(0, 7)}-01`, endDate: latest }));
                   return;
               }
-              const rows = await fetchCloudRows(filters.startDate, filters.endDate, cloudToken, controller.signal);
+              const [rows, targets] = await Promise.all([
+                  fetchCloudRows(filters.startDate, filters.endDate, cloudToken, controller.signal),
+                  fetchCloudTargets(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null),
+              ]);
               if (controller.signal.aborted) return;
               setCloudRows(rows);
+              setCloudTargetData(targets?.rows || []);
+              setCloudTargetActive(targets?.active || false);
               setCloudRowsRange(`${filters.startDate}|${filters.endDate}`);
               setCloudConnected(true);
-              setCloudStatus(freshness.latestRun?.status === 'failed'
+              setCloudStatus((freshness.latestRun?.status === 'failed'
                   ? `云端同步失败，当前业绩数据截至 ${freshness.latest_date}`
-                  : `云端业绩数据截至 ${freshness.latest_date}`);
+                  : `云端业绩数据截至 ${freshness.latest_date}`) + (targets === null ? ' · 云端目标读取失败，暂用本地目标' : ''));
               setDataEndDate(freshness.latest_date);
               setLastImportedAt(freshness.latestRun?.finished_at ? Date.parse(freshness.latestRun.finished_at) : undefined);
           } catch (error) {
@@ -316,6 +323,8 @@ const App: React.FC = () => {
       setCloudToken('');
       setCloudConnected(false);
       setCloudRows([]);
+      setCloudTargetData([]);
+      setCloudTargetActive(false);
       setCloudRowsRange('');
       setCloudStatus('已切换到本地导入数据');
       loadFromDB('meta').then((meta: AppMeta | null) => {
@@ -327,6 +336,7 @@ const App: React.FC = () => {
   const visibleCloudRows = cloudRowsRange === `${filters.startDate}|${filters.endDate}` ? cloudRows : [];
   const displayPerformanceData = cloudConnected ? visibleCloudRows : performanceData;
   const displayWeeklyData = cloudConnected ? visibleCloudRows : weeklyData;
+  const displayTargetData = cloudConnected && cloudTargetActive ? cloudTargetData : targetData;
 
   // --- 2. Save Filters + data coverage when they change ---
   useEffect(() => {
@@ -366,7 +376,7 @@ const App: React.FC = () => {
     };
     const newWeekly = await parseOptional(slots.weekly, parseWeeklyPerformance);
     const parsedTargets = await parseOptional(slots.target, parseTargetData);
-    const newTargets = enrichTargetData(parsedTargets, monthlyRes.data);
+    const newTargets = slots.target ? enrichTargetData(parsedTargets, monthlyRes.data) : targetData;
     const newInventory = await parseOptional(slots.inventory, parseInventoryData);
     const newRefunds = await parseOptional(slots.refund, parseRefundData);
     const newReviews = await parseOptional(slots.review, parseReviewData);
@@ -396,7 +406,7 @@ const App: React.FC = () => {
     };
     return {
         reports: debugs,
-        missingOptional: listMissingOptionalSlots(slots),
+        missingOptional: listMissingOptionalSlots(slots).filter(label => label !== '全年目标表' || (!targetData.length && !cloudTargetActive)),
         unrecognizedNames: [],
         commit: async () => {
             const evaluatedActions = businessActions.map(action => {
@@ -526,8 +536,8 @@ const App: React.FC = () => {
           ? 1
           : getPacingRatio(periods.current.start, periods.current.end, dataEndDate);
       const target = isWeeklyMode
-          ? getWeeklyAllocatedTarget(targetData, periods.current.start, periods.current.end, filters)
-          : getTargetForSelection(targetData, periods.current.start, periods.current.end, filters, 1);
+          ? getWeeklyAllocatedTarget(displayTargetData, periods.current.start, periods.current.end, filters)
+          : getTargetForSelection(displayTargetData, periods.current.start, periods.current.end, filters, 1);
 
       // Inventory (Snapshot logic usually, here simplified filter)
       const invRows = filterInventoryData(inventoryData, filters);
@@ -535,7 +545,7 @@ const App: React.FC = () => {
 
       // Analysis
       const dataCompleteness = analyzeDataCompleteness(currentRows, lastRows, yearRows, periods);
-      const targetWarnings = analyzeTargetCompleteness(targetData, periods.current.start, periods.current.end);
+      const targetWarnings = analyzeTargetCompleteness(displayTargetData, periods.current.start, periods.current.end);
       
       const warnings = [...dataCompleteness.warnings, ...targetWarnings];
 
@@ -553,7 +563,7 @@ const App: React.FC = () => {
           invRows,
           pacingRatio,
       };
-  }, [displayPerformanceData, displayWeeklyData, targetData, inventoryData, filters, isWeeklyMode, dataEndDate]);
+  }, [displayPerformanceData, displayWeeklyData, displayTargetData, inventoryData, filters, isWeeklyMode, dataEndDate]);
 
   const businessIssues = useMemo(() => {
       if (!processedData) return [];
@@ -575,7 +585,7 @@ const App: React.FC = () => {
       <SidebarFilters 
         data={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
         inventoryData={inventoryData}
-        targetData={targetData}
+        targetData={displayTargetData}
         filters={filters} 
         setFilters={setFilters} 
         warnings={processedData?.warnings}
@@ -631,11 +641,11 @@ const App: React.FC = () => {
                 </button>
             </div>
         </header>
-        {showCloudAdmin && <Suspense fallback={null}><CloudAdminPanel onClose={() => setShowCloudAdmin(false)} /></Suspense>}
+        {showCloudAdmin && <Suspense fallback={null}><CloudAdminPanel onClose={() => setShowCloudAdmin(false)} onTargetsUpdated={() => setCloudRefreshTick(value => value + 1)} /></Suspense>}
 
         {/* Scrollable Content */}
         <main className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">
-            {CLOUD_ENABLED && cloudStatus && <div role="status" className={`mx-auto mb-3 max-w-[1680px] rounded-xl border px-4 py-2 text-sm ${cloudConnected && !cloudStatus.includes('失败') ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>{cloudStatus}{cloudConnected && ' · 目标、库存、退货、评论仍使用本地导入数据'}</div>}
+            {CLOUD_ENABLED && cloudStatus && <div role="status" className={`mx-auto mb-3 max-w-[1680px] rounded-xl border px-4 py-2 text-sm ${cloudConnected && !cloudStatus.includes('失败') ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>{cloudStatus}{cloudConnected && (cloudTargetActive ? ' · 目标使用云端目标表；库存、退货、评论仍使用本地导入' : ' · 目标、库存、退货、评论仍使用本地导入')}</div>}
             {persistenceError && <div role="alert" className="mx-auto mb-3 flex max-w-[1680px] items-center justify-between rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"><span>{persistenceError}</span><button type="button" onClick={() => setPersistenceError('')} className="ml-3 font-bold">关闭</button></div>}
             {isRestoringData ? (
                 <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/80 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
@@ -655,7 +665,7 @@ const App: React.FC = () => {
                             isWeeklyMode={isWeeklyMode}
                             rawData={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
                             filters={filters}
-                            targetRows={targetData}
+                            targetRows={displayTargetData}
                             pacingRatio={processedData.pacingRatio}
                         /></section>
                     )}
@@ -746,7 +756,7 @@ const App: React.FC = () => {
                 currentRows={processedData.currentRows}
                 lastRows={processedData.lastRows}
                 yearRows={processedData.yearRows}
-                targetRows={targetData}
+                targetRows={displayTargetData}
                 inventoryRows={processedData.invRows}
                 period={processedData.periods.current}
                 onOpenRefundAnalysis={handleOpenRefundAnalysis}

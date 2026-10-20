@@ -130,7 +130,7 @@ function fixtureShops() {
 /* --------------------------- 上传：Supabase --------------------------- */
 
 const NUMERIC_FIELDS = [
-    'sales_quantity', 'sales_amount', 'gross_profit', 'fba_sellable_qty', 'sessions',
+    'sales_quantity', 'order_quantity', 'sales_amount', 'gross_profit', 'fba_sellable_qty', 'sessions',
     'first_mile_cost', 'procurement_cost', 'storage_fee', 'fba_fee', 'refund_cost', 'platform_commission',
     'ad_spend', 'ad_sales', 'ad_orders', 'sp_spend', 'sp_sales', 'sd_spend', 'sd_sales',
     'sb_spend', 'sb_sales', 'sbv_spend', 'sbv_sales', 'impressions', 'clicks',

@@ -95,6 +95,7 @@ export function toDataRow({ shop, row, cost, date, override }) {
         })(),
 
         sales_quantity: num(row.volume),
+        order_quantity: num(row.order_items),
         sales_amount: num(row.amount),
         gross_profit: num(c.gross_profit),
         fba_sellable_qty: num(row.afn_fulfillable_quantity),
@@ -196,7 +197,7 @@ export const monthKeyFromDate = (dateStr) => String(dateStr).slice(0, 7);
  * ------------------------------------------------------------------ */
 
 const SUM_FIELDS = [
-    'sales_quantity', 'sales_amount', 'gross_profit', 'sessions',
+    'sales_quantity', 'order_quantity', 'sales_amount', 'gross_profit', 'sessions',
     'first_mile_cost', 'procurement_cost', 'storage_fee', 'fba_fee', 'refund_cost', 'platform_commission',
     'ad_spend', 'ad_sales', 'ad_orders', 'sp_spend', 'sp_sales', 'sd_spend', 'sd_sales',
     'sb_spend', 'sb_sales', 'sbv_spend', 'sbv_sales', 'impressions', 'clicks',
