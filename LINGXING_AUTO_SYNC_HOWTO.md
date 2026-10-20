@@ -6,7 +6,7 @@
 
 - 2026-10-20 已在 `Ray’AI WorkSpace` 新建独立项目 `amazon-performance-dashboard`，区域为新加坡，项目 URL 是 `https://ywbxdzsqymztlvknltbn.supabase.co`。
 - 已运行 [db/schema.sql](db/schema.sql)：数据表、管理规则表、只读视图和按天原子替换函数都已建好。真实查询确认匿名角色无权读取业务表，测试写入已回滚。
-- 2026-10-20 已确认 GitHub 仓库 `Ray-2026426/Web-amazonfupan` 与 Vercel 项目 `web-amazonfupan` 连接正常，生产部署使用最新提交 `024f024`。已在 Vercel 的生产环境填入 `SUPABASE_URL`。
+- 2026-10-20 已确认 GitHub 仓库 `Ray-2026426/Web-amazonfupan` 与 Vercel 项目 `web-amazonfupan` 连接正常，生产部署已成功。已在 Vercel 的生产环境填入 `SUPABASE_URL`。
 - 当前云数据库还没有同步记录或业务数据。Vercel 的其他环境变量尚未配置，因此看板还未切换到云端读取。
 
 ## 你要做的事（只需配置一次）
