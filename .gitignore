@@ -5,6 +5,7 @@ node_modules.*/
 
 # 构建产物
 dist/
+dist-review/
 dist-ssr/
 
 # 环境变量与密钥（.env.local 里有 GEMINI_API_KEY，绝对不要提交）

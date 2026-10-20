@@ -24,6 +24,10 @@ concurrency:
   group: lingxing-sync
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -43,11 +47,15 @@ jobs:
           LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
           LINGXING_CURRENCY: ${{ vars.LINGXING_CURRENCY || 'USD' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
           set -euo pipefail
           if [ -z "${LINGXING_MCP_KEY:-}" ]; then
             echo "::error::缺少 LINGXING_MCP_KEY，请在仓库 Settings → Secrets 里添加"
+            exit 1
+          fi
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SECRET_KEY:-}" ]; then
+            echo "::error::缺少 SUPABASE_URL 或 SUPABASE_SECRET_KEY，请在仓库 Settings → Secrets 里添加"
             exit 1
           fi
           DAYS="${{ github.event.inputs.days || '3' }}"

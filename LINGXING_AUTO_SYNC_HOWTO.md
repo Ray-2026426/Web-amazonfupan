@@ -1,93 +1,66 @@
-# 领星数据自动同步 · 操作手册（给第一次配置的人）
+# 领星数据自动更新：照着做
 
-目标：**不用再下载 Excel、不用再手动上传**。每天自动从领星取数写进数据库，看板打开就是最新数据。
-电脑关机也照跑，因为任务跑在 GitHub 的服务器上。
+目标：电脑关机后，云端仍每天从领星拉取数据。看板打开后自动读取最新业绩，无需每天下载、上传 Excel。
 
-## 一、整体是怎么转的（先理解这一句）
+## 你要做的事（只需配置一次）
 
-```
-GitHub Actions（每天 08:10 自动跑）
-        │  用 MCP 密钥调领星接口，拉最近几天、筛掉零活动行
-        ▼
-Supabase 数据库（免费额度，存日明细，月/周用视图现算）
-        │  浏览器用「匿名只读」的 key 查
-        ▼
-看板（打开即最新；本地 IndexedDB 只做缓存/离线兜底）
-```
+1. **准备领星 MCP 密钥。** 在领星开放平台启用 MCP，生成可读取店铺、产品表现、订单利润的 `X-Mcp-Key`。密钥只填在 GitHub Secret 中，不要发到聊天里。[领星官方说明](https://www.lingxing.com/help/article/mcp)
+2. **创建 Supabase 项目。** 在 [Supabase](https://supabase.com/) 新建项目，进入 SQL Editor，把 [db/schema.sql](db/schema.sql) 全文运行一次。以后若更新本仓库数据库结构，也重新运行这份脚本。到项目的 API Keys 页面复制 Project URL 和服务端用的 **secret key**（通常以 `sb_secret_` 开头）。不要使用浏览器公开的 publishable key。
+3. **给 GitHub 仓库配置三个 Secrets。** 在仓库 Settings → Secrets and variables → Actions → New repository secret 中填写：
 
-密钥只存在 GitHub Secrets 和 Supabase 后台，**不会进代码、不会进浏览器**。
+   | 名称 | 填入的值 |
+   | --- | --- |
+   | `LINGXING_MCP_KEY` | 第 1 步的领星密钥 |
+   | `SUPABASE_URL` | 第 2 步的 Project URL |
+   | `SUPABASE_SECRET_KEY` | 第 2 步的 Supabase secret key |
 
-## 二、你需要做的 4 件事
+4. **给 Vercel 项目配置四个环境变量。** 在 Vercel Project → Settings → Environment Variables 中填写：
 
-### 1. 拿领星 MCP 密钥
+   | 名称 | 填入的值 |
+   | --- | --- |
+   | `VITE_CLOUD_SYNC_ENABLED` | `true` |
+   | `SUPABASE_URL` | 同一个 Supabase Project URL |
+   | `SUPABASE_SECRET_KEY` | 同一个 Supabase secret key |
+   | `DASHBOARD_READ_TOKEN` | 自己生成的一串至少 24 位随机字符，作为看板只读密码 |
 
-- 位置：领星 ERP → 开放平台 / MCP 设置里，生成一串密钥（`X-Mcp-Key`）。
-- 官方说明：<https://www.lingxing.com/help/article/mcp>
-- 权限只需要**读取**（店铺、产品表现、订单利润）。
-- 拿到后先别贴到聊天里，第 3 步直接填进 GitHub Secrets。
+   保存后重新部署 Vercel 项目。`SUPABASE_SECRET_KEY` 和 `DASHBOARD_READ_TOKEN` **不要**添加 `VITE_` 前缀；它们只在服务端使用。看板上的“连接云端数据”输入第 4 项只读密码，不输入领星或 Supabase 密钥。
+   如果领星同步使用的不是默认 `USD`，GitHub Variables 和 Vercel 环境变量都要设置相同的 `LINGXING_CURRENCY`（例如 `CNY`）。
+5. **第一次补历史数据。** GitHub 仓库 → Actions →「领星数据自动同步」→ Run workflow。先输入 `days=3`，确认成功后分段补历史数据。每次建议 7–30 天，避免一次运行超过 GitHub Actions 的 120 分钟限制。`from` 和 `to` 都填写时按指定日期执行。完成后打开看板，输入只读密码。
 
-### 2. 开一个免费的 Supabase 数据库
+## 我已经做好的部分
 
-1. 打开 <https://supabase.com> → 用 GitHub 账号登录 → New project。
-2. 名字随便（如 `amazon-dashboard`），区域选 `Southeast Asia (Singapore)`，记下数据库密码（用不到也能填）。
-3. 项目建好后，左侧 **SQL Editor** → 把本仓库 `db/schema.sql` 全文粘进去 → Run。看到 Success 就对了。
-4. 左侧 **Project Settings → API**，记下两样东西：
-   - `Project URL`（形如 `https://xxxx.supabase.co`）
-   - `service_role` 那一栏的 key（**不是** `anon` 那个；这个只给 GitHub 用）
+- GitHub Actions 每天北京时间约 08:10 运行，拉最近 3 天，覆盖领星延迟回填的数据；逐店限速和分页校验。
+- Supabase 保存日明细；同一天的数据在数据库事务内整体替换，失败时保留旧数据。
+- Vercel 的 `/api/data` 和 `/api/freshness` 只在服务端读 Supabase；看板按所选日期拉取本期、上期和去年同期数据，每 15 分钟刷新一次，显示数据截至日。
+- 看板保留原有 Excel 导入。**目前自动更新的是 ASIN 业绩、流量、广告和成本。** 目标、库存、退货、评论和图片仍沿用本地导入。
 
-### 3. 在 GitHub 仓库里填 3 个 Secret
+## 上线前核对一次数字
 
-仓库 → **Settings → Secrets and variables → Actions → New repository secret**，逐个添加：
-
-| 名字 | 值 |
-|---|---|
-| `LINGXING_MCP_KEY` | 第 1 步拿到的领星 MCP 密钥 |
-| `SUPABASE_URL` | 第 2 步的 Project URL |
-| `SUPABASE_SERVICE_KEY` | 第 2 步的 `service_role` key |
-
-填完可以在 **Variables** 里加一个 `LINGXING_CURRENCY`（默认 `USD`；如果你的报表是人民币口径就填 `CNY`）。
-
-### 4. 手动跑一次回补（第一次要补历史）
-
-仓库 → **Actions** → 左侧「领星数据自动同步」→ 右侧 **Run workflow**：
-
-- 第一次建议 `days = 30`（补最近 30 天），点 Run。
-- 跑完点进去看日志：应该出现「产物：日 N 行 / 月 N 行 / 周 N 行」和「Supabase 上传完成」。
-- 30 天没问题后，再跑一次 `from` / `to` 指定更早的区间（一次最多 90 天，建议按月补）。
-
-之后**不用再管**：每天北京时间 08:10 自动跑。失败会自动开一个 Issue 提醒你。
-
-## 三、怎么确认数据对了
-
-1. 打开 Supabase → Table Editor → `fact_daily`，应该能看到每天约 1,000 行左右。
-2. 左侧 SQL Editor 跑一句对账：
+Supabase SQL Editor 运行：
 
 ```sql
--- 最近 7 天按天汇总，和你现有 Excel 的销售额对一下
-select date, round(sum(sales_amount)::numeric, 2) as 销售额, round(sum(gross_profit)::numeric, 2) as 毛利额
+select date, round(sum(sales_amount), 2) as sales_amount,
+       round(sum(gross_profit), 2) as gross_profit,
+       round(sum(ad_spend), 2) as ad_spend
 from fact_daily
 where date >= current_date - 7
-group by 1 order by 1 desc;
+group by date order by date desc;
 ```
 
-3. 数字对得上再往下走（接前端）。**对不上先别接前端**，先查口径。
+用你原来同日期、同币种、同店铺范围的 Excel 核对销售额、毛利和广告花费。离线样本中 2026-09-17 的 81 个店铺查询通过了接口汇总校验，但毛利约 51% 的行是负数；上线前需要用你的真实报表确认成本口径。
 
-## 四、常见问题
+## 如何知道是否正常
 
-| 现象 | 原因 / 处理 |
-|---|---|
-| 日志里「缺少 LINGXING_MCP_KEY」 | Secret 名字拼错，或没在仓库级而填到了组织级 |
-| 日志里「网关错误 code=102」 | 领星密钥失效/无权限，重新生成 |
-| 日志里「429」或大量店铺失败 | 领星 QPS=1 的风控。把 `--days` 调小（如 1~2）再试 |
-| 成本匹配率低于 50% | 币种不对（`LINGXING_CURRENCY`），或订单利润表口径变了 |
-| Supabase 报 401/403 | 用了 `anon` key 而不是 `service_role`；或没执行 `db/schema.sql` |
-| 负毛利行占比很高（>30%） | 成本口径待核对（见下） |
+- 看板顶部显示“云端业绩数据截至 YYYY-MM-DD”。同步失败时，会显示失败状态并保留数据库内上一次成功的数据。
+- GitHub Actions 的这次运行日志显示“Supabase 上传完成”；失败时工作流尝试创建 GitHub Issue。
+- 定时任务由 GitHub 执行，电脑关机不影响。GitHub 官方说明定时任务可能延迟或偶发跳过，公开仓库连续 60 天无活动还可能自动停用；如果以后需要严格保证每天准点更新，应迁移到专用云端调度器。[GitHub 官方说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
-## 五、已知待办
+## 常见问题
 
-- **成本口径对账**：用 2026-09-17 的真实数据实测，1,109 行里有 51% 是负毛利。可能是
-  「订单利润」的成本项比「销售额」口径更全（含头程/仓储），也可能是 MSKU→ASIN 归并错了。
-  **必须先拿你现有 Excel 的毛利列对一次**，再决定口径。
-- **前端接入**：目前数据只进数据库，看板还没有读它（下一步做：启动时拉数据库 → 写入
-  IndexedDB → 顶部显示「业绩截至 X 月 X 日」）。保留 Excel 导入作为兜底。
-- **库存 / 退货 / 评论 / 目标**：暂未接入（接口字段待逐个核对，目标不是实绩、只能人工维护）。
+| 现象 | 处理 |
+| --- | --- |
+| Actions 提示缺少密钥 | 检查 GitHub Secrets 的三个名称是否完全一致。 |
+| Supabase 返回 401/403 | 检查是否用服务端 secret key，并重新运行 `db/schema.sql`。 |
+| 看板显示“云端访问密码不正确” | 输入 Vercel 的 `DASHBOARD_READ_TOKEN`，不是领星密钥。 |
+| 看板只有本地数据 | 确认 Vercel 已重新部署，`VITE_CLOUD_SYNC_ENABLED=true`，且首次同步已完成。 |
+| 领星接口限速或查询失败 | 在 Actions 中用 `days=1` 重试；完整校验不过时不会覆盖该天数据。 |

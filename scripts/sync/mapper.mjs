@@ -29,7 +29,7 @@ export function categoryLevel2(categories) {
     if (!first) return '';
     const raw = typeof first === 'string' ? first : first.name || first.category_name || '';
     const parts = String(raw)
-        .split(/[:>/|]/)
+        .split(/[\\:>/|]/)
         .map((s) => s.trim())
         .filter(Boolean);
     return parts[1] || parts[0] || '';
@@ -87,7 +87,12 @@ export function toDataRow({ shop, row, cost, date }) {
         sub_category: categoryLevel2(row.categories),
         parent_asin: (row.parent_asins || [])[0]?.parent_asin || row.parent_asin || '',
         child_asin: asin,
-        product_name: row.local_name || row.item_name || '',
+        // 领星 item_name 是 Amazon 标题，不是内部品名。品名在 price_list[].local_name。
+        product_name: (() => {
+            const prices = row.price_list || [];
+            const best = prices.reduce((a, b) => num(b?.volume) > num(a?.volume) ? b : a, prices[0]);
+            return best?.local_name || prices.find((p) => p?.local_name)?.local_name || row.local_name || '';
+        })(),
 
         sales_quantity: num(row.volume),
         sales_amount: num(row.amount),
@@ -237,13 +242,14 @@ export function aggregateRows(rows, granularity) {
  * 校验：宁可整批失败，也不要把半份数据写进库
  * ------------------------------------------------------------------ */
 
-export function validateSnapshot({ dailyRows, rawPPRows, shops, dates, currency }) {
+export function validateSnapshot({ dailyRows, rawPPRows, shops, dates, currency, failedShopCalls = 0 }) {
     const errors = [];
     const warnings = [];
 
     if (!dailyRows.length) errors.push('转换后 0 行，中止');
     if (!Array.isArray(shops) || shops.length === 0) errors.push('店铺列表为空');
     if (!dates.length) errors.push('日期区间为空');
+    if (failedShopCalls > 0) errors.push(`${failedShopCalls} 个店铺查询失败，拒绝发布不完整数据`);
 
     // 店铺覆盖：有销量的店铺必须都被拉到
     const shopsWithSales = new Set(dailyRows.filter((r) => r.sales_amount > 0).map((r) => r.shop_name));

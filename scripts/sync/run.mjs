@@ -23,6 +23,7 @@ import {
     aggregateRows,
     isActiveRow,
     mergeOrderProfit,
+    num,
     toDataRow,
     validateSnapshot,
 } from './mapper.mjs';
@@ -44,7 +45,7 @@ const FIXTURES = has('fixtures');
 const DRY_RUN = has('dry-run');
 const UPLOAD = has('upload') || !!process.env.SUPABASE_URL;
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || '';
+const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || '';
 const KEEP_ZERO = has('include-zero');
 const SHOP_LIMIT = Number(arg('shops-limit', '0')) || 0;
 const PAGE = Number(arg('page', '1000')) || 1000;
@@ -110,6 +111,7 @@ async function fetchPaged(toolId, baseParams) {
         if (page.length === 0) break;
         if (offset > 500000) break;
     }
+    if (rows.length !== total) throw new Error(`${toolId} 分页不完整：${rows.length}/${total}`);
     return { total, total_sum: totalSum, list: rows };
 }
 
@@ -152,7 +154,7 @@ async function postgrest(pathname, body, onConflict) {
         method: 'POST',
         headers: {
             apikey: SUPABASE_KEY,
-            Authorization: `Bearer ${SUPABASE_KEY}`,
+            ...(SUPABASE_KEY.startsWith('eyJ') ? { Authorization: `Bearer ${SUPABASE_KEY}` } : {}),
             'Content-Type': 'application/json',
             Prefer: 'resolution=merge-duplicates,return=minimal',
         },
@@ -165,17 +167,18 @@ async function postgrest(pathname, body, onConflict) {
 
 async function uploadToSupabase({ dailyRows, currency, startedAt, range, report }) {
     if (!SUPABASE_URL || !SUPABASE_KEY) {
-        log('未配置 SUPABASE_URL / SUPABASE_SERVICE_KEY，跳过上传（只写本地文件）');
+        log('未配置 SUPABASE_URL / SUPABASE_SECRET_KEY，跳过上传（只写本地文件）');
         return false;
     }
-    log(`上传 Supabase：日明细 ${dailyRows.length} 行（月/周汇总由数据库视图现算，不推汇总，避免跨月跨周写出残月数据）`);
+    log(`上传 Supabase：日明细 ${dailyRows.length} 行，按天原子替换`);
 
     const dailyPayload = dailyRows.map((r) => pickRow(r, { date: r.date, sid: r.sid, asin: r.asin, currency }));
 
-    const CHUNK = 800;
-    for (let i = 0; i < dailyPayload.length; i += CHUNK) {
-        await postgrest('fact_daily', dailyPayload.slice(i, i + CHUNK), 'date,sid,asin,currency');
-        if ((i / CHUNK) % 5 === 0) log(`  日表进度 ${Math.min(i + CHUNK, dailyPayload.length)}/${dailyPayload.length}`);
+    for (const date of dates) {
+        const dayRows = dailyPayload.filter((row) => row.date === date);
+        if (dayRows.length === 0) throw new Error(`${date} 没有可发布的日明细，已停止上传，保留数据库旧数据`);
+        await postgrest('rpc/replace_fact_daily', { p_date: date, p_currency: currency, p_rows: dayRows });
+        log(`  ${date} 已原子替换 ${dayRows.length} 行`);
     }
 
     await postgrest('sync_runs', [
@@ -263,6 +266,16 @@ async function main() {
                 }
             }
             rawPPRows += (payload.list || []).length;
+            if (payload.total_sum?.amount !== undefined) {
+                const amount = (payload.list || []).reduce((sum, row) => sum + num(row.amount), 0);
+                if (Math.abs(amount - num(payload.total_sum.amount)) > 0.05) {
+                    throw new Error(`${date} 店铺 ${sid} 销售额与领星汇总不一致`);
+                }
+            }
+            if (payload.total_sum?.volume !== undefined) {
+                const volume = (payload.list || []).reduce((sum, row) => sum + num(row.volume), 0);
+                if (volume !== num(payload.total_sum.volume)) throw new Error(`${date} 店铺 ${sid} 销量与领星汇总不一致`);
+            }
             for (const row of payload.list || []) {
                 if (!KEEP_ZERO && !isActiveRow(row)) continue;
                 allRows.push(
@@ -287,6 +300,7 @@ async function main() {
         shops: usedShops,
         dates,
         currency: CURRENCY,
+        failedShopCalls,
     });
     report.warnings.forEach((w) => log(`⚠ ${w}`));
     if (!report.ok) {

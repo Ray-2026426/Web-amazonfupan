@@ -38,6 +38,7 @@ import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parse
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles } from 'lucide-react';
 import { saveToDB, loadFromDB, replaceImportedData } from './db';
 import { DEFAULT_BUSINESS_RULES, generateBusinessIssues, updateActionForIssue } from './utils/businessRules';
+import { CLOUD_ENABLED, clearCloudToken, fetchCloudFreshness, fetchCloudRows, getCloudToken, saveCloudToken } from './cloudData';
 
 const DEFAULT_DATA_START = '2025-01-01';
 const SAMPLE_HEADERS = '日期,ASIN,国家,店铺,负责人,销售额,销量,毛利润,广告花费,广告销售额,Sessions';
@@ -156,6 +157,15 @@ const App: React.FC = () => {
   const [isRestoringData, setIsRestoringData] = useState(true);
   const [restoreFailed, setRestoreFailed] = useState(false);
   const [persistenceError, setPersistenceError] = useState('');
+  const [cloudToken, setCloudToken] = useState(() => CLOUD_ENABLED ? getCloudToken() : '');
+  const [cloudTokenInput, setCloudTokenInput] = useState('');
+  const [showCloudLogin, setShowCloudLogin] = useState(false);
+  const [cloudRows, setCloudRows] = useState<DataRow[]>([]);
+  const [cloudRowsRange, setCloudRowsRange] = useState('');
+  const [cloudConnected, setCloudConnected] = useState(false);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState('');
+  const [cloudRefreshTick, setCloudRefreshTick] = useState(0);
   // Modal States
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailType, setDetailType] = useState<'PL' | 'Traffic' | 'Inventory'>('PL');
@@ -248,9 +258,77 @@ const App: React.FC = () => {
       restoreData();
   }, []);
 
+  useEffect(() => {
+      if (!CLOUD_ENABLED) return;
+      const timer = window.setInterval(() => setCloudRefreshTick(value => value + 1), 15 * 60 * 1000);
+      return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+      if (!CLOUD_ENABLED || !cloudToken || isRestoringData) return;
+      const controller = new AbortController();
+      setCloudLoading(true);
+      const refresh = async () => {
+          try {
+              const freshness = await fetchCloudFreshness(cloudToken, controller.signal);
+              if (!freshness.latest_date) throw new Error('云端尚无数据；同步服务完成首次抓取后会自动显示');
+              if (!filters.startDate || !filters.endDate) {
+                  const latest = freshness.latest_date;
+                  setFilters(prev => ({ ...prev, startDate: `${latest.slice(0, 7)}-01`, endDate: latest }));
+                  return;
+              }
+              const rows = await fetchCloudRows(filters.startDate, filters.endDate, cloudToken, controller.signal);
+              if (controller.signal.aborted) return;
+              setCloudRows(rows);
+              setCloudRowsRange(`${filters.startDate}|${filters.endDate}`);
+              setCloudConnected(true);
+              setCloudStatus(freshness.latestRun?.status === 'failed'
+                  ? `云端同步失败，当前业绩数据截至 ${freshness.latest_date}`
+                  : `云端业绩数据截至 ${freshness.latest_date}`);
+              setDataEndDate(freshness.latest_date);
+              setLastImportedAt(freshness.latestRun?.finished_at ? Date.parse(freshness.latestRun.finished_at) : undefined);
+          } catch (error) {
+              if (controller.signal.aborted) return;
+              const message = String(error instanceof Error ? error.message : error);
+              if (message.includes('密码不正确')) setCloudConnected(false);
+              setCloudStatus(`云端连接失败：${message}。${message.includes('密码不正确') ? '请重新输入只读密码。' : '可稍后重试；当前周期仅显示已成功读取的数据。'}`);
+          } finally {
+              if (!controller.signal.aborted) setCloudLoading(false);
+          }
+      };
+      refresh();
+      return () => controller.abort();
+  }, [cloudToken, filters.startDate, filters.endDate, isRestoringData, cloudRefreshTick]);
+
+  const connectCloud = () => {
+      const token = cloudTokenInput.trim();
+      if (!token) return;
+      saveCloudToken(token);
+      setCloudToken(token);
+      setCloudRefreshTick(value => value + 1);
+      setShowCloudLogin(false);
+      setCloudTokenInput('');
+  };
+  const disconnectCloud = () => {
+      clearCloudToken();
+      setCloudToken('');
+      setCloudConnected(false);
+      setCloudRows([]);
+      setCloudRowsRange('');
+      setCloudStatus('已切换到本地导入数据');
+      loadFromDB('meta').then((meta: AppMeta | null) => {
+          setDataEndDate(meta?.dataEndDate || '');
+          setLastImportedAt(meta?.lastImportedAt);
+      }).catch(error => setPersistenceError(`读取本地状态失败：${String(error)}`));
+  };
+
+  const visibleCloudRows = cloudRowsRange === `${filters.startDate}|${filters.endDate}` ? cloudRows : [];
+  const displayPerformanceData = cloudConnected ? visibleCloudRows : performanceData;
+  const displayWeeklyData = cloudConnected ? visibleCloudRows : weeklyData;
+
   // --- 2. Save Filters + data coverage when they change ---
   useEffect(() => {
-      if (!isRestoringData && performanceData.length > 0 && filters.startDate) {
+      if (!isRestoringData && !cloudConnected && performanceData.length > 0 && filters.startDate) {
           const meta: AppMeta = {
               filters,
               dataStartDate,
@@ -259,7 +337,7 @@ const App: React.FC = () => {
           };
           saveToDB('meta', meta).catch(e => setPersistenceError(`筛选设置保存失败：${String(e)}`));
       }
-  }, [filters, dataStartDate, dataEndDate, lastImportedAt, isRestoringData, performanceData]);
+  }, [filters, dataStartDate, dataEndDate, lastImportedAt, isRestoringData, performanceData, cloudConnected]);
 
   useEffect(() => {
       if (!isRestoringData) {
@@ -414,7 +492,7 @@ const App: React.FC = () => {
   // --- Processing Logic ---
   
   const processedData = useMemo(() => {
-      const activeData = isWeeklyMode ? weeklyData : performanceData;
+      const activeData = isWeeklyMode ? displayWeeklyData : displayPerformanceData;
       if (activeData.length === 0) return null;
       if (!filters.startDate || !filters.endDate) return null;
 
@@ -473,7 +551,7 @@ const App: React.FC = () => {
           invRows,
           pacingRatio,
       };
-  }, [performanceData, weeklyData, targetData, inventoryData, filters, isWeeklyMode, dataEndDate]);
+  }, [displayPerformanceData, displayWeeklyData, targetData, inventoryData, filters, isWeeklyMode, dataEndDate]);
 
   const businessIssues = useMemo(() => {
       if (!processedData) return [];
@@ -493,7 +571,7 @@ const App: React.FC = () => {
       {sidebarOpen && <button type="button" aria-label="关闭筛选侧栏" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-slate-950/50 xl:hidden" />}
       <div className={`fixed inset-y-0 left-0 z-40 transition-transform xl:relative xl:z-20 xl:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       <SidebarFilters 
-        data={isWeeklyMode ? weeklyData : performanceData} 
+        data={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
         inventoryData={inventoryData}
         targetData={targetData}
         filters={filters} 
@@ -537,6 +615,8 @@ const App: React.FC = () => {
 
                 <AppSettingsButton />
 
+                {CLOUD_ENABLED && <button type="button" onClick={() => setShowCloudLogin(true)} className={`rounded-xl border px-3 py-2 text-xs font-bold ${cloudConnected ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-sky-200 bg-white text-sky-700'}`}>{cloudLoading ? '云端加载中…' : cloudConnected ? '云端数据已连接' : '连接云端数据'}</button>}
+
                 <button 
                     onClick={() => setShowUploadModal(true)}
                     disabled={restoreFailed}
@@ -544,13 +624,14 @@ const App: React.FC = () => {
                     className="flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#0284c7_0%,#2563eb_100%)] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-sky-500/20 transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                     <FileSpreadsheet className="w-4 h-4" />
-                    {performanceData.length > 0 ? '更新数据源' : '导入数据源'}
+                    {displayPerformanceData.length > 0 ? '更新数据源' : '导入数据源'}
                 </button>
             </div>
         </header>
 
         {/* Scrollable Content */}
         <main className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">
+            {CLOUD_ENABLED && cloudStatus && <div role="status" className={`mx-auto mb-3 max-w-[1680px] rounded-xl border px-4 py-2 text-sm ${cloudConnected && !cloudStatus.includes('失败') ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>{cloudStatus}{cloudConnected && ' · 目标、库存、退货、评论仍使用本地导入数据'}</div>}
             {persistenceError && <div role="alert" className="mx-auto mb-3 flex max-w-[1680px] items-center justify-between rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"><span>{persistenceError}</span><button type="button" onClick={() => setPersistenceError('')} className="ml-3 font-bold">关闭</button></div>}
             {isRestoringData ? (
                 <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/80 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
@@ -568,7 +649,7 @@ const App: React.FC = () => {
                             current={processedData.current} 
                             target={processedData.target} 
                             isWeeklyMode={isWeeklyMode}
-                            rawData={isWeeklyMode ? weeklyData : performanceData}
+                            rawData={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
                             filters={filters}
                             targetRows={targetData}
                             pacingRatio={processedData.pacingRatio}
@@ -629,9 +710,9 @@ const App: React.FC = () => {
                             <div className="mb-5 rounded-2xl bg-sky-50 p-6 text-sky-300 ring-1 ring-sky-100">
                                 <FileSpreadsheet className="w-12 h-12" />
                             </div>
-                            <p className="text-lg font-semibold text-slate-700">{restoreFailed ? '本地数据暂时无法读取' : performanceData.length ? '当前选择无数据' : '暂无数据'}</p>
-                            <p className="mt-1 text-sm text-slate-500">{restoreFailed ? '请检查浏览器存储权限后刷新页面' : performanceData.length ? '请调整分析周期或切换月度视图' : '可先加载样例，也可导入自己的数据'}</p>
-                            {!restoreFailed && !performanceData.length && <div className="mt-5 flex flex-wrap justify-center gap-2">
+                            <p className="text-lg font-semibold text-slate-700">{restoreFailed ? '本地数据暂时无法读取' : displayPerformanceData.length ? '当前选择无数据' : '暂无数据'}</p>
+                            <p className="mt-1 text-sm text-slate-500">{restoreFailed ? '请检查浏览器存储权限后刷新页面' : displayPerformanceData.length ? '请调整分析周期或切换月度视图' : '可先加载样例，也可导入自己的数据'}</p>
+                            {!restoreFailed && !displayPerformanceData.length && <div className="mt-5 flex flex-wrap justify-center gap-2">
                                 <button type="button" onClick={downloadImportTemplate} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">下载模板</button>
                                 <button type="button" onClick={handleLoadSample} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">加载脱敏样例</button>
                                 <button type="button" onClick={() => setShowUploadModal(true)} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white">导入自己的数据</button>
@@ -668,9 +749,9 @@ const App: React.FC = () => {
                 onOpenCalculator={handleOpenCalculator}
                 onOpenReviewAnalysis={() => setReviewModalOpen(true)}
                 isWeeklyMode={isWeeklyMode}
-                rawPerformance={isWeeklyMode ? weeklyData : performanceData}
-                performanceMonthly={performanceData}
-                performanceWeekly={weeklyData}
+                rawPerformance={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
+                performanceMonthly={displayPerformanceData}
+                performanceWeekly={displayWeeklyData}
                 productImageLookup={productImageLookup}
                 dataEndDate={dataEndDate}
             /></Suspense>
@@ -680,7 +761,7 @@ const App: React.FC = () => {
             isOpen={refundModalOpen}
             onClose={() => { setRefundModalOpen(false); setRefundOverrideFilters(null); }}
             refundData={refundData}
-            rawPerformance={performanceData}
+            rawPerformance={displayPerformanceData}
             onDataChange={setRefundData}
             initialFilters={refundOverrideFilters ? { ...filters, ...refundOverrideFilters } : filters}
         /></Suspense>}
@@ -689,7 +770,7 @@ const App: React.FC = () => {
             isOpen={reviewModalOpen}
             onClose={() => setReviewModalOpen(false)}
             reviewData={reviewData}
-            rawPerformance={performanceData}
+            rawPerformance={displayPerformanceData}
             onDataChange={setReviewData}
             initialFilters={filters}
         /></Suspense>}
@@ -704,11 +785,27 @@ const App: React.FC = () => {
         {calculatorModalOpen && <Suspense fallback={null}><ProfitSimulatorModal 
             isOpen={calculatorModalOpen}
             onClose={() => setCalculatorModalOpen(false)}
-            rawData={performanceData}
+            rawData={displayPerformanceData}
             filters={filters}
             initialProduct={calculatorParams.product}
             initialCountry={calculatorParams.country}
         /></Suspense>}
+
+        {showCloudLogin && <div role="dialog" aria-modal="true" aria-label="连接云端数据" className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/60 p-4" onClick={() => setShowCloudLogin(false)}>
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
+                <h2 className="text-lg font-bold text-slate-900">连接云端数据</h2>
+                <p className="mt-2 text-sm text-slate-600">首次连接输入看板只读密码。领星 MCP 密钥不会放在这里。</p>
+                <form onSubmit={event => { event.preventDefault(); connectCloud(); }}>
+                    <label htmlFor="cloud-read-token" className="mt-5 block text-sm font-semibold text-slate-700">看板只读密码</label>
+                    <input id="cloud-read-token" type="password" value={cloudTokenInput} onChange={event => setCloudTokenInput(event.target.value)} autoComplete="off" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" autoFocus />
+                    <div className="mt-5 flex justify-end gap-2">
+                        {cloudToken && <button type="button" onClick={() => { disconnectCloud(); setShowCloudLogin(false); }} className="rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">切换到本地数据</button>}
+                        <button type="button" onClick={() => setShowCloudLogin(false)} className="rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100">取消</button>
+                        <button type="submit" disabled={!cloudTokenInput.trim()} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">连接</button>
+                    </div>
+                </form>
+            </div>
+        </div>}
 
         {/* Chat Bot Integration with All Data Sources */}
         {!chatLoaded && <button type="button" aria-label="打开 AI 顾问" onClick={() => setChatLoaded(true)} className="fixed bottom-6 right-6 z-50 rounded-full bg-blue-600 p-4 text-white shadow-xl hover:bg-blue-700"><Sparkles className="h-6 w-6" /></button>}
@@ -717,7 +814,7 @@ const App: React.FC = () => {
             inventory={processedData?.inventory || null}
             refunds={refundData}
             filters={filters} 
-            rawPerformance={isWeeklyMode ? weeklyData : performanceData}
+            rawPerformance={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
             rawInventory={inventoryData}
             initialOpen
         /></Suspense>}
