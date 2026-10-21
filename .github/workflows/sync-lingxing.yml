@@ -42,6 +42,17 @@ jobs:
         with:
           node-version: '22'
 
+      - name: 配置自检（仅手动触发时）
+        # 手动点 Run workflow 时先做一次最轻量的连通性检查：
+        # 密钥错/表没建会立刻以 ✅❌ 清单的形式列出来，不用等同步跑完才看到报错。
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        env:
+          LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: node scripts/sync/selfcheck.mjs
+
       - name: 同步（领星 → 数据库）
         env:
           LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
