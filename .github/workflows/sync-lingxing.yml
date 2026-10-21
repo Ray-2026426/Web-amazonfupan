@@ -19,6 +19,10 @@ on:
         description: '结束日期 YYYY-MM-DD（留空则按 days 自动算）'
         required: false
         default: ''
+      selfcheck:
+        description: '只做配置自检（true / false）。默认 false；自检会额外调一次领星鉴权，紧接着跑同步可能触发 429 限流'
+        required: false
+        default: 'false'
 
 concurrency:
   group: lingxing-sync
@@ -42,10 +46,11 @@ jobs:
         with:
           node-version: '22'
 
-      - name: 配置自检（仅手动触发时）
-        # 手动点 Run workflow 时先做一次最轻量的连通性检查：
-        # 密钥错/表没建会立刻以 ✅❌ 清单的形式列出来，不用等同步跑完才看到报错。
-        if: github.event_name == 'workflow_dispatch'
+      - name: 配置自检（可选，默认关闭）
+        # 只在手动触发且 selfcheck=true 时执行。
+        # 为什么默认关闭：自检本身会做一次领星鉴权，紧接着的同步再鉴权，
+        # 短时间内两次鉴权容易触发领星的 429「认证请求过于频繁」。
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.selfcheck == 'true'
         continue-on-error: true
         env:
           LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}

@@ -121,20 +121,52 @@ export function createClient({ key = process.env.LINGXING_MCP_KEY, url = process
         return d;
     }
 
+    /**
+     * 限流（429「认证请求过于频繁」）自动退避重试。
+     *
+     * 实测触发场景：短时间内连续启动多个同步（或先跑自检再立刻跑同步）时，
+     * 领星对「鉴权请求」有一层独立于业务 QPS 的限制，报错藏在业务包里（HTTP 200 + code=429），
+     * 必须按文本识别、等一会儿再试，否则整轮同步直接失败。
+     * 重试只重发请求，不清 session：鉴权已经通过，再鉴权只会更容易被拦。
+     */
+    const RATE_LIMIT_RE = /code=429|认证请求过于频繁|too many requests|请求过于频繁/i;
+
+    async function withRateLimitRetry(fn, { tries = 4, baseMs = 40000 } = {}) {
+        let lastError = null;
+        for (let attempt = 1; attempt <= tries; attempt++) {
+            try {
+                return await fn();
+            } catch (e) {
+                lastError = e;
+                const msg = String((e && e.message) || e);
+                if (!RATE_LIMIT_RE.test(msg)) throw e;
+                if (attempt === tries) break;
+                const waitMs = Math.round(baseMs * Math.pow(1.6, attempt - 1));
+                if (verbose) console.error(`  [lingxing] 命中限流，${Math.round(waitMs / 1000)}s 后第 ${attempt + 1} 次尝试`);
+                await new Promise((r) => setTimeout(r, waitMs));
+            }
+        }
+        throw new Error(`${String(lastError && lastError.message)}（已自动重试 ${tries} 次仍被限流，请隔几分钟再跑）`);
+    }
+
     /** 调用业务工具，返回已抹平信封的真实载荷 */
     async function call(toolId, params) {
-        await ensureInit();
-        await ensureSchema(toolId);
         const args = params === null || params === undefined ? { toolId } : { toolId, params };
-        const raw = unwrap(await rpc('tools/call', { name: 'action', arguments: args }));
+        const raw = await withRateLimitRetry(async () => {
+            await ensureInit();
+            await ensureSchema(toolId);
+            return unwrap(await rpc('tools/call', { name: 'action', arguments: args }));
+        });
         if (verbose) console.error(`  [lingxing] ${toolId} → 顶层键 ${Object.keys(raw).slice(0, 8).join(',')}`);
         return payload(raw);
     }
 
     /** 调用网关的 help / search */
     async function gateway(name, args) {
-        await ensureInit();
-        return unwrap(await rpc('tools/call', { name, arguments: args }));
+        return withRateLimitRetry(async () => {
+            await ensureInit();
+            return unwrap(await rpc('tools/call', { name, arguments: args }));
+        });
     }
 
     return { call, gateway, rpc, ensureInit };
