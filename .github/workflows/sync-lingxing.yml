@@ -2,6 +2,11 @@ name: 领星数据自动同步
 
 # 每天北京时间 08:10（= UTC 00:10）拉取前几天的数据并写入数据库。
 # 电脑关机也照跑：任务在 GitHub 的机器上执行。
+#
+# 三种触发方式：
+#   1. 定时（每天 08:10）
+#   2. 手动（Actions → Run workflow，可指定 days / from / to）
+#   3. 提交 sync-trigger.txt（用于让协助者/脚本远程触发，跑 1 天）
 on:
   schedule:
     - cron: '10 0 * * *'
@@ -20,16 +25,19 @@ on:
         required: false
         default: ''
       selfcheck:
-        description: '只做配置自检（true / false）。默认 false；自检会额外调一次领星鉴权，紧接着跑同步可能触发 429 限流'
+        description: '只做配置自检（true / false）。默认 false；自检会额外调一次领星鉴权'
         required: false
         default: 'false'
+  push:
+    paths:
+      - 'sync-trigger.txt'
 
 concurrency:
   group: lingxing-sync
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write # 需要把同步摘要提交回仓库（保持仓库活跃 + 让结果可追溯）
   issues: write
 
 jobs:
@@ -64,26 +72,71 @@ jobs:
           LINGXING_CURRENCY: ${{ vars.LINGXING_CURRENCY || 'USD' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DAYS: ${{ github.event.inputs.days }}
+          INPUT_FROM: ${{ github.event.inputs.from }}
+          INPUT_TO: ${{ github.event.inputs.to }}
         run: |
           set -euo pipefail
           if [ -z "${LINGXING_MCP_KEY:-}" ]; then
-            echo "::error::缺少 LINGXING_MCP_KEY，请在仓库 Settings → Secrets 里添加"
+            echo "::error title=缺少密钥::缺少 LINGXING_MCP_KEY"
             exit 1
           fi
           if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SECRET_KEY:-}" ]; then
-            echo "::error::缺少 SUPABASE_URL 或 SUPABASE_SECRET_KEY，请在仓库 Settings → Secrets 里添加"
+            echo "::error title=缺少密钥::缺少 SUPABASE_URL 或 SUPABASE_SECRET_KEY"
             exit 1
           fi
-          DAYS="${{ github.event.inputs.days }}"
-          FROM="${{ github.event.inputs.from }}"
-          TO="${{ github.event.inputs.to }}"
-          if [ -n "$FROM" ] && [ -n "$TO" ]; then
-            node scripts/sync/run.mjs --from "$FROM" --to "$TO" --out data/snapshot --upload
+          # push 触发（提交 sync-trigger.txt）默认只跑 1 天，最省领星配额
+          DAYS="${INPUT_DAYS:-}"
+          if [ "${EVENT_NAME}" = "push" ] || [ "${EVENT_NAME}" = "schedule" ]; then
+            DAYS=1
+          fi
+          if [ -n "${INPUT_FROM:-}" ] && [ -n "${INPUT_TO:-}" ]; then
+            node scripts/sync/run.mjs --from "$INPUT_FROM" --to "$INPUT_TO" --out data/snapshot --upload
           elif [ -n "$DAYS" ]; then
             node scripts/sync/run.mjs --days "$DAYS" --out data/snapshot --upload
           else
             node scripts/sync/run.mjs --out data/snapshot --upload
           fi
+
+      - name: 记录失败原因（供事后排查 / 让结果可追溯）
+        if: failure()
+        run: |
+          mkdir -p data/snapshot/runs
+          ts=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+          cat > "data/snapshot/runs/failed-${ts}.json" <<EOF
+          {
+            "status": "failed",
+            "at": "${ts}",
+            "event": "${EVENT_NAME}",
+            "runId": "${GITHUB_RUN_ID}",
+            "runUrl": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          }
+          EOF
+          echo "已记录失败摘要"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+
+      - name: 提交同步摘要（保持仓库活跃，避免定时任务 60 天被自动停用）
+        if: always()
+        continue-on-error: true # 摘要提交是辅助功能，失败不应该把成功的同步标记成失败
+        run: |
+          set -e
+          if [ ! -d data/snapshot ]; then
+            echo "没有摘要文件，跳过提交"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/snapshot/manifest.json data/snapshot/runs 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "摘要没有变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore(sync): 同步摘要 $(date -u +%Y-%m-%dT%H:%MZ)"
+          # 别人可能同时在改仓库，先 rebase 再推
+          git pull --rebase --autostash origin main || true
+          git push
 
       - name: 保存审计日志（不含业务数据）
         if: always()
@@ -108,8 +161,8 @@ jobs:
               `运行日志：${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               '',
               '常见原因：',
-              '- 领星 MCP 密钥过期或权限被改',
+              '- 领星 MCP 密钥过期或权限被改（先跑「领星连通性测试」看是否 102）',
+              '- 领星鉴权被限流（429），等 30~60 分钟再试',
               '- Supabase 密钥/URL 配错，或数据库配额满',
-              '- 领星接口临时风控（QPS 限制）',
             ].join('\n');
             await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body });
