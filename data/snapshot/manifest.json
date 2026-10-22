@@ -1,0 +1,24 @@
+{
+  "dates": [
+    "2026-10-21"
+  ],
+  "lastRun": {
+    "at": "2026-10-22T13:04:55.997Z",
+    "range": {
+      "from": "2026-10-21",
+      "to": "2026-10-21"
+    },
+    "days": 1,
+    "rowsAdded": 974,
+    "rowsTotal": 974,
+    "bytes": 2580041,
+    "costMatchRate": 0.786,
+    "failedShopCalls": 0,
+    "warnings": [
+      "负毛利行占比 45%，请核对成本口径"
+    ],
+    "mcpCalls": 115,
+    "durationMs": 363897
+  },
+  "currency": "USD"
+}
