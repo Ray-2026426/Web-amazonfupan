@@ -51,24 +51,31 @@ export function respond(req, res, work) {
   });
 }
 
-export async function fetchTable(table, params, maxRows = 60000) {
+/**
+ * 拉一页或多页数据。
+ *
+ * @param {number} maxRows 最多返回多少行
+ * @param {{rejectIfOverflow?: boolean}} [options]
+ *   rejectIfOverflow=true 时，若实际数据超过 maxRows 会抛 413（给 /api/data 用：
+ *   "这段日期太大了，请缩小范围"）。默认 false —— 取到 maxRows 就截断返回。
+ *
+ * 为什么必须区分：`fetchTable(t, p, 1)` 的调用方（freshness / admin）语义是
+ * "取第一条"，表里本来就有成千上万行，如果默认做超限判定，它会立刻 413。
+ * 旧实现正是把这两件事混在一起，导致 /api/freshness 永久 413。
+ */
+export async function fetchTable(table, params, maxRows = 60000, options = {}) {
   const base = process.env.SUPABASE_URL?.replace(/\/$/, '');
   const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
   if (!base || !key) throw new Error('Supabase server credentials are missing');
 
-  /*
-   * 关键：为了判断「是否超限」，必须比上限多取 1 行。
-   * 之前的写法是 `limit = min(pageSize, maxRows - offset + 1)` 且循环条件 `offset <= maxRows`：
-   * 当 maxRows=1（freshness 只需要 1 行）时，第一页取 1 行后不满足退出条件，
-   * 第二页再取 1 行 → rows.length(2) > maxRows(1) → 误报 413「数据量过大」，
-   * 导致 /api/freshness 永久失败（看板顶部的"数据截至日"会直接报错）。
-   */
-  const hardLimit = maxRows + 1;
-  const pageSize = Math.min(1000, hardLimit);
+  const { rejectIfOverflow = false } = options;
+  // 需要判超限时多取 1 行，用来区分「刚好 maxRows 行」和「超过 maxRows 行」
+  const target = rejectIfOverflow ? maxRows + 1 : maxRows;
+  const pageSize = Math.max(1, Math.min(1000, target));
   const rows = [];
-  for (let offset = 0; offset < hardLimit; offset += pageSize) {
+  for (let offset = 0; offset < target; offset += pageSize) {
     const query = new URLSearchParams(params);
-    query.set('limit', String(Math.min(pageSize, hardLimit - offset)));
+    query.set('limit', String(Math.min(pageSize, target - offset)));
     query.set('offset', String(offset));
     const response = await fetch(`${base}/rest/v1/${table}?${query}`, {
       headers: {
@@ -80,17 +87,17 @@ export async function fetchTable(table, params, maxRows = 60000) {
     const page = await response.json();
     if (!Array.isArray(page)) throw new Error(`Supabase ${table}: invalid response`);
     rows.push(...page);
-    if (rows.length >= hardLimit) break;
+    if (rows.length >= target) break;
     if (page.length < pageSize) break;
   }
 
-  if (rows.length > maxRows) {
+  if (rejectIfOverflow && rows.length > maxRows) {
     const error = new Error('too many rows');
     error.status = 413;
     error.publicMessage = '所选范围数据量过大，请缩短日期范围';
     throw error;
   }
-  return rows;
+  return rows.slice(0, maxRows);
 }
 
 export async function fetchPage(table, params, limit = 1000, offset = 0) {
@@ -156,10 +163,16 @@ export async function rowsForRange(from, to) {
     const field = monthly ? 'period' : 'date';
     const low = monthly ? part.from.slice(0, 7) : part.from;
     const high = monthly ? part.to.slice(0, 7) : part.to;
-    const rows = await fetchTable(table, [
-      ['select', '*'], [field, `gte.${low}`], [field, `lte.${high}`], ['currency', `eq.${currency}`],
-      ['order', monthly ? 'period.asc,sid.asc,asin.asc' : 'date.asc,sid.asc,asin.asc'],
-    ]);
+    // 这里才需要"超限就报错"的语义：日期区间太大时提示用户缩短范围
+    const rows = await fetchTable(
+      table,
+      [
+        ['select', '*'], [field, `gte.${low}`], [field, `lte.${high}`], ['currency', `eq.${currency}`],
+        ['order', monthly ? 'period.asc,sid.asc,asin.asc' : 'date.asc,sid.asc,asin.asc'],
+      ],
+      60000,
+      { rejectIfOverflow: true }
+    );
     segments.push(...rows.map((row) => asDataRow(row, part.granularity)));
   }
   return segments;
