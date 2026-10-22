@@ -111,3 +111,14 @@ group by date order by date desc;
 | 看板只有本地数据 | 确认 Vercel 已重新部署，`VITE_CLOUD_SYNC_ENABLED=true`，且首次同步已完成。 |
 | 领星接口限速或查询失败 | 在 Actions 中用 `days=1` 重试；完整校验不过时不会覆盖该天数据。 |
 | 报错 `code=429 认证请求过于频繁` | 见上面「同步失败时按这个顺序查」。现在鉴权被限流会**立即失败并提示等待**（不再反复重试烧配额），业务调用被限流才自动退避。 |
+
+## 部署记录
+
+- **2026-10-22**：Vercel 生产环境补齐 4 个变量（`VITE_CLOUD_SYNC_ENABLED` / `SUPABASE_SECRET_KEY` /
+  `DASHBOARD_READ_TOKEN` / `DASHBOARD_ADMIN_TOKEN`），随后需要重新部署让**构建期**变量生效。
+- 部署方式（两种都行）：
+  1. Vercel → 项目 → **Deployments** → 列表里最新一条 → 右侧 `⋯` → **Redeploy** → 再点一次确认；
+  2. 往 `main` 推任意一次提交，Vercel 会自动重新构建（本次就是用这种方式触发的）。
+- 部署完验证：`GET /api/freshness` 带上 `Authorization: Bearer <DASHBOARD_READ_TOKEN>`，
+  应返回 `latest_date` 与 `latestRun`；不带令牌应返回 401。
+
