@@ -1,0 +1,35 @@
+name: 领星连通性测试
+
+# 只做「1 次鉴权 + 1 次取店铺列表」，10 秒出结果。
+# 用途：同步失败时先跑这个，判断是「领星通不通」还是「同步流程有问题」。
+# 比跑整轮同步省配额：一轮同步是 81 个店铺 × 几百次请求。
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: lingxing-ping
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 取出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 测试领星连通性
+        env:
+          LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LINGXING_MCP_KEY:-}" ]; then
+            echo "::error::缺少 LINGXING_MCP_KEY，请在仓库 Settings → Secrets 里添加"
+            exit 1
+          fi
+          node scripts/sync/ping.mjs

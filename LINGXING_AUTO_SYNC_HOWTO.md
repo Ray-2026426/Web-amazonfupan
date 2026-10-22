@@ -71,6 +71,20 @@ group by date order by date desc;
 - GitHub Actions 的这次运行日志显示“Supabase 上传完成”；失败时工作流尝试创建 GitHub Issue。
 - 定时任务由 GitHub 执行，电脑关机不影响。GitHub 官方说明定时任务可能延迟或偶发跳过，公开仓库连续 60 天无活动还可能自动停用；如果以后需要严格保证每天准点更新，应迁移到专用云端调度器。[GitHub 官方说明](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
+## 同步失败时按这个顺序查
+
+1. **先跑「领星连通性测试」**（Actions 左侧另一个 workflow，点 Run workflow，约 10 秒出结果）。
+   它只做 1 次鉴权 + 1 次取店铺列表，不像整轮同步那样烧几百次请求。
+2. **如果它也报 429**：这是领星的鉴权频率限制，不是配置错。
+   - 等 **30~60 分钟**再试，期间不要再触发（每多试一次都会延长冷却）。
+   - 如果隔天还是 429：很可能是 **GitHub 机器的共享出口 IP 被领星限流**，重试解决不了。
+     这时要把"谁在跑同步"换成**出口 IP 固定且干净**的地方（自己的云服务器 / 自建 runner）；
+     数据库和前端都不用改。
+3. **如果连通性测试通过、但同步失败**：看日志里具体是哪一步（取店铺 / 订单利润 / 产品表现），
+   错误信息通常带 `code=` 和中文原因。
+4. **如果同步成功但库里没数据**：检查 `SUPABASE_URL` / `SUPABASE_SECRET_KEY`，
+   以及 Supabase 是否执行过 `db/schema.sql`。
+
 ## 常见问题
 
 | 现象 | 处理 |
@@ -80,4 +94,4 @@ group by date order by date desc;
 | 看板显示“云端访问密码不正确” | 输入 Vercel 的 `DASHBOARD_READ_TOKEN`，不是领星密钥。 |
 | 看板只有本地数据 | 确认 Vercel 已重新部署，`VITE_CLOUD_SYNC_ENABLED=true`，且首次同步已完成。 |
 | 领星接口限速或查询失败 | 在 Actions 中用 `days=1` 重试；完整校验不过时不会覆盖该天数据。 |
-| 报错 `code=429 认证请求过于频繁` | 短时间内连续触发多次鉴权（连点几次 Run、或自检紧接着同步）。脚本已会自动退避重试 4 次；仍然失败就等 3~5 分钟再点一次，`selfcheck` 留空。 |
+| 报错 `code=429 认证请求过于频繁` | 见上面「同步失败时按这个顺序查」。现在鉴权被限流会**立即失败并提示等待**（不再反复重试烧配额），业务调用被限流才自动退避。 |

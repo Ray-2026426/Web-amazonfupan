@@ -122,51 +122,75 @@ export function createClient({ key = process.env.LINGXING_MCP_KEY, url = process
     }
 
     /**
-     * 限流（429「认证请求过于频繁」）自动退避重试。
+     * 限流识别与处理。领星把错误藏在业务包里（HTTP 200 + code=429），只能按文本判断。
      *
-     * 实测触发场景：短时间内连续启动多个同步（或先跑自检再立刻跑同步）时，
-     * 领星对「鉴权请求」有一层独立于业务 QPS 的限制，报错藏在业务包里（HTTP 200 + code=429），
-     * 必须按文本识别、等一会儿再试，否则整轮同步直接失败。
-     * 重试只重发请求，不清 session：鉴权已经通过，再鉴权只会更容易被拦。
+     * 关键区分（踩过的坑）：
+     *   · 鉴权阶段被限流（initialize）→ 这是「认证请求频率」限制，重试只会让冷却时间更长，
+     *     必须立刻失败并告诉用户等多久。
+     *   · 业务调用被限流 → 退避重试是有效的，可以自动等。
+     * 早期版本把两者混在一起重试，结果每轮同步反复尝试鉴权、把配额烧光，4 次全失败。
      */
     const RATE_LIMIT_RE = /code=429|认证请求过于频繁|too many requests|请求过于频繁/i;
 
-    async function withRateLimitRetry(fn, { tries = 4, baseMs = 40000 } = {}) {
+    const isRateLimited = (e) => RATE_LIMIT_RE.test(String((e && e.message) || e));
+
+    /** 业务调用用的退避重试（不含鉴权） */
+    async function withRateLimitRetry(fn, { tries = 3, baseMs = 20000 } = {}) {
         let lastError = null;
         for (let attempt = 1; attempt <= tries; attempt++) {
             try {
                 return await fn();
             } catch (e) {
                 lastError = e;
-                const msg = String((e && e.message) || e);
-                if (!RATE_LIMIT_RE.test(msg)) throw e;
+                if (!isRateLimited(e)) throw e;
                 if (attempt === tries) break;
-                const waitMs = Math.round(baseMs * Math.pow(1.6, attempt - 1));
-                if (verbose) console.error(`  [lingxing] 命中限流，${Math.round(waitMs / 1000)}s 后第 ${attempt + 1} 次尝试`);
+                const waitMs = Math.round(baseMs * Math.pow(1.8, attempt - 1));
+                if (verbose) console.error(`  [lingxing] 业务调用被限流，${Math.round(waitMs / 1000)}s 后第 ${attempt + 1} 次尝试`);
                 await new Promise((r) => setTimeout(r, waitMs));
             }
         }
-        throw new Error(`${String(lastError && lastError.message)}（已自动重试 ${tries} 次仍被限流，请隔几分钟再跑）`);
+        throw new Error(`${String((lastError && lastError.message) || lastError)}（业务调用已重试 ${tries} 次）`);
+    }
+
+    /** 鉴权阶段被限流：不重试，给出明确等待建议 */
+    async function ensureAuthGuarded() {
+        try {
+            await ensureInit();
+        } catch (e) {
+            if (!isRateLimited(e)) throw e;
+            const err = new Error(
+                '领星鉴权被限流（429 认证请求过于频繁）。' +
+                    '这是领星对「认证请求频率」的限制，通常是短时间内触发太多次登录造成的；' +
+                    '请等 30~60 分钟后再试，期间不要再触发同步——每多试一次都会延长冷却时间。'
+            );
+            err.code = 'LINGXING_AUTH_RATE_LIMITED';
+            throw err;
+        }
     }
 
     /** 调用业务工具，返回已抹平信封的真实载荷 */
     async function call(toolId, params) {
         const args = params === null || params === undefined ? { toolId } : { toolId, params };
-        const raw = await withRateLimitRetry(async () => {
-            await ensureInit();
+        await ensureAuthGuarded();
+        try {
             await ensureSchema(toolId);
-            return unwrap(await rpc('tools/call', { name: 'action', arguments: args }));
-        });
+        } catch (e) {
+            if (isRateLimited(e)) {
+                const err = new Error('领星在刷新工具定义时被限流（429），请等 30~60 分钟再试');
+                err.code = 'LINGXING_AUTH_RATE_LIMITED';
+                throw err;
+            }
+            throw e;
+        }
+        const raw = await withRateLimitRetry(() => rpc('tools/call', { name: 'action', arguments: args }).then(unwrap));
         if (verbose) console.error(`  [lingxing] ${toolId} → 顶层键 ${Object.keys(raw).slice(0, 8).join(',')}`);
         return payload(raw);
     }
 
     /** 调用网关的 help / search */
     async function gateway(name, args) {
-        return withRateLimitRetry(async () => {
-            await ensureInit();
-            return unwrap(await rpc('tools/call', { name, arguments: args }));
-        });
+        await ensureAuthGuarded();
+        return withRateLimitRetry(() => rpc('tools/call', { name, arguments: args }).then(unwrap));
     }
 
     return { call, gateway, rpc, ensureInit };
