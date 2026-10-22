@@ -9,7 +9,7 @@
  *   node scripts/sync/ping.mjs
  * 环境变量：LINGXING_MCP_KEY
  */
-import { createClient } from '../lingxing-client.mjs';
+import { createClient, describeMcpKey } from '../lingxing-client.mjs';
 
 const key = process.env.LINGXING_MCP_KEY;
 if (!key) {
@@ -18,7 +18,7 @@ if (!key) {
 }
 
 const started = Date.now();
-console.log(`尝试鉴权并取店铺列表（密钥长度 ${key.length}）…`);
+const keyInfo = describeMcpKey(key);
 
 /** 在 GitHub Actions 里把结果直接显示到运行概览页（Annotations），不用展开日志 */
 const annotate = (level, title, message) => {
@@ -26,6 +26,18 @@ const annotate = (level, title, message) => {
     const oneLine = String(message).replace(/[\r\n]+/g, ' ').slice(0, 400);
     console.log(`::${level} title=${title}::${oneLine}`);
 };
+
+console.log(`密钥诊断：长度 ${keyInfo.originalLength} → 清洗后 ${keyInfo.cleanedLength}`);
+if (keyInfo.changed) {
+    console.log('  已自动去掉首尾空白/引号/零宽字符（这类字符会让领星误判为 Key 无效）');
+}
+if (keyInfo.hasWhitespace) console.log('  ⚠ 原值含空白或换行（已清洗）');
+if (keyInfo.hasQuotes) console.log('  ⚠ 原值含外层引号（已清洗）');
+if (keyInfo.hasZeroWidth) console.log('  ⚠ 原值含零宽字符（已清洗）');
+if (!keyInfo.looksLikeToken) {
+    console.log('  ⚠ 清洗后仍含非常规字符（正常密钥通常只有字母/数字/_-），很可能复制错了东西');
+}
+console.log(`尝试鉴权并取店铺列表…`);
 
 try {
     const client = createClient({ intervalMs: 800, verbose: true });
@@ -59,8 +71,14 @@ try {
         console.log('如果反复这样，说明出口 IP 被领星限流（GitHub 的机器是共享 IP），');
         console.log('那就要把定时任务放到出口 IP 固定/干净的地方（例如自己的云服务器）。');
     } else if (/code=102|无效|invalid/i.test(message)) {
-        annotate('error', '领星密钥无效', '去领星后台重新生成密钥，并更新 GitHub Secret');
-        console.log('处理：密钥无效或已过期 → 去领星后台重新生成，并更新 GitHub Secret。');
+        annotate('error', '领星密钥无效（102）', '去 ERP→AI助手→MCP→复制密钥，更新 GitHub Secret 后重跑');
+        console.log('处理（按顺序排查）：');
+        console.log('  1. 去领星 ERP → AI助手 → 点【MCP】→ 【复制密钥】重新复制一次');
+        console.log('     （注意：要的是「密钥」，不是 JSON 里的 URL）');
+        console.log('  2. 如果最近在【管理MCP】点过「重新生成」，旧密钥会立即失效，只能用最新的那个');
+        console.log('  3. 确认 MCP 已启用：业务配置 → 开放接口 → MCP（需付费账号）');
+        console.log('  4. 复制后先粘到记事本看一眼：首尾有没有空格/换行，是不是完整长度');
+        console.log('  5. 更新 GitHub → Settings → Secrets → LINGXING_MCP_KEY（点 Update），再跑一次');
     } else if (/ENOTFOUND|fetch failed|ECONN|timeout/i.test(message)) {
         annotate('error', '领星网络不通', '换网络或稍后再试');
         console.log('处理：网络不通 → 换网络/稍后再试。');

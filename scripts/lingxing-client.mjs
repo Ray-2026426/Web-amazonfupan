@@ -18,8 +18,41 @@ import path from 'node:path';
 export const LINGXING_MCP_URL = 'https://openmcp.lingxing.com/mcp-servers/lingxing-mcp';
 const MIN_INTERVAL_MS = 1200;
 
+/**
+ * 清洗密钥：复制粘贴最常见的四个坑都会导致领星报 code=102「Key 无效」。
+ *   1. 从网页复制时末尾带换行（最隐蔽）
+ *   2. 前后多了一个空格
+ *   3. 外层被包了引号（从 JSON 片段复制时）
+ *   4. 混入零宽字符（U+200B~U+200D / U+FEFF）
+ * 这些都不改变密钥本体，清掉就能用，不需要重新生成。
+ */
+export function normalizeMcpKey(raw) {
+    if (!raw) return '';
+    let key = String(raw)
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .trim();
+    if (/^(["'])(.*)\1$/s.test(key)) key = key.replace(/^(["'])(.*)\1$/s, '$2').trim();
+    return key;
+}
+
+/** 给自检/连通性测试用的诊断信息（不含密钥本体） */
+export function describeMcpKey(raw) {
+    const original = raw ? String(raw) : '';
+    const cleaned = normalizeMcpKey(original);
+    return {
+        originalLength: original.length,
+        cleanedLength: cleaned.length,
+        changed: original !== cleaned,
+        hasWhitespace: /^\s|\s$|\n|\r/.test(original),
+        hasQuotes: /^["']|["']$/.test(original.trim()),
+        hasZeroWidth: /[\u200B-\u200D\uFEFF]/.test(original),
+        looksLikeToken: /^[A-Za-z0-9._~+/-]+$/.test(cleaned),
+    };
+}
+
 export function createClient({ key = process.env.LINGXING_MCP_KEY, url = process.env.LINGXING_MCP_URL || LINGXING_MCP_URL, intervalMs = MIN_INTERVAL_MS, verbose = false } = {}) {
-    if (!key) throw new Error('缺少鉴权密钥：设置环境变量 LINGXING_MCP_KEY');
+    const authKey = normalizeMcpKey(key);
+    if (!authKey) throw new Error('缺少鉴权密钥：设置环境变量 LINGXING_MCP_KEY');
     let last = 0;
     let sessionId = null;
     let initialized = false;
@@ -34,7 +67,7 @@ export function createClient({ key = process.env.LINGXING_MCP_KEY, url = process
             headers: {
                 'Content-Type': 'application/json',
                 Accept: 'application/json, text/event-stream',
-                'X-Mcp-Key': key,
+                'X-Mcp-Key': authKey,
                 ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
             },
             body: JSON.stringify({
