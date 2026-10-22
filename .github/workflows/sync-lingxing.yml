@@ -87,18 +87,23 @@ jobs:
             exit 1
           fi
           # push 触发（提交 sync-trigger.txt）默认只跑 1 天；
-          # 但可以在该文件里写 days=30 或 from=2026-09-01 / to=2026-09-30 来补历史
+          # 想补历史就在该文件里写一行 `run: days=30` 或 `run: from=2026-09-01 to=2026-09-30`
+          # —— 只认 `run:` 开头的行，避免说明文字里的示例被误当成参数
           DAYS="${INPUT_DAYS:-}"
           FROM="${INPUT_FROM:-}"
           TO="${INPUT_TO:-}"
           if [ "${EVENT_NAME}" = "push" ]; then
             if [ -f sync-trigger.txt ]; then
-              t=$(grep -oE 'days=[0-9]+' sync-trigger.txt | head -1 | cut -d= -f2 || true)
-              if [ -n "$t" ]; then DAYS="$t"; fi
-              t=$(grep -oE 'from=[0-9]{4}-[0-9]{2}-[0-9]{2}' sync-trigger.txt | head -1 | cut -d= -f2 || true)
-              if [ -n "$t" ]; then FROM="$t"; fi
-              t=$(grep -oE 'to=[0-9]{4}-[0-9]{2}-[0-9]{2}' sync-trigger.txt | head -1 | cut -d= -f2 || true)
-              if [ -n "$t" ]; then TO="$t"; fi
+              # 只认「行首就是 run:」的那一行，避免说明文字/缩进示例被误当参数
+              RUNLINE=$(grep -E '^run:' sync-trigger.txt | head -1 || true)
+              if [ -n "$RUNLINE" ]; then
+                t=$(printf '%s' "$RUNLINE" | grep -oE 'days=[0-9]+' | head -1 | cut -d= -f2 || true)
+                if [ -n "$t" ]; then DAYS="$t"; fi
+                t=$(printf '%s' "$RUNLINE" | grep -oE 'from=[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | cut -d= -f2 || true)
+                if [ -n "$t" ]; then FROM="$t"; fi
+                t=$(printf '%s' "$RUNLINE" | grep -oE 'to=[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | cut -d= -f2 || true)
+                if [ -n "$t" ]; then TO="$t"; fi
+              fi
             fi
             if [ -z "$DAYS" ] && [ -z "$FROM" ]; then DAYS=1; fi
           fi
