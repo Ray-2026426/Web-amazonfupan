@@ -254,6 +254,8 @@ async function main() {
     let rawPPRows = 0;
     let failedShopCalls = 0;
     const costByDate = new Map();
+    /** 每天拿「我算的毛利合计」和「领星自己返回的 total_sum」对账 */
+    const reconciliations = [];
 
     for (const date of dates) {
         // 1) 订单利润 → 成本
@@ -277,7 +279,10 @@ async function main() {
         }
         const costMap = mergeOrderProfit(op.list, { asinRules: controls.asinRules });
         costByDate.set(date, costMap);
+        const expectedGrossProfit = op.total_sum ? num(op.total_sum.gross_profit) : null;
+        const expectedAmount = op.total_sum ? num(op.total_sum.amount) : null;
         log(`${date} 订单利润 ${op.list.length} 行 → ${costMap.size} 个 (店铺,ASIN) 成本`);
+        const rowsBefore = allRows.length;
 
         // 2) 产品表现（逐店铺）
         let done = 0;
@@ -332,6 +337,20 @@ async function main() {
             if (done % 20 === 0) log(`  ${date} 进度 ${done}/${usedShops.length}，累计 ${allRows.length} 行`);
         }
         log(`${date} 完成，累计 ${allRows.length} 行`);
+
+        // 当日对账：与领星自己的合计比较（而不是看「负毛利行占比」，那个会误报）
+        const dateRows = allRows.slice(rowsBefore);
+        const actualGrossProfit = dateRows.reduce((sum, r) => sum + num(r.gross_profit), 0);
+        const actualAmount = dateRows.reduce((sum, r) => sum + num(r.sales_amount), 0);
+        reconciliations.push({ date, expectedGrossProfit, actualGrossProfit, expectedAmount, actualAmount });
+        if (expectedGrossProfit !== null) {
+            const diff = actualGrossProfit - expectedGrossProfit;
+            const pct = expectedGrossProfit !== 0 ? (diff / Math.abs(expectedGrossProfit)) * 100 : 0;
+            log(
+                `${date} 对账：毛利 ${actualGrossProfit.toFixed(2)} vs 领星 ${expectedGrossProfit.toFixed(2)}` +
+                    `（差 ${diff.toFixed(2)}，${pct.toFixed(1)}%）；销售额 ${actualAmount.toFixed(2)} vs ${expectedAmount === null ? 'n/a' : expectedAmount.toFixed(2)}`
+            );
+        }
     }
 
     // 3) 校验（失败即中止，不写半份数据）
@@ -342,6 +361,7 @@ async function main() {
         dates,
         currency: CURRENCY,
         failedShopCalls,
+        reconciliations,
     });
     report.warnings.forEach((w) => log(`⚠ ${w}`));
     if (!report.ok) {
@@ -369,6 +389,16 @@ async function main() {
             costMatchRate: Number(report.costMatchRate.toFixed(3)),
             filteredZeroRows: report.zeroFiltered,
             failedShopCalls,
+            /** 负毛利行占比：仅作参考（领星按 MSKU/天 粒度会因一次性成本出现大量负值，不代表错） */
+            negativeRowShare: Number((report.negativeShare || 0).toFixed(3)),
+            /** 与领星 total_sum 的对账结果，跑完可在 manifest.json 里核对 */
+            reconciliations: (report.reconciliations || []).map((c) => ({
+                date: c.date,
+                grossProfitMine: Number(Number(c.actualGrossProfit).toFixed(2)),
+                grossProfitLingxing: c.expectedGrossProfit === null ? null : Number(Number(c.expectedGrossProfit).toFixed(2)),
+                salesMine: Number(Number(c.actualAmount).toFixed(2)),
+                salesLingxing: c.expectedAmount === null ? null : Number(Number(c.expectedAmount).toFixed(2)),
+            })),
         },
         daily: allRows,
         monthly,

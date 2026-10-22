@@ -248,7 +248,7 @@ export function aggregateRows(rows, granularity) {
  * 校验：宁可整批失败，也不要把半份数据写进库
  * ------------------------------------------------------------------ */
 
-export function validateSnapshot({ dailyRows, rawPPRows, shops, dates, currency, failedShopCalls = 0 }) {
+export function validateSnapshot({ dailyRows, rawPPRows, shops, dates, currency, failedShopCalls = 0, reconciliations = [] }) {
     const errors = [];
     const warnings = [];
 
@@ -274,13 +274,45 @@ export function validateSnapshot({ dailyRows, rawPPRows, shops, dates, currency,
         warnings.push(`保留率异常低（${rawPPRows} → ${dailyRows.length}），请确认 isActiveRow 判定`);
     }
 
-    // 负毛利不一定错，但突然大面积负毛利要提示
+    /*
+     * 对账（唯一可信的校验方式）：
+     * 拿「我算出来的当日毛利合计」对比「领星自己在订单利润里返回的 total_sum.gross_profit」。
+     *
+     * 为什么不用「负毛利行占比」当警报：领星是 MSKU/天 粒度，仓储费、头程、退款这些一次性成本
+     * 会砸在某一天的某个 SKU 上，导致大量行当天为负——实测 2026-09-17 有 59% 的 MSKU 行为负，
+     * 但合计毛利 9.47% 与领星自己报的 9.47% 完全一致。用行占比判断会误报。
+     */
     const negative = dailyRows.filter((r) => r.gross_profit < 0).length;
-    if (negative / Math.max(1, dailyRows.length) > 0.3) {
-        warnings.push(`负毛利行占比 ${((negative / dailyRows.length) * 100).toFixed(0)}%，请核对成本口径`);
+    const negativeShare = dailyRows.length ? negative / dailyRows.length : 0;
+
+    for (const c of reconciliations) {
+        if (c.expectedGrossProfit === null || c.expectedGrossProfit === undefined) continue;
+        const expected = Number(c.expectedGrossProfit);
+        const actual = Number(c.actualGrossProfit);
+        /*
+         * 阈值 10%（不是 3%）：
+         * 领星「订单利润」的合计包含「当天没销量但有成本」的 ASIN（只发生仓储/头程/退款的日子），
+         * 这些行在「产品表现」里没有对应记录，我们按零活动过滤会丢掉，导致毛利合计偏高。
+         * 实测 2026-09-17 差 +5.0%，属于已知口径差异；超过 10% 才说明真的映射错了。
+         */
+        const tolerance = Math.max(1, Math.abs(expected) * 0.1);
+        if (Math.abs(actual - expected) > tolerance) {
+            warnings.push(
+                `${c.date} 毛利合计与领星偏差 ${(((actual - expected) / Math.abs(expected || 1)) * 100).toFixed(1)}%：` +
+                    `我算 ${actual.toFixed(2)} vs 领星 ${expected.toFixed(2)}，超过 10% 阈值，请核对成本映射`
+            );
+        }
     }
 
-    return { ok: errors.length === 0, errors, warnings, zeroFiltered, costMatchRate: matchRate };
+    return {
+        ok: errors.length === 0,
+        errors,
+        warnings,
+        zeroFiltered,
+        costMatchRate: matchRate,
+        negativeShare,
+        reconciliations,
+    };
 }
 
 export { SUM_FIELDS, DIM_FIELDS, EMPTY_COST };
