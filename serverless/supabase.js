@@ -55,11 +55,20 @@ export async function fetchTable(table, params, maxRows = 60000) {
   const base = process.env.SUPABASE_URL?.replace(/\/$/, '');
   const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
   if (!base || !key) throw new Error('Supabase server credentials are missing');
+
+  /*
+   * 关键：为了判断「是否超限」，必须比上限多取 1 行。
+   * 之前的写法是 `limit = min(pageSize, maxRows - offset + 1)` 且循环条件 `offset <= maxRows`：
+   * 当 maxRows=1（freshness 只需要 1 行）时，第一页取 1 行后不满足退出条件，
+   * 第二页再取 1 行 → rows.length(2) > maxRows(1) → 误报 413「数据量过大」，
+   * 导致 /api/freshness 永久失败（看板顶部的"数据截至日"会直接报错）。
+   */
+  const hardLimit = maxRows + 1;
+  const pageSize = Math.min(1000, hardLimit);
   const rows = [];
-  const pageSize = Math.min(1000, maxRows);
-  for (let offset = 0; offset <= maxRows; offset += pageSize) {
+  for (let offset = 0; offset < hardLimit; offset += pageSize) {
     const query = new URLSearchParams(params);
-    query.set('limit', String(Math.min(pageSize, maxRows - offset + 1)));
+    query.set('limit', String(Math.min(pageSize, hardLimit - offset)));
     query.set('offset', String(offset));
     const response = await fetch(`${base}/rest/v1/${table}?${query}`, {
       headers: {
@@ -71,13 +80,15 @@ export async function fetchTable(table, params, maxRows = 60000) {
     const page = await response.json();
     if (!Array.isArray(page)) throw new Error(`Supabase ${table}: invalid response`);
     rows.push(...page);
-    if (rows.length > maxRows) {
-      const error = new Error('too many rows');
-      error.status = 413;
-      error.publicMessage = '所选范围数据量过大，请缩短日期范围';
-      throw error;
-    }
+    if (rows.length >= hardLimit) break;
     if (page.length < pageSize) break;
+  }
+
+  if (rows.length > maxRows) {
+    const error = new Error('too many rows');
+    error.status = 413;
+    error.publicMessage = '所选范围数据量过大，请缩短日期范围';
+    throw error;
   }
   return rows;
 }
