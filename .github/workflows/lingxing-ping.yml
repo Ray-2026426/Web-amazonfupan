@@ -27,9 +27,10 @@ jobs:
         env:
           LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
         run: |
-          set -euo pipefail
           if [ -z "${LINGXING_MCP_KEY:-}" ]; then
-            echo "::error::缺少 LINGXING_MCP_KEY，请在仓库 Settings → Secrets 里添加"
+            echo "::error title=缺少密钥::仓库 Secret 里没有 LINGXING_MCP_KEY"
             exit 1
           fi
+          # 结果由脚本自己输出 ::notice:: / ::error:: 注解，
+          # 运行概览页直接可见，不用展开日志
           node scripts/sync/ping.mjs
