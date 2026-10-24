@@ -1,5 +1,8 @@
+# pnpm 11：只有这里显式放行的依赖才允许执行安装脚本（postinstall）。
+# 之前这里是 "set this to true or false" 的占位符，等于一个都没放行，
+# pnpm install 会以 ERR_PNPM_IGNORED_BUILDS 退出 1 —— CI 的 Quality gate 一直红就是这个原因。
 allowBuilds:
-  '@google/genai': set this to true or false
-  core-js: set this to true or false
-  esbuild: set this to true or false
-  protobufjs: set this to true or false
+  '@google/genai': true
+  core-js: true
+  esbuild: true
+  protobufjs: true
