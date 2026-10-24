@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeOrderProfit, toDataRow, validateSnapshot } from './mapper.mjs';
+import { DEFAULT_FIELD_PATHS, mergeOrderProfit, resolveField, toDataRow, validateSnapshot } from './mapper.mjs';
 import { authorized, isValidDate, rowsForRange, splitRange } from '../../serverless/supabase.js';
 import adminHandler from '../../api/admin.js';
 import exportHandler from '../../api/export.js';
 import targetsHandler from '../../api/targets.js';
 
-test('Lingxing product name comes from price_list, not Amazon title', () => {
+test('默认字段映射：品名取 price_list 里销量最大的 local_name，二级分类取第 2 段', () => {
   const row = toDataRow({
     date: '2026-10-18', shop: { id: 1, name: '店铺', country: '美国' },
     row: {
@@ -20,6 +20,54 @@ test('Lingxing product name comes from price_list, not Amazon title', () => {
   assert.equal(row.sales_amount, 100);
 });
 
+test('映射路径解析支持数组、下标、层级与按销量取最大', () => {
+  const row = {
+    asin: 'B001',
+    brands: ['品牌A'],
+    parent_asins: [{ parent_asin: 'B0PARENT' }],
+    seller_store_countries: [{ seller_name: '美国店', country: '美国' }],
+    price_list: [{ volume: 1, local_name: '小号' }, { volume: 9, local_name: '大号' }],
+    categories: ['B-工具\\A分类\\细分'],
+  };
+  assert.equal(resolveField(row, 'brands[]'), '品牌A');
+  assert.equal(resolveField(row, 'parent_asins[].parent_asin'), 'B0PARENT');
+  assert.equal(resolveField(row, 'seller_store_countries[0].country'), '美国');
+  assert.equal(resolveField(row, 'price_list[].local_name@max(volume)'), '大号');
+  assert.equal(resolveField(row, 'categories[]@level(2)'), 'A分类');
+  assert.equal(resolveField(row, 'not_exists[]'), '');
+  // 默认映射覆盖 8 个字段，且引用的正是上面这些路径
+  assert.deepEqual(Object.keys(DEFAULT_FIELD_PATHS).sort(), ['asin', 'brand', 'country', 'manager', 'parent_asin', 'product_name', 'shop_name', 'sub_category']);
+});
+
+test('云端字段映射改变下一次同步的取值', () => {
+  const fieldMap = new Map([
+    ['product_name', 'item_name'],
+    ['brand', 'brands[]'],
+  ]);
+  const data = toDataRow({
+    date: '2026-10-18', shop: { id: 7, name: '店铺' },
+    row: {
+      asin: 'B007', item_name: '用 Amazon 标题当品名', brands: ['新品牌'],
+      price_list: [{ volume: 1, local_name: '原来的品名' }], amount: 50,
+    },
+    fieldMap,
+  });
+  assert.equal(data.product_name, '用 Amazon 标题当品名');
+  assert.equal(data.brand, '新品牌');
+});
+
+test('成本按 sid|asin 归并，不再依赖已下线的成本匹配规则', () => {
+  const costs = mergeOrderProfit([{
+    sids: [7], price_list: [{ local_sku: 'SKU-1', asin: 'B000000007' }], gross_profit: 23,
+  }]);
+  assert.equal(costs.get('7|B000000007').gross_profit, 23);
+  const data = toDataRow({
+    date: '2026-10-18', shop: { id: 7, name: '店铺' },
+    row: { asin: 'B000000007', amount: 50 }, cost: costs.get('7|B000000007'),
+  });
+  assert.equal(data.gross_profit, 23);
+});
+
 test('failed shop queries reject a publishable snapshot', () => {
   const result = validateSnapshot({
     dailyRows: [{ shop_name: '店铺', sales_amount: 100, gross_profit: 20 }],
@@ -27,22 +75,6 @@ test('failed shop queries reject a publishable snapshot', () => {
   });
   assert.equal(result.ok, false);
   assert.match(result.errors.join(','), /店铺查询失败/);
-});
-
-test('admin cost and product rules change the next sync result', () => {
-  const costs = mergeOrderProfit([{
-    sids: [7], price_list: [{ local_sku: 'SKU-1', asin: 'BOLD000001' }], gross_profit: 23,
-  }], { asinRules: new Map([['7|SKU-1', 'BNEW000001']]) });
-  assert.equal(costs.has('7|BOLD000001'), false);
-  assert.equal(costs.get('7|BNEW000001').gross_profit, 23);
-  const data = toDataRow({
-    date: '2026-10-18', shop: { id: 7, name: '店铺' },
-    row: { asin: 'BNEW000001', brands: ['旧品牌'], amount: 50 }, cost: costs.get('7|BNEW000001'),
-    override: { brand: '新品牌', product_name: '更正品名' },
-  });
-  assert.equal(data.brand, '新品牌');
-  assert.equal(data.product_name, '更正品名');
-  assert.equal(data.gross_profit, 23);
 });
 
 test('long ranges keep partial months at daily grain', () => {
@@ -83,7 +115,7 @@ test('cloud read queries use bounded dates and keep the database key server-side
   }
 });
 
-test('admin API requires its own password and saves a cost rule server-side', async () => {
+test('admin API requires its own password and saves a field mapping server-side', async () => {
   const oldFetch = globalThis.fetch;
   const oldAdmin = process.env.DASHBOARD_ADMIN_TOKEN;
   const oldUrl = process.env.SUPABASE_URL;
@@ -108,11 +140,14 @@ test('admin API requires its own password and saves a cost rule server-side', as
     assert.equal(denied.code, 401);
     assert.equal(calls.length, 0);
     const allowed = response();
-    await adminHandler({ method: 'POST', headers: { authorization: 'Bearer separate-admin-token-long-enough' }, body: { action: 'cost_rule', sid: '7', local_sku: 'SKU-1', asin: 'BNEW000001' } }, allowed);
+    await adminHandler({ method: 'POST', headers: { authorization: 'Bearer separate-admin-token-long-enough' }, body: { action: 'field_mapping', web_field: 'product_name', export_label: '品名', lingxing_field: 'item_name' } }, allowed);
     assert.equal(allowed.code, 200);
-    assert.equal(calls[0].url.pathname, '/rest/v1/cost_asin_rules');
+    assert.equal(calls[0].url.pathname, '/rest/v1/field_mappings');
     assert.equal(calls[0].options.headers.apikey, 'sb_secret_test-only');
-    assert.equal(JSON.parse(calls[0].options.body).asin, 'BNEW000001');
+    assert.equal(JSON.parse(calls[0].options.body).lingxing_field, 'item_name');
+    const rejected = response();
+    await adminHandler({ method: 'POST', headers: { authorization: 'Bearer separate-admin-token-long-enough' }, body: { action: 'field_mapping', web_field: 'not_a_field', export_label: 'x', lingxing_field: 'y' } }, rejected);
+    assert.equal(rejected.code, 400);
   } finally {
     globalThis.fetch = oldFetch;
     for (const [name, value] of [['DASHBOARD_ADMIN_TOKEN', oldAdmin], ['SUPABASE_URL', oldUrl], ['SUPABASE_SECRET_KEY', oldKey]]) {

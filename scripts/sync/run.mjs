@@ -182,16 +182,15 @@ async function readControlTable(table) {
 }
 
 async function loadControls() {
-    if (!SUPABASE_URL || !SUPABASE_KEY) return { settings: { enabled: true, lookback_days: 3 }, asinRules: new Map(), productOverrides: new Map() };
-    const [settingsRows, costRows, productRows] = await Promise.all([
+    if (!SUPABASE_URL || !SUPABASE_KEY) return { settings: { enabled: true, lookback_days: 3 }, fieldMappings: new Map() };
+    const [settingsRows, mappingRows] = await Promise.all([
         readControlTable('sync_settings'),
-        readControlTable('cost_asin_rules'),
-        readControlTable('product_overrides'),
+        // 映射表允许不存在（老库还没建表）：读失败就全用默认路径
+        readControlTable('field_mappings').catch(() => []),
     ]);
     return {
         settings: settingsRows.find((item) => item.id === 1) || { enabled: true, lookback_days: 3 },
-        asinRules: new Map(costRows.map((r) => [`${r.sid}|${r.local_sku}`, r.asin])),
-        productOverrides: new Map(productRows.map((r) => [`${r.sid}|${r.asin}`, r])),
+        fieldMappings: new Map(mappingRows.map((r) => [r.web_field, r.lingxing_field])),
     };
 }
 
@@ -233,7 +232,7 @@ async function uploadToSupabase({ dailyRows, currency, startedAt, range, dates, 
 /* --------------------------- 主流程 --------------------------- */
 async function main() {
     const startedAt = new Date().toISOString();
-    const controls = FIXTURES ? { settings: { enabled: true, lookback_days: 3 }, asinRules: new Map(), productOverrides: new Map() } : await loadControls();
+    const controls = FIXTURES ? { settings: { enabled: true, lookback_days: 3 }, fieldMappings: new Map() } : await loadControls();
     const explicitRange = arg('from') && arg('to');
     if (!controls.settings.enabled && !explicitRange && !CLI_DAYS) {
         log('管理后台已暂停自动同步，本次定时任务跳过');
@@ -277,7 +276,7 @@ async function main() {
                 service_type: 1,
             });
         }
-        const costMap = mergeOrderProfit(op.list, { asinRules: controls.asinRules });
+        const costMap = mergeOrderProfit(op.list);
         costByDate.set(date, costMap);
         const expectedGrossProfit = op.total_sum ? num(op.total_sum.gross_profit) : null;
         const expectedAmount = op.total_sum ? num(op.total_sum.amount) : null;
@@ -329,7 +328,7 @@ async function main() {
                         row,
                         cost: costMap.get(`${sid}|${row.asin}`),
                         date,
-                        override: controls.productOverrides.get(`${sid}|${row.asin}`),
+                        fieldMap: controls.fieldMappings,
                     })
                 );
             }

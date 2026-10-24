@@ -32,7 +32,7 @@
    | `DASHBOARD_ADMIN_TOKEN` | 另一串不同的至少 24 位随机字符，作为数据管理密码 |
 
    保存后重新部署 Vercel 项目。`SUPABASE_SECRET_KEY`、`DASHBOARD_READ_TOKEN`、`DASHBOARD_ADMIN_TOKEN` **不要**添加 `VITE_` 前缀；它们只在服务端使用。看板上的“连接云端数据”输入只读密码，不输入领星或 Supabase 密钥。
-   看板上的“数据管理”使用单独的 `DASHBOARD_ADMIN_TOKEN`。管理后台可查看同步记录与日明细、修改成本匹配及产品字段规则、暂停每日同步、调整每天回补 1–14 天。修改匹配规则后，下一次同步才会重算；更早的日期要到 GitHub Actions 手动指定 `from` / `to` 回补。
+   看板上的“数据管理”使用单独的 `DASHBOARD_ADMIN_TOKEN`。管理后台可查看同步记录与日明细、维护字段映射（下载表格列名 / Web 展示字段 / 领星字段路径三列）、暂停每日同步、调整每天回补 1–14 天。改了字段映射后，下一次同步或回补才会按新路径取值；更早的日期要到 GitHub Actions 手动指定 `from` / `to` 重跑。
    如果领星同步使用的不是默认 `USD`，GitHub Variables 和 Vercel 环境变量都要设置相同的 `LINGXING_CURRENCY`（例如 `CNY`）。
 5. **第一次补历史数据。** GitHub 仓库 → Actions →「领星数据自动同步」→ Run workflow。先输入 `days=3`，确认成功后分段补历史数据。每次建议 7–30 天，避免一次运行超过 GitHub Actions 的 120 分钟限制。`from` 和 `to` 都填写时按指定日期执行。完成后打开看板，输入只读密码。
 

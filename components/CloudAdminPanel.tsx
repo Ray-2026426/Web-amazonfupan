@@ -1,16 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { parseTargetData } from '../dataLoader';
 import { enrichTargetData } from '../utils';
-import { dailyCsvHeader, dailyCsvRows, dailyExportMatrix } from '../dailyExport';
+import { dailyCsvHeader, dailyCsvRows, dailyExportMatrix, type ExportLabels } from '../dailyExport';
+import { useEscClose } from './useEscClose';
+import { AlertCircle, Database, Download, RefreshCw, RotateCcw, Save, Settings2, Table2, Upload, X } from 'lucide-react';
 
-type CostRule = { sid: string; local_sku: string; asin: string };
-type ProductRule = { sid: string; asin: string; brand: string | null; manager: string | null; sub_category: string | null; parent_asin: string | null; product_name: string | null };
+type FieldMapping = { web_field: string; export_label: string; lingxing_field: string };
 type Run = { id: number; started_at: string; range_from: string; range_to: string; status: string; rows_daily: number; error: string | null };
 type Sample = { date: string; sid: string; asin: string; shop_name: string; product_name: string; sales_amount: number; gross_profit: number; ad_spend: number };
 type AdminData = {
   settings: { enabled: boolean; lookback_days: number } | null;
-  costRules: CostRule[];
-  productOverrides: ProductRule[];
+  fieldMappings: FieldMapping[];
+  /** false = 云端还没建 field_mappings 表，当前显示的是内置默认值 */
+  fieldMappingReady?: boolean;
   runs: Run[];
   sampleDate: string | null;
   data: Sample[];
@@ -18,15 +20,34 @@ type AdminData = {
 };
 
 const TOKEN_KEY = 'amazon-dashboard-admin-token';
-const emptyProduct = { sid: '', asin: '', brand: '', manager: '', sub_category: '', parent_asin: '', product_name: '' };
+
+/** 映射表固定这 8 行：顺序即界面上从上到下的顺序 */
+const FIELD_META: Record<string, { label: string; hint: string }> = {
+  asin: { label: 'ASIN', hint: '表格与筛选里的 ASIN' },
+  parent_asin: { label: '父ASIN', hint: '父 ASIN 列' },
+  shop_name: { label: '店铺', hint: '店铺列与店铺筛选' },
+  country: { label: '国家', hint: '国家列与国家筛选' },
+  manager: { label: '负责人', hint: '负责人列与筛选' },
+  product_name: { label: '品名', hint: '品名列、筛选、下载' },
+  sub_category: { label: '二级分类', hint: '二级分类列与筛选' },
+  brand: { label: '品牌', hint: '品牌列与筛选' },
+};
+const FIELD_ORDER = ['asin', 'parent_asin', 'shop_name', 'country', 'manager', 'product_name', 'sub_category', 'brand'];
+
+type Tab = 'overview' | 'fields' | 'targets' | 'data';
+const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
+  { key: 'overview', label: '概览', icon: <Settings2 className="h-3.5 w-3.5" /> },
+  { key: 'fields', label: '字段映射', icon: <Table2 className="h-3.5 w-3.5" /> },
+  { key: 'targets', label: '目标表', icon: <Database className="h-3.5 w-3.5" /> },
+  { key: 'data', label: '数据下载', icon: <Download className="h-3.5 w-3.5" /> },
+];
 
 export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?: () => void }> = ({ onClose, onTargetsUpdated }) => {
+  useEscClose(true, onClose);
   const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_KEY) || '');
   const [password, setPassword] = useState('');
   const [data, setData] = useState<AdminData | null>(null);
-  const [tab, setTab] = useState<'overview' | 'cost' | 'product' | 'data' | 'targets'>('overview');
-  const [cost, setCost] = useState({ sid: '', local_sku: '', asin: '' });
-  const [product, setProduct] = useState(emptyProduct);
+  const [tab, setTab] = useState<Tab>('overview');
   const [date, setDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -34,10 +55,9 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   const [progress, setProgress] = useState('');
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
-  /** 单日 / 时间段 */
   const [exportMode, setExportMode] = useState<'day' | 'range'>('range');
+  const [draft, setDraft] = useState<Record<string, { export_label: string; lingxing_field: string }>>({});
 
-  /** 本地日期 YYYY-MM-DD（不能用 toISOString，会因时区差一天） */
   const localDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   useEffect(() => {
@@ -77,11 +97,23 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   };
 
   useEffect(() => { if (token) void load(); }, [token]);
+
+  /** 服务端数据回来后刷新映射草稿；保存后也会走一遍，等于「已保存」的确认 */
   useEffect(() => {
-    if (!data?.sampleDate) return;
-    setExportFrom(current => current || data.sampleDate || '');
-    setExportTo(current => current || data.sampleDate || '');
-  }, [data?.sampleDate]);
+    if (!data) return;
+    const next: Record<string, { export_label: string; lingxing_field: string }> = {};
+    for (const key of FIELD_ORDER) {
+      const row = data.fieldMappings.find(item => item.web_field === key);
+      next[key] = { export_label: row?.export_label ?? '', lingxing_field: row?.lingxing_field ?? '' };
+    }
+    setDraft(next);
+  }, [data]);
+
+  const exportLabels = useMemo<ExportLabels>(() => {
+    const labels: ExportLabels = {};
+    for (const item of data?.fieldMappings || []) labels[item.web_field] = item.export_label;
+    return labels;
+  }, [data]);
 
   const save = async (body: object, success: string) => {
     setBusy(true);
@@ -89,7 +121,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
       await request('POST', body);
       const refreshed = await request('GET') as AdminData;
       setData(refreshed);
-      setMessage(`${success}。规则将在下次同步或历史回补时生效。`);
+      setMessage(success);
     } catch (error) {
       setMessage(String(error instanceof Error ? error.message : error));
     } finally {
@@ -108,7 +140,6 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
         throw new Error('目标表缺少“子ASIN”或横向月份目标列，请使用提供的目标表格式');
       }
       const rows = enrichTargetData(parsed.data, []).filter(row =>
-        /^\d{4}-(0[1-9]|1[0-2])$/.test(row.month) &&
         [row.sales_quantity_target, row.sales_amount_target, row.gross_profit_target, row.ad_spend_target].some(value => Number(value) !== 0),
       );
       if (!rows.length) throw new Error('目标表中没有非零目标数据');
@@ -188,7 +219,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
       const fileBase = days === 1 ? `亚马逊每日业绩_${from}` : `亚马逊每日业绩_${from}_${to}`;
 
       if (format === 'csv') {
-        const parts: BlobPart[] = ['\uFEFF', dailyCsvHeader()];
+        const parts: BlobPart[] = ['\uFEFF', dailyCsvHeader(exportLabels)];
         let count = 0;
         for (let i = 0; i < chunks.length; i++) {
           const rows = await fetchRangeRows(chunks[i].from, chunks[i].to);
@@ -211,7 +242,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
           setProgress(`已读取 ${all.length} 行（第 ${i + 1}/${chunks.length} 段）…`);
         }
         const XLSX = await import('xlsx');
-        const worksheet = XLSX.utils.aoa_to_sheet(dailyExportMatrix(all));
+        const worksheet = XLSX.utils.aoa_to_sheet(dailyExportMatrix(all, exportLabels));
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, '每日明细');
         XLSX.writeFile(workbook, `${fileBase}.xlsx`);
@@ -225,116 +256,334 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
     }
   };
 
-  const fieldClass = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800';
-  const actionClass = 'rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50';
-  const smallClass = 'rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600';
+  const cardClass = 'rounded-2xl border border-slate-200/70 bg-white p-5';
+  const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100';
+  const primaryClass = 'inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40';
+  const ghostClass = 'inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-40';
+  const sectionTitle = 'text-sm font-semibold text-slate-900';
+  const sectionHint = 'mt-1 text-xs leading-relaxed text-slate-500';
 
-  return <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/60 p-3" role="dialog" aria-modal="true" aria-label="云端数据管理后台">
-    <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-      <header className="flex items-center justify-between border-b border-slate-200 p-4">
-        <div><h2 className="text-lg font-bold text-slate-800">云端数据管理</h2><p className="text-xs text-slate-500">查看同步、管理匹配规则和数据来源</p></div>
-        <button className={smallClass} onClick={onClose}>关闭</button>
-      </header>
-      {!token ? <form className="mx-auto w-full max-w-md space-y-3 p-8" onSubmit={event => { event.preventDefault(); const value = password.trim(); if (value) { sessionStorage.setItem(TOKEN_KEY, value); setToken(value); setPassword(''); } }}>
-        <p className="text-sm text-slate-600">输入单独的管理密码。它与看板只读密码不同。</p>
-        <input className={fieldClass} type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} placeholder="管理密码" aria-label="管理密码" />
-        <button className={actionClass} type="submit">进入管理后台</button>
-        {message && <p className="text-sm text-red-700" role="alert">{message}</p>}
-      </form> : <>
-        <nav className="flex flex-wrap gap-2 border-b border-slate-200 p-3 text-sm">
-          {([['overview', '同步与设置'], ['cost', '成本匹配'], ['product', '产品字段'], ['targets', '目标表'], ['data', '每日数据']] as const).map(([key, label]) => <button key={key} onClick={() => setTab(key)} className={`rounded-lg px-3 py-1.5 ${tab === key ? 'bg-sky-100 font-bold text-sky-800' : 'text-slate-600'}`}>{label}</button>)}
-          <button className={`${smallClass} ml-auto`} onClick={() => { sessionStorage.removeItem(TOKEN_KEY); setToken(''); setData(null); }}>退出管理</button>
-        </nav>
-        <div className="overflow-y-auto p-4 text-sm">
-          {message && <p className="mb-3 rounded-lg bg-amber-50 p-2 text-amber-900" role="status">{message}</p>}
-          {progress && <p className="mb-3 rounded-lg bg-sky-50 p-2 text-sky-900" role="status">{progress}</p>}
-          {!data ? <p className="p-6 text-slate-500">{busy ? '正在读取云端配置…' : '暂无数据，请检查 Supabase 配置。'}</p> : <>
-            {tab === 'overview' && <div className="space-y-6">
-              <section className="rounded-xl border border-slate-200 p-4"><h3 className="mb-3 font-bold">自动同步设置</h3>
-                <label className="mr-5 inline-flex items-center gap-2"><input type="checkbox" checked={data.settings?.enabled ?? true} onChange={event => setData({ ...data, settings: { enabled: event.target.checked, lookback_days: data.settings?.lookback_days ?? 3 } })} />启用每日自动同步</label>
-                <label className="inline-flex items-center gap-2">每天回补最近 <input className="w-16 rounded border p-1 text-center" type="number" min="1" max="14" value={data.settings?.lookback_days ?? 3} onChange={event => setData({ ...data, settings: { enabled: data.settings?.enabled ?? true, lookback_days: Number(event.target.value) } })} /> 天</label>
-                <div className="mt-3"><button className={actionClass} disabled={busy} onClick={() => save({ action: 'settings', ...data.settings }, '设置已保存')}>保存设置</button></div>
-              </section>
-              <section><h3 className="mb-2 font-bold">最近同步记录</h3><div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="border-b"><th className="p-2">开始时间</th><th className="p-2">数据日期</th><th className="p-2">状态</th><th className="p-2">日明细行数</th></tr></thead><tbody>{data.runs.map(run => <tr key={run.id} className="border-b"><td className="p-2">{new Date(run.started_at).toLocaleString('zh-CN')}</td><td className="p-2">{run.range_from} ～ {run.range_to}</td><td className="p-2">{run.status}</td><td className="p-2">{run.rows_daily ?? 0}</td></tr>)}</tbody></table></div>{!data.runs.length && <p className="text-slate-500">尚无同步记录。</p>}</section>
-            </div>}
-            {tab === 'cost' && <div className="space-y-4"><p className="text-slate-600">指定“店铺 ID + 本地 SKU”应归入哪个 ASIN，用于订单利润成本匹配。</p>
-              <div className="grid gap-2 sm:grid-cols-4"><input className={fieldClass} placeholder="店铺 ID" value={cost.sid} onChange={e => setCost({ ...cost, sid: e.target.value })} /><input className={fieldClass} placeholder="本地 SKU" value={cost.local_sku} onChange={e => setCost({ ...cost, local_sku: e.target.value })} /><input className={fieldClass} placeholder="目标 ASIN" value={cost.asin} onChange={e => setCost({ ...cost, asin: e.target.value })} /><button className={actionClass} disabled={busy} onClick={() => save({ action: 'cost_rule', ...cost }, '成本匹配规则已保存')}>保存规则</button></div>
-              <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="border-b"><th className="p-2">店铺 ID</th><th className="p-2">本地 SKU</th><th className="p-2">目标 ASIN</th><th className="p-2">操作</th></tr></thead><tbody>{data.costRules.map(rule => <tr className="border-b" key={`${rule.sid}|${rule.local_sku}`}><td className="p-2">{rule.sid}</td><td className="p-2">{rule.local_sku}</td><td className="p-2">{rule.asin}</td><td className="p-2"><button className={smallClass} onClick={() => setCost(rule)}>编辑</button> <button className={smallClass} onClick={() => { if (window.confirm('删除这条成本匹配规则？')) void save({ action: 'delete_cost_rule', sid: rule.sid, local_sku: rule.local_sku }, '规则已删除'); }}>删除</button></td></tr>)}</tbody></table></div>
-            </div>}
-            {tab === 'product' && <div className="space-y-4"><p className="text-slate-600">指定“店铺 ID + ASIN”的字段覆盖值；留空表示继续使用领星原值。</p>
-              <div className="grid gap-2 sm:grid-cols-3">{(['sid', 'asin', 'brand', 'manager', 'sub_category', 'parent_asin', 'product_name'] as const).map(field => <input key={field} className={fieldClass} placeholder={({ sid: '店铺 ID', asin: 'ASIN', brand: '品牌', manager: '负责人', sub_category: '二级品类', parent_asin: '父 ASIN', product_name: '产品名称' })[field]} value={product[field]} onChange={e => setProduct({ ...product, [field]: e.target.value })} />)}</div>
-              <button className={actionClass} disabled={busy} onClick={() => save({ action: 'product_override', ...product }, '产品字段规则已保存')}>保存规则</button>
-              <div className="space-y-2">{data.productOverrides.map(rule => <div key={`${rule.sid}|${rule.asin}`} className="flex flex-wrap items-center gap-2 rounded-lg border p-2 text-xs"><strong>{rule.sid} / {rule.asin}</strong><span className="text-slate-500">{[rule.brand, rule.manager, rule.sub_category, rule.parent_asin, rule.product_name].filter(Boolean).join(' · ')}</span><button className={smallClass} onClick={() => setProduct(Object.fromEntries(Object.entries(rule).map(([key, value]) => [key, value ?? ''])) as typeof emptyProduct)}>编辑</button><button className={smallClass} onClick={() => { if (window.confirm('删除这条产品字段规则？')) void save({ action: 'delete_product_override', sid: rule.sid, asin: rule.asin }, '规则已删除'); }}>删除</button></div>)}</div>
-            </div>}
-            {tab === 'targets' && <div className="space-y-4">
-              <p className="text-slate-600">目标表上传一次后保存在云端。更新目标时上传新版，完整上传成功后才会替换当前版本。</p>
-              <div className="rounded-xl border border-slate-200 p-4">
-                <h3 className="font-bold">当前生效的目标表</h3>
-                {data.targetImport ? <p className="mt-2 text-slate-700">{data.targetImport.source_filename} · {data.targetImport.expected_rows} 行 · {new Date(data.targetImport.activated_at).toLocaleString('zh-CN')} 上传</p> : <p className="mt-2 text-slate-500">尚未上传目标表。</p>}
-              </div>
-              <div className="rounded-xl border border-slate-200 p-4">
-                <label className="block font-bold" htmlFor="cloud-target-file">上传或替换目标表</label>
-                <p className="my-2 text-xs text-slate-500">支持提供的“年份×月份”横向目标模板；零目标行不会存入云端。</p>
-                <input id="cloud-target-file" className={fieldClass} type="file" accept=".xlsx,.xls,.csv" onChange={event => setTargetFile(event.target.files?.[0] || null)} />
-                <button className={`${actionClass} mt-3`} disabled={busy || !targetFile} onClick={() => void uploadTargets()}>上传并启用目标表</button>
-              </div>
-            </div>}
-            {tab === 'data' && <div className="space-y-3"><p className="text-slate-600">抽查某一天销售额最高的前 100 条明细。数值异常时，先改匹配规则，再重跑对应日期。</p><div className="flex gap-2"><input className={fieldClass} type="date" value={date || data.sampleDate || ''} onChange={e => setDate(e.target.value)} /><button className={actionClass} disabled={busy} onClick={() => load(date || data.sampleDate || '')}>查询</button></div><p>当前日期：{data.sampleDate || '暂无数据'}</p>
-              <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="border-b"><th className="p-2">店铺</th><th className="p-2">ASIN</th><th className="p-2">产品</th><th className="p-2">销售额</th><th className="p-2">毛利</th><th className="p-2">广告花费</th></tr></thead><tbody>{data.data.map(row => <tr key={`${row.date}|${row.sid}|${row.asin}`} className="border-b"><td className="p-2">{row.shop_name}</td><td className="p-2">{row.asin}</td><td className="p-2">{row.product_name}</td><td className="p-2">{Number(row.sales_amount).toFixed(2)}</td><td className="p-2">{Number(row.gross_profit).toFixed(2)}</td><td className="p-2">{Number(row.ad_spend).toFixed(2)}</td></tr>)}</tbody></table></div>
-              <div className="rounded-xl border border-slate-200 p-4">
-                <h3 className="font-bold">下载每日明细</h3>
-                <p className="my-2 text-xs text-slate-500">列名与《项目业绩》表一致（日期/年份/月份 + 47 个业务字段）；可选某一天或任意区间。</p>
-                <div className="mb-2 inline-flex rounded-lg border border-slate-200 p-0.5 text-xs">
-                  {([['day', '单日'], ['range', '时间段']] as const).map(([mode, label]) => (
-                    <button key={mode} type="button" onClick={() => setExportMode(mode)} className={`rounded px-3 py-1 ${exportMode === mode ? 'bg-sky-100 font-bold text-sky-800' : 'text-slate-600'}`}>{label}</button>
-                  ))}
+  const statusPill = (status: string) => (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${status === 'ok' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200/70' : 'bg-rose-50 text-rose-700 ring-rose-200/70'}`}>
+      {status === 'ok' ? '成功' : '失败'}
+    </span>
+  );
+
+  const latestRun = data?.runs?.[0];
+
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/50 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="云端数据管理">
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-slate-50 shadow-2xl ring-1 ring-slate-900/5">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200/70 bg-white px-6 py-5">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight text-slate-900">云端数据</h2>
+            <p className="mt-1 text-xs text-slate-500">同步设置、字段映射、目标表与明细下载</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {latestRun && (
+              <span className="hidden items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600 sm:inline-flex">
+                最近同步 {new Date(latestRun.started_at).toLocaleString('zh-CN')}
+              </span>
+            )}
+            <button type="button" onClick={onClose} className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="关闭">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </header>
+
+        {!token ? (
+          <form className="mx-auto w-full max-w-sm space-y-3 px-6 py-12" onSubmit={event => { event.preventDefault(); const value = password.trim(); if (value) { sessionStorage.setItem(TOKEN_KEY, value); setToken(value); setPassword(''); } }}>
+            <p className="text-sm text-slate-600">输入单独的管理密码。它与看板只读密码不同。</p>
+            <input className={inputClass} type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} placeholder="管理密码" aria-label="管理密码" />
+            <button className={`${primaryClass} w-full justify-center`} type="submit">进入</button>
+            {message && <p className="text-sm text-rose-600" role="alert">{message}</p>}
+          </form>
+        ) : <>
+          <nav className="flex flex-wrap items-center gap-1 border-b border-slate-200/70 bg-white px-4 py-2">
+            {TABS.map(item => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setTab(item.key)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition ${tab === item.key ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            ))}
+            <div className="ml-auto flex items-center gap-2">
+              <button className={ghostClass} onClick={() => void load()} disabled={busy}><RefreshCw className={`h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} />刷新</button>
+              <button className={ghostClass} onClick={() => { sessionStorage.removeItem(TOKEN_KEY); setToken(''); setData(null); }}>退出</button>
+            </div>
+          </nav>
+
+          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+            {message && <p className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-2.5 text-xs text-sky-900" role="status">{message}</p>}
+            {progress && <p className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-600" role="status">{progress}</p>}
+            {!data ? <p className="p-8 text-center text-sm text-slate-500">{busy ? '正在读取云端配置…' : '暂无数据，请检查数据库配置。'}</p> : <>
+
+              {tab === 'overview' && <div className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <section className={cardClass}>
+                    <h3 className={sectionTitle}>自动同步</h3>
+                    <p className={sectionHint}>每天定时把领星数据写进云端；回补天数越大，越能自动补上失败的日期。</p>
+                    <div className="mt-4 space-y-4">
+                      <label className="flex items-center justify-between gap-3 text-sm text-slate-700">
+                        <span>启用每日自动同步</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={data.settings?.enabled ?? true}
+                          onClick={() => setData({ ...data, settings: { enabled: !(data.settings?.enabled ?? true), lookback_days: data.settings?.lookback_days ?? 3 } })}
+                          className={`relative h-6 w-11 rounded-full transition ${(data.settings?.enabled ?? true) ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                        >
+                          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${(data.settings?.enabled ?? true) ? 'left-[22px]' : 'left-0.5'}`} />
+                        </button>
+                      </label>
+                      <label className="flex items-center justify-between gap-3 text-sm text-slate-700">
+                        <span>每天回补最近</span>
+                        <span className="flex items-center gap-2">
+                          <input
+                            className="w-16 rounded-lg border border-slate-200 px-2 py-1.5 text-center text-sm outline-none focus:border-sky-400"
+                            type="number" min="1" max="14"
+                            value={data.settings?.lookback_days ?? 3}
+                            onChange={event => setData({ ...data, settings: { enabled: data.settings?.enabled ?? true, lookback_days: Number(event.target.value) } })}
+                          />
+                          <span className="text-xs text-slate-500">天</span>
+                        </span>
+                      </label>
+                      <button className={`${primaryClass} w-full justify-center`} disabled={busy} onClick={() => save({ action: 'settings', ...data.settings }, '同步设置已保存')}>保存设置</button>
+                    </div>
+                  </section>
+
+                  <section className={cardClass}>
+                    <h3 className={sectionTitle}>数据现状</h3>
+                    <p className={sectionHint}>云端日明细的最新日期与最近一次运行结果。</p>
+                    <dl className="mt-4 space-y-3 text-sm">
+                      <div className="flex items-center justify-between"><dt className="text-slate-500">最新数据日</dt><dd className="font-mono text-slate-900">{data.sampleDate || '—'}</dd></div>
+                      <div className="flex items-center justify-between"><dt className="text-slate-500">最近状态</dt><dd>{latestRun ? statusPill(latestRun.status) : '—'}</dd></div>
+                      <div className="flex items-center justify-between"><dt className="text-slate-500">最近写入行数</dt><dd className="font-mono text-slate-900">{latestRun?.rows_daily ?? '—'}</dd></div>
+                    </dl>
+                  </section>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <input className={fieldClass} style={{ width: 'auto' }} type="date" value={exportFrom} onChange={event => setExportFrom(event.target.value)} aria-label={exportMode === 'day' ? '下载日期' : '下载起始日期'} />
-                  {exportMode === 'range' && <><span>至</span><input className={fieldClass} style={{ width: 'auto' }} type="date" value={exportTo} onChange={event => setExportTo(event.target.value)} aria-label="下载结束日期" /></>}
-                  <button className={actionClass} disabled={busy} onClick={() => void downloadDaily('csv')}>下载 CSV</button>
-                  <button className={smallClass} disabled={busy} onClick={() => void downloadDaily('xlsx')}>下载 Excel</button>
+
+                <section className={cardClass}>
+                  <h3 className={sectionTitle}>最近同步记录</h3>
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-[11px] uppercase tracking-wide text-slate-400">
+                        <tr><th className="py-2 pr-3 font-medium">开始时间</th><th className="py-2 pr-3 font-medium">数据日期</th><th className="py-2 pr-3 font-medium">状态</th><th className="py-2 font-medium">日明细行数</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {data.runs.map(run => (
+                          <tr key={run.id} className="text-slate-700">
+                            <td className="py-2.5 pr-3">{new Date(run.started_at).toLocaleString('zh-CN')}</td>
+                            <td className="py-2.5 pr-3 font-mono">{run.range_from} ～ {run.range_to}</td>
+                            <td className="py-2.5 pr-3">{statusPill(run.status)}</td>
+                            <td className="py-2.5 font-mono">{run.rows_daily ?? 0}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {!data.runs.length && <p className="py-6 text-center text-xs text-slate-400">尚无同步记录</p>}
+                  </div>
+                </section>
+              </div>}
+
+              {tab === 'fields' && <section className={cardClass}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className={sectionTitle}>字段映射</h3>
+                    <p className={sectionHint}>
+                      一行对应一个字段：左边是下载表格里的列名，中间是看板里实际展示的字段，右边是领星 MCP 返回的字段路径。
+                      改右边即可跟随领星字段变化，改左边能自定义下载列名。保存后对下一次同步/下载生效。
+                    </p>
+                  </div>
+                  <button className={ghostClass} disabled={busy} onClick={() => save({ action: 'field_mapping_reset' }, '已全部恢复默认映射')}>
+                    <RotateCcw className="h-3.5 w-3.5" />全部恢复默认
+                  </button>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-                  {([
-                    ['昨天', 1],
-                    ['近7天', 7],
-                    ['近30天', 30],
-                    ['全部（2025-01-01 起）', 0],
-                  ] as const).map(([label, days]) => (
-                    <button
-                      key={label}
-                      type="button"
-                      className={smallClass}
-                      onClick={() => {
-                        const end = new Date();
-                        end.setDate(end.getDate() - (days === 1 ? 1 : 0));
-                        const start = new Date(end);
-                        if (days === 0) {
-                          setExportFrom('2025-01-01');
-                          setExportTo(localDate(end));
-                          setExportMode('range');
-                        } else if (days === 1) {
-                          setExportFrom(localDate(end));
-                          setExportMode('day');
-                        } else {
-                          start.setDate(end.getDate() - (days - 1));
-                          setExportFrom(localDate(start));
-                          setExportTo(localDate(end));
-                          setExportMode('range');
-                        }
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
+
+                <div className="mt-5 overflow-x-auto">
+                  {data.fieldMappingReady === false && (
+                    <p className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200/70 bg-amber-50 px-3.5 py-2.5 text-[11px] leading-relaxed text-amber-800">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      云端还没有字段映射表，下面是内置默认值。请先在 Supabase SQL Editor 执行 db/schema.sql，保存才会生效。
+                    </p>
+                  )}
+                  <table className="w-full min-w-[720px] text-left text-xs">
+                    <thead className="text-[11px] uppercase tracking-wide text-slate-400">
+                      <tr>
+                        <th className="w-[26%] py-2 pr-3 font-medium">下载表格字段名</th>
+                        <th className="w-[22%] py-2 pr-3 font-medium">Web 展示字段</th>
+                        <th className="w-[38%] py-2 pr-3 font-medium">领星字段名（路径）</th>
+                        <th className="py-2 font-medium" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {FIELD_ORDER.map(key => {
+                        const meta = FIELD_META[key];
+                        const row = draft[key] || { export_label: '', lingxing_field: '' };
+                        const changed = (() => {
+                          const saved = data.fieldMappings.find(item => item.web_field === key);
+                          return !saved || saved.export_label !== row.export_label || saved.lingxing_field !== row.lingxing_field;
+                        })();
+                        return (
+                          <tr key={key} className="align-middle">
+                            <td className="py-2.5 pr-3">
+                              <input
+                                className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                                value={row.export_label}
+                                onChange={event => setDraft(prev => ({ ...prev, [key]: { ...row, export_label: event.target.value } }))}
+                                aria-label={`${meta.label} 的下载列名`}
+                              />
+                            </td>
+                            <td className="py-2.5 pr-3">
+                              <div className="flex flex-col">
+                                <span className="font-medium text-slate-800">{meta.label}</span>
+                                <span className="text-[11px] text-slate-400">{meta.hint}</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 pr-3">
+                              <input
+                                className="w-full rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-1.5 font-mono text-[11px] text-slate-700 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
+                                value={row.lingxing_field}
+                                onChange={event => setDraft(prev => ({ ...prev, [key]: { ...row, lingxing_field: event.target.value } }))}
+                                spellCheck={false}
+                                aria-label={`${meta.label} 的领星字段路径`}
+                              />
+                            </td>
+                            <td className="py-2.5">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  className={ghostClass}
+                                  disabled={busy || !changed}
+                                  onClick={() => save({ action: 'field_mapping', web_field: key, export_label: row.export_label, lingxing_field: row.lingxing_field }, `${meta.label} 映射已保存`)}
+                                >
+                                  <Save className="h-3.5 w-3.5" />保存
+                                </button>
+                                <button
+                                  className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+                                  disabled={busy}
+                                  title="恢复该字段默认值"
+                                  onClick={() => save({ action: 'field_mapping_reset', web_field: key }, `${meta.label} 已恢复默认`)}
+                                >
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-                <p className="mt-2 text-xs text-slate-500">CSV 支持任意长度区间（按 31 天分段拉取）；Excel 单次最多 92 天。</p>
-              </div>
-            </div>}
-          </>}
-        </div>
-      </>}
+
+                <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-[11px] leading-relaxed text-slate-500">
+                  路径写法：<code className="font-mono text-slate-700">brands[]</code> 取数组第一个非空值 ·
+                  <code className="ml-1 font-mono text-slate-700">parent_asins[].parent_asin</code> 取子字段 ·
+                  <code className="ml-1 font-mono text-slate-700">price_list[].local_name@max(volume)</code> 取销量最大的那条 ·
+                  <code className="ml-1 font-mono text-slate-700">categories[]@level(2)</code> 按分隔符取第 2 段。
+                </div>
+              </section>}
+
+              {tab === 'targets' && <div className="space-y-4">
+                <section className={cardClass}>
+                  <h3 className={sectionTitle}>当前生效的目标表</h3>
+                  {data.targetImport ? (
+                    <p className={`${sectionHint} text-slate-700`}>{data.targetImport.source_filename} · {data.targetImport.expected_rows} 行 · {new Date(data.targetImport.activated_at).toLocaleString('zh-CN')} 上传</p>
+                  ) : <p className={sectionHint}>尚未上传目标表。</p>}
+                </section>
+                <section className={cardClass}>
+                  <h3 className={sectionTitle}>上传或替换</h3>
+                  <p className={sectionHint}>支持“年份 × 月份”横向目标模板；零目标行不会存入云端。完整上传成功后才会替换当前版本。</p>
+                  <input className={`${inputClass} mt-4 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-700`} type="file" accept=".xlsx,.xls,.csv" onChange={event => setTargetFile(event.target.files?.[0] || null)} />
+                  <button className={`${primaryClass} mt-3`} disabled={busy || !targetFile} onClick={() => void uploadTargets()}>
+                    <Upload className="h-3.5 w-3.5" />上传并启用
+                  </button>
+                </section>
+              </div>}
+
+              {tab === 'data' && <div className="space-y-4">
+                <section className={cardClass}>
+                  <h3 className={sectionTitle}>抽查明细</h3>
+                  <p className={sectionHint}>看某一天销售额最高的前 100 条，用来核对数字是否合理。</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <input className={`${inputClass} w-auto`} type="date" value={date || data.sampleDate || ''} onChange={event => setDate(event.target.value)} />
+                    <button className={primaryClass} disabled={busy} onClick={() => void load(date || data.sampleDate || '')}>查询</button>
+                  </div>
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-[11px] uppercase tracking-wide text-slate-400">
+                        <tr><th className="py-2 pr-3 font-medium">店铺</th><th className="py-2 pr-3 font-medium">ASIN</th><th className="py-2 pr-3 font-medium">品名</th><th className="py-2 pr-3 font-medium text-right">销售额</th><th className="py-2 pr-3 font-medium text-right">毛利</th><th className="py-2 font-medium text-right">广告花费</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {data.data.map(row => (
+                          <tr key={`${row.date}|${row.sid}|${row.asin}`} className="text-slate-700">
+                            <td className="py-2.5 pr-3">{row.shop_name}</td>
+                            <td className="py-2.5 pr-3 font-mono text-[11px]">{row.asin}</td>
+                            <td className="max-w-[240px] truncate py-2.5 pr-3">{row.product_name}</td>
+                            <td className="py-2.5 pr-3 text-right font-mono">{Number(row.sales_amount).toFixed(2)}</td>
+                            <td className="py-2.5 pr-3 text-right font-mono">{Number(row.gross_profit).toFixed(2)}</td>
+                            <td className="py-2.5 text-right font-mono">{Number(row.ad_spend).toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {!data.data.length && <p className="py-6 text-center text-xs text-slate-400">这一天没有明细</p>}
+                  </div>
+                </section>
+
+                <section className={cardClass}>
+                  <h3 className={sectionTitle}>下载每日明细</h3>
+                  <p className={sectionHint}>列名与《项目业绩》表一致；列名可在「字段映射」里改。CSV 支持任意长度区间，Excel 单次最多 92 天。</p>
+                  <div className="mt-4 inline-flex rounded-xl bg-slate-100 p-0.5 text-xs">
+                    {([['day', '单日'], ['range', '时间段']] as const).map(([mode, label]) => (
+                      <button key={mode} type="button" onClick={() => setExportMode(mode)} className={`rounded-lg px-3 py-1.5 font-medium transition ${exportMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <input className={`${inputClass} w-auto`} type="date" value={exportFrom} onChange={event => setExportFrom(event.target.value)} aria-label={exportMode === 'day' ? '下载日期' : '下载起始日期'} />
+                    {exportMode === 'range' && <><span className="text-xs text-slate-400">至</span><input className={`${inputClass} w-auto`} type="date" value={exportTo} onChange={event => setExportTo(event.target.value)} aria-label="下载结束日期" /></>}
+                    <button className={primaryClass} disabled={busy} onClick={() => void downloadDaily('csv')}><Download className="h-3.5 w-3.5" />CSV</button>
+                    <button className={ghostClass} disabled={busy} onClick={() => void downloadDaily('xlsx')}><Download className="h-3.5 w-3.5" />Excel</button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {([['昨天', 1], ['近7天', 7], ['近30天', 30], ['全部（2025-01-01 起）', 0]] as const).map(([label, nights]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        className="rounded-lg px-2 py-1 text-[11px] text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                        onClick={() => {
+                          const end = new Date();
+                          end.setDate(end.getDate() - (nights === 1 ? 1 : 0));
+                          const start = new Date(end);
+                          if (nights === 0) {
+                            setExportFrom('2025-01-01');
+                            setExportTo(localDate(end));
+                            setExportMode('range');
+                          } else if (nights === 1) {
+                            setExportFrom(localDate(end));
+                            setExportMode('day');
+                          } else {
+                            start.setDate(end.getDate() - (nights - 1));
+                            setExportFrom(localDate(start));
+                            setExportTo(localDate(end));
+                            setExportMode('range');
+                          }
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>}
+
+            </>}
+          </div>
+        </>}
+      </div>
     </div>
-  </div>;
+  );
 };

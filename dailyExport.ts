@@ -105,8 +105,16 @@ function csvCell(value: unknown, numeric: boolean): string {
   return text;
 }
 
-export function dailyCsvHeader(): string {
-  return DAILY_EXPORT_COLUMNS.map(([, title]) => csvCell(title, false)).join(',') + '\r\n';
+/** 云端字段映射里的下载列名覆盖：{ 列 key → 显示名 } */
+export type ExportLabels = Record<string, string>;
+
+const labelOf = (key: string, fallback: string, labels?: ExportLabels) => {
+  const custom = labels?.[key]?.trim();
+  return custom || fallback;
+};
+
+export function dailyCsvHeader(labels?: ExportLabels): string {
+  return DAILY_EXPORT_COLUMNS.map(([key, title]) => csvCell(labelOf(key, title, labels), false)).join(',') + '\r\n';
 }
 
 export function dailyCsvRows(rows: Record<string, unknown>[]): string {
@@ -114,8 +122,8 @@ export function dailyCsvRows(rows: Record<string, unknown>[]): string {
 }
 
 /** Excel 用：返回「表头 + 数据」的二维数组，数值保持 number，比率保持数值（Excel 里可直接算） */
-export function dailyExportMatrix(rows: Record<string, unknown>[]): unknown[][] {
-  const header = DAILY_EXPORT_COLUMNS.map(([, title]) => title);
+export function dailyExportMatrix(rows: Record<string, unknown>[], labels?: ExportLabels): unknown[][] {
+  const header = DAILY_EXPORT_COLUMNS.map(([key, title]) => labelOf(key, title, labels));
   const body = rows.map((row) => DAILY_EXPORT_COLUMNS.map(([key]) => {
     const value = field(row, key);
     if (value === '' || value === null || value === undefined) return '';

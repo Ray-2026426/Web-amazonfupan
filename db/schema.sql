@@ -223,31 +223,34 @@ create table if not exists sync_settings (
 );
 insert into sync_settings (id) values (1) on conflict (id) do nothing;
 
-create table if not exists cost_asin_rules (
-    sid text not null,
-    local_sku text not null,
-    asin text not null,
-    updated_at timestamptz not null default now(),
-    primary key (sid, local_sku)
+-- 字段映射：web 字段 ← 领星字段路径。
+-- 领星返回的字段名会变（例如品名从 item_name 改成 price_list[].local_name），
+-- 把「取哪个字段」做成配置，改配置即可，不用发版。export_label 是下载表格里的列名。
+create table if not exists field_mappings (
+    web_field text primary key,
+    export_label text not null,
+    lingxing_field text not null,
+    updated_at timestamptz not null default now()
 );
+insert into field_mappings (web_field, export_label, lingxing_field) values
+    ('asin',         'ASIN',       'asin'),
+    ('parent_asin',  '父ASIN',     'parent_asins[].parent_asin'),
+    ('shop_name',    '店铺',       'seller_store_countries[].seller_name'),
+    ('country',      '国家',       'seller_store_countries[].country'),
+    ('manager',      '负责人',     'principal_names[]'),
+    ('product_name', '品名',       'price_list[].local_name@max(volume)'),
+    ('sub_category', '二级分类',   'categories[]@level(2)'),
+    ('brand',        '品牌',       'brands[]')
+on conflict (web_field) do nothing;
 
-create table if not exists product_overrides (
-    sid text not null,
-    asin text not null,
-    brand text,
-    manager text,
-    sub_category text,
-    parent_asin text,
-    product_name text,
-    updated_at timestamptz not null default now(),
-    primary key (sid, asin)
-);
+-- 成本匹配 / 逐产品字段覆盖已下线：前者用不上，后者由上面的字段映射取代。
+drop table if exists cost_asin_rules;
+drop table if exists product_overrides;
 
 alter table sync_settings enable row level security;
-alter table cost_asin_rules enable row level security;
-alter table product_overrides enable row level security;
-revoke all on table sync_settings, cost_asin_rules, product_overrides from anon, authenticated;
-grant select, insert, update, delete on table sync_settings, cost_asin_rules, product_overrides to service_role;
+alter table field_mappings enable row level security;
+revoke all on table sync_settings, field_mappings from anon, authenticated;
+grant select, insert, update, delete on table sync_settings, field_mappings to service_role;
 
 -- 目标表按上传批次保存。新批次上传完并校验行数后才切换为生效版本，
 -- 避免上传中断时看板读到半份目标。

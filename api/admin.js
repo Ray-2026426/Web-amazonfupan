@@ -7,7 +7,18 @@ const clean = (value, label, max = 100) => {
   return text;
 };
 
-const productFields = ['brand', 'manager', 'sub_category', 'parent_asin', 'product_name'];
+/** 可配置映射的字段：web 内部字段 → 下载列名 + 领星取值路径 */
+const FIELD_KEYS = ['asin', 'parent_asin', 'shop_name', 'country', 'manager', 'product_name', 'sub_category', 'brand'];
+const DEFAULT_FIELD_MAPPINGS = {
+  asin: { export_label: 'ASIN', lingxing_field: 'asin' },
+  parent_asin: { export_label: '父ASIN', lingxing_field: 'parent_asins[].parent_asin' },
+  shop_name: { export_label: '店铺', lingxing_field: 'seller_store_countries[].seller_name' },
+  country: { export_label: '国家', lingxing_field: 'seller_store_countries[].country' },
+  manager: { export_label: '负责人', lingxing_field: 'principal_names[]' },
+  product_name: { export_label: '品名', lingxing_field: 'price_list[].local_name@max(volume)' },
+  sub_category: { export_label: '二级分类', lingxing_field: 'categories[]@level(2)' },
+  brand: { export_label: '品牌', lingxing_field: 'brands[]' },
+};
 const targetTextFields = ['brand', 'country', 'shop_name', 'manager', 'sub_category', 'parent_asin', 'child_asin', 'product_name'];
 const targetNumberFields = ['sales_quantity_target', 'sales_amount_target', 'gross_profit_target', 'gross_margin_target', 'ad_spend_target'];
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -37,31 +48,22 @@ async function save(body) {
       await writeTable('sync_settings', 'PATCH', { enabled: body.enabled, lookback_days: body.lookback_days, updated_at: now }, { id: 'eq.1' });
       return;
     }
-    case 'cost_rule': {
-      const sid = clean(body.sid, '店铺 ID');
-      const local_sku = clean(body.local_sku, '本地 SKU', 200);
-      const asin = clean(body.asin, '目标 ASIN', 40).toUpperCase();
-      await writeTable('cost_asin_rules', 'POST', { sid, local_sku, asin, updated_at: now }, { on_conflict: 'sid,local_sku' }, true);
+    case 'field_mapping': {
+      const webField = String(body.web_field || '');
+      if (!FIELD_KEYS.includes(webField)) throw Object.assign(new Error('未知字段'), { status: 400 });
+      const export_label = clean(body.export_label, '下载字段名', 40);
+      const lingxing_field = clean(body.lingxing_field, '领星字段名', 200);
+      await writeTable('field_mappings', 'POST', { web_field: webField, export_label, lingxing_field, updated_at: now }, { on_conflict: 'web_field' }, true);
       return;
     }
-    case 'delete_cost_rule': {
-      const sid = clean(body.sid, '店铺 ID');
-      const local_sku = clean(body.local_sku, '本地 SKU', 200);
-      await writeTable('cost_asin_rules', 'DELETE', undefined, { sid: `eq.${sid}`, local_sku: `eq.${local_sku}` });
-      return;
-    }
-    case 'product_override': {
-      const row = { sid: clean(body.sid, '店铺 ID'), asin: clean(body.asin, 'ASIN', 40).toUpperCase(), updated_at: now };
-      for (const field of productFields) row[field] = body[field] == null || String(body[field]).trim() === '' ? null : clean(body[field], field, 200);
-      if (productFields.every((field) => row[field] === null)) throw Object.assign(new Error('至少填写一个要覆盖的字段'), { status: 400 });
-      await writeTable('product_overrides', 'POST', row, { on_conflict: 'sid,asin' }, true);
-      return;
-    }
-    case 'delete_product_override': {
-      const sid = clean(body.sid, '店铺 ID');
-      const asin = clean(body.asin, 'ASIN', 40).toUpperCase();
-      await writeTable('product_overrides', 'DELETE', undefined, { sid: `eq.${sid}`, asin: `eq.${asin}` });
-      return;
+    case 'field_mapping_reset': {
+      const requested = body.web_field ? [String(body.web_field)] : FIELD_KEYS;
+      for (const webField of requested) {
+        const preset = DEFAULT_FIELD_MAPPINGS[webField];
+        if (!preset) throw Object.assign(new Error('未知字段'), { status: 400 });
+        await writeTable('field_mappings', 'POST', { web_field: webField, ...preset, updated_at: now }, { on_conflict: 'web_field' }, true);
+      }
+      return { reset: requested.length };
     }
     case 'targets_start': {
       const expectedRows = Number(body.expected_rows);
@@ -111,20 +113,26 @@ export default async function handler(req, res) {
       const url = new URL(req.url || '/', 'https://localhost');
       const date = url.searchParams.get('date');
       if (date && !isValidDate(date)) return res.status(400).json({ error: 'invalid_date' });
-      const [settings, costRules, productOverrides, runs, latest, targetImports] = await Promise.all([
+      // 映射表可能还没建（用户尚未执行最新 schema）：这时回退到内置默认值，
+      // 面板照常打开，但会带 fieldMappingReady=false 让前端提示先建表。
+      const mappingsResult = await fetchTable('field_mappings', { select: 'web_field,export_label,lingxing_field' }, 100)
+        .then((rows) => ({ rows, ready: true }))
+        .catch(() => ({ rows: [], ready: false }));
+      const [settings, runs, latest, targetImports] = await Promise.all([
         fetchTable('sync_settings', { select: '*', id: 'eq.1' }, 1),
-        fetchTable('cost_asin_rules', { select: '*', order: 'updated_at.desc' }, 1000),
-        fetchTable('product_overrides', { select: '*', order: 'updated_at.desc' }, 1000),
         fetchTable('sync_runs', { select: '*', order: 'started_at.desc' }, 10),
         fetchTable('fact_daily', { select: 'date', order: 'date.desc' }, 1),
         fetchTable('target_imports', { select: 'id,source_filename,expected_rows,activated_at', active: 'eq.true' }, 1),
       ]);
+      const fieldMappings = mappingsResult.ready
+        ? mappingsResult.rows
+        : Object.entries(DEFAULT_FIELD_MAPPINGS).map(([web_field, preset]) => ({ web_field, ...preset }));
       const sampleDate = date || latest[0]?.date;
       const data = sampleDate ? await fetchTable('fact_daily', {
         select: 'date,sid,asin,shop_name,product_name,sales_amount,gross_profit,ad_spend',
         date: `eq.${sampleDate}`, order: 'sales_amount.desc',
       }, 100) : [];
-      return res.status(200).json({ settings: settings[0] || null, costRules, productOverrides, runs, sampleDate, data, targetImport: targetImports[0] || null });
+      return res.status(200).json({ settings: settings[0] || null, fieldMappings, fieldMappingReady: mappingsResult.ready, runs, sampleDate, data, targetImport: targetImports[0] || null });
     }
     if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;

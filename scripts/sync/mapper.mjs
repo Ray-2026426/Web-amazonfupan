@@ -45,6 +45,100 @@ function shopMeta(shop, row) {
     };
 }
 
+/* ------------------------------------------------------------------ *
+ * 字段映射：web 字段 ← 领星字段路径
+ *
+ * 领星 MCP 返回的字段名会变（例如品名从 item_name 改成 price_list[].local_name），
+ * 所以「取哪个字段」做成云端可配置的映射表，改配置即可，不用发版。
+ *
+ * 路径语法：
+ *   brands[]                    数组里第一个非空元素
+ *   parent_asins[].parent_asin  数组里第一个非空的子字段
+ *   seller_store_countries[0].country  指定下标
+ *   categories[]@level(2)       取到值后按分隔符切分并取第 2 段（二级分类）
+ *   price_list[].local_name@max(volume)  取 volume 最大的那个元素的 local_name
+ * ------------------------------------------------------------------ */
+
+export const DEFAULT_FIELD_PATHS = {
+    asin: 'asin',
+    parent_asin: 'parent_asins[].parent_asin',
+    shop_name: 'seller_store_countries[].seller_name',
+    country: 'seller_store_countries[].country',
+    manager: 'principal_names[]',
+    product_name: 'price_list[].local_name@max(volume)',
+    sub_category: 'categories[]@level(2)',
+    brand: 'brands[]',
+};
+
+const PATH_RE = /^([A-Za-z0-9_]+)(?:\[(\d*)\])?(?:\.([A-Za-z0-9_]+))?$/;
+
+function toText(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'object') return String(value.name ?? value.value ?? '').trim();
+    return String(value).trim();
+}
+
+/** 按映射路径从领星行里取值；取不到返回 ''，由调用方决定回落值 */
+export function resolveField(row, path) {
+    if (!row || !path) return '';
+    let raw = String(path).trim();
+    let transform = '';
+    const at = raw.indexOf('@');
+    if (at > 0) {
+        transform = raw.slice(at + 1);
+        raw = raw.slice(0, at);
+    }
+    const match = PATH_RE.exec(raw);
+    if (!match) return '';
+
+    const [, key, index, sub] = match;
+    const read = (item) => {
+        if (!sub) return toText(item);
+        const value = sub.split('.').reduce((acc, part) => (acc == null ? undefined : acc[part]), item);
+        return toText(value);
+    };
+
+    let value = '';
+    const field = row[key];
+    if (index === undefined) {
+        value = read(field);
+    } else if (Array.isArray(field)) {
+        if (index === '') {
+            const maxMatch = /^max\(([A-Za-z0-9_]+)\)$/.exec(transform);
+            if (maxMatch) {
+                const best = field.reduce((a, b) => (num(b?.[maxMatch[1]]) > num(a?.[maxMatch[1]]) ? b : a), field[0]);
+                value = read(best);
+            } else {
+                for (const item of field) {
+                    const candidate = read(item);
+                    if (candidate) { value = candidate; break; }
+                }
+            }
+        } else {
+            value = read(field[Number(index)]);
+        }
+    }
+
+    const levelMatch = /^level\((\d+)\)$/.exec(transform);
+    if (levelMatch && value) {
+        const parts = String(value).split(/[\\:>/|]/).map((s) => s.trim()).filter(Boolean);
+        value = parts[Number(levelMatch[1]) - 1] || parts[0] || '';
+    }
+    return value;
+}
+
+/** 映射表（Map 或普通对象）合并到默认值，缺项回落到默认路径 */
+function normalizeFieldMap(fieldMap) {
+    if (!fieldMap) return DEFAULT_FIELD_PATHS;
+    const entries = fieldMap instanceof Map ? [...fieldMap.entries()] : Object.entries(fieldMap);
+    const result = { ...DEFAULT_FIELD_PATHS };
+    for (const [key, value] of entries) {
+        if (typeof value === 'string' && value.trim()) result[key] = value.trim();
+    }
+    return result;
+}
+
 const EMPTY_COST = {
     refund_amount: 0,
     gross_profit: 0,
@@ -62,6 +156,13 @@ export function isActiveRow(row) {
     return ACTIVE_FIELDS.some((k) => num(row[k]) !== 0);
 }
 
+/** 旧的品名取值逻辑，作为映射解析不到时的兜底 */
+function legacyProductName(row) {
+    const prices = row.price_list || [];
+    const best = prices.reduce((a, b) => (num(b?.volume) > num(a?.volume) ? b : a), prices[0]);
+    return best?.local_name || prices.find((p) => p?.local_name)?.local_name || row.local_name || '';
+}
+
 /**
  * 单行转换。
  * @param {object} args
@@ -69,30 +170,29 @@ export function isActiveRow(row) {
  * @param {object} args.row    query_product_performance_asin_lists 的一行
  * @param {object} [args.cost] 同一 (sid, asin) 的成本（来自订单利润归并）
  * @param {string} args.date   YYYY-MM-DD
+ * @param {Map<string,string>|object} [args.fieldMap] 云端字段映射（web 字段 → 领星字段路径）
  */
-export function toDataRow({ shop, row, cost, date, override }) {
+export function toDataRow({ shop, row, cost, date, fieldMap }) {
     const meta = shopMeta(shop, row);
     const c = cost || EMPTY_COST;
-    const asin = row.asin || '-';
+    const paths = normalizeFieldMap(fieldMap);
+    const pick = (field, fallback = '') => resolveField(row, paths[field]) || fallback;
+    const asin = pick('asin') || '-';
     const data = {
         id: `${meta.sid}|${asin}|${date}`,
         date,
         /** 数据库主键用的两个维度（DataRow 本身不需要，但入库需要） */
         sid: meta.sid,
         asin,
-        country: meta.country,
-        shop_name: meta.shop_name,
-        brand: (row.brands || [])[0] || '',
-        manager: (row.principal_names || [])[0] || '',
-        sub_category: categoryLevel2(row.categories),
-        parent_asin: (row.parent_asins || [])[0]?.parent_asin || row.parent_asin || '',
+        country: pick('country', meta.country),
+        shop_name: pick('shop_name', meta.shop_name),
+        brand: pick('brand'),
+        manager: pick('manager'),
+        sub_category: pick('sub_category') || categoryLevel2(row.categories),
+        parent_asin: pick('parent_asin') || row.parent_asin || '',
         child_asin: asin,
-        // 领星 item_name 是 Amazon 标题，不是内部品名。品名在 price_list[].local_name。
-        product_name: (() => {
-            const prices = row.price_list || [];
-            const best = prices.reduce((a, b) => num(b?.volume) > num(a?.volume) ? b : a, prices[0]);
-            return best?.local_name || prices.find((p) => p?.local_name)?.local_name || row.local_name || '';
-        })(),
+        // 领星 item_name 是 Amazon 标题，不是内部品名。品名默认取 price_list 里销量最大的 local_name。
+        product_name: pick('product_name') || legacyProductName(row),
 
         sales_quantity: num(row.volume),
         order_quantity: num(row.order_items),
@@ -128,20 +228,16 @@ export function toDataRow({ shop, row, cost, date, override }) {
         rating: num(row.avg_star),
         review_count: num(row.reviews_count),
     };
-    for (const field of ['brand', 'manager', 'sub_category', 'parent_asin', 'product_name']) {
-        if (override?.[field] !== null && override?.[field] !== undefined) data[field] = override[field];
-    }
     return data;
 }
 
 /** 订单利润行（msku 粒度）→ key `${sid}|${asin}` → 累加成本 */
-export function mergeOrderProfit(opRows, { firstMileField = 'logistics_costs', asinRules = new Map() } = {}) {
+export function mergeOrderProfit(opRows, { firstMileField = 'logistics_costs' } = {}) {
     const map = new Map();
     for (const r of opRows || []) {
         const pl = (r.price_list || [])[0] || {};
         const sid = String((r.sids || [])[0] ?? pl.sid ?? '');
-        const localSku = String(pl.local_sku || pl.seller_sku || r.msku || '');
-        const asin = asinRules.get(`${sid}|${localSku}`) || pl.asin;
+        const asin = pl.asin;
         if (!asin || !sid) continue;
         const key = `${sid}|${asin}`;
         const cur = map.get(key) || { ...EMPTY_COST };
