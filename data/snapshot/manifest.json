@@ -1,24 +1,23 @@
 {
   "dates": [
-    "2026-10-21"
+    "2026-10-21",
+    "2026-10-23"
   ],
   "lastRun": {
-    "at": "2026-10-22T13:04:55.997Z",
+    "at": "2026-10-24T04:34:34.879Z",
     "range": {
-      "from": "2026-10-21",
-      "to": "2026-10-21"
+      "from": "2026-10-23",
+      "to": "2026-10-23"
     },
     "days": 1,
-    "rowsAdded": 974,
-    "rowsTotal": 974,
-    "bytes": 2580041,
-    "costMatchRate": 0.786,
+    "rowsAdded": 888,
+    "rowsTotal": 888,
+    "bytes": 2349528,
+    "costMatchRate": 0.779,
     "failedShopCalls": 0,
-    "warnings": [
-      "负毛利行占比 45%，请核对成本口径"
-    ],
+    "warnings": [],
     "mcpCalls": 115,
-    "durationMs": 363897
+    "durationMs": 386970
   },
   "currency": "USD"
 }
