@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { parseTargetData } from '../dataLoader';
 import { enrichTargetData } from '../utils';
-import { dailyCsvHeader, dailyCsvRows } from '../dailyExport';
+import { dailyCsvHeader, dailyCsvRows, dailyExportMatrix } from '../dailyExport';
 
 type CostRule = { sid: string; local_sku: string; asin: string };
 type ProductRule = { sid: string; asin: string; brand: string | null; manager: string | null; sub_category: string | null; parent_asin: string | null; product_name: string | null };
@@ -34,6 +34,18 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   const [progress, setProgress] = useState('');
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
+  /** 单日 / 时间段 */
+  const [exportMode, setExportMode] = useState<'day' | 'range'>('range');
+
+  /** 本地日期 YYYY-MM-DD（不能用 toISOString，会因时区差一天） */
+  const localDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  useEffect(() => {
+    if (exportFrom) return;
+    const today = localDate(new Date());
+    setExportFrom(today);
+    setExportTo(today);
+  }, [exportFrom]);
 
   const request = async (method: 'GET' | 'POST', body?: object, requestedDate = date) => {
     const response = await fetch(`/api/admin${method === 'GET' && requestedDate ? `?date=${encodeURIComponent(requestedDate)}` : ''}`, {
@@ -124,41 +136,87 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
     }
   };
 
-  const downloadDaily = async () => {
-    if (!exportFrom || !exportTo || exportFrom > exportTo) {
-      setMessage('请先选择有效的下载日期范围');
+  /** 服务端单次最多 31 天，按 31 天窗口切片后逐段拉取 */
+  const buildChunks = (from: string, to: string) => {
+    const chunks: { from: string; to: string }[] = [];
+    let cursor = new Date(`${from}T00:00:00`);
+    const end = new Date(`${to}T00:00:00`);
+    while (cursor.getTime() <= end.getTime()) {
+      const chunkEnd = new Date(cursor);
+      chunkEnd.setDate(chunkEnd.getDate() + 30);
+      if (chunkEnd.getTime() > end.getTime()) chunkEnd.setTime(end.getTime());
+      chunks.push({ from: localDate(cursor), to: localDate(chunkEnd) });
+      cursor = new Date(chunkEnd);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return chunks;
+  };
+
+  const fetchRangeRows = async (from: string, to: string) => {
+    const rows: Record<string, unknown>[] = [];
+    let offset = 0;
+    for (let page = 0; page < 501; page++) {
+      const response = await fetch(`/api/export?from=${from}&to=${to}&offset=${offset}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || `下载失败：${response.status}`);
+      rows.push(...(result.rows as Record<string, unknown>[]));
+      if (result.nextOffset === null) return rows;
+      offset = result.nextOffset;
+    }
+    throw new Error('单段数据量超过下载上限，请缩短日期范围');
+  };
+
+  const downloadDaily = async (format: 'csv' | 'xlsx') => {
+    const from = exportFrom;
+    const to = exportMode === 'day' ? exportFrom : exportTo;
+    if (!from || !to || from > to) {
+      setMessage('请先选择有效的下载日期');
       return;
     }
-    const days = (Date.parse(`${exportTo}T00:00:00Z`) - Date.parse(`${exportFrom}T00:00:00Z`)) / 86400000 + 1;
-    if (days > 31) { setMessage('每次最多下载连续 31 天，请分月下载'); return; }
+    const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000 + 1;
+    if (format === 'xlsx' && days > 92) {
+      setMessage('Excel 单次最多 92 天（约 8 万行）；更长的区间请用 CSV');
+      return;
+    }
     setBusy(true);
     setMessage('');
     setProgress('正在准备每日明细…');
     try {
-      const parts: BlobPart[] = ['\uFEFF', dailyCsvHeader()];
-      let offset = 0;
-      let count = 0;
-      for (let page = 0; page < 101; page++) {
-        const response = await fetch(`/api/export?from=${exportFrom}&to=${exportTo}&offset=${offset}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result.message || `下载失败：${response.status}`);
-        const rows = result.rows as Record<string, unknown>[];
-        parts.push(dailyCsvRows(rows));
-        count += rows.length;
-        setProgress(`已读取 ${count} 行…`);
-        if (result.nextOffset === null) break;
-        offset = result.nextOffset;
-        if (page === 100) throw new Error('数据量超过下载上限，请缩短日期范围');
+      const chunks = buildChunks(from, to);
+      const fileBase = days === 1 ? `亚马逊每日业绩_${from}` : `亚马逊每日业绩_${from}_${to}`;
+
+      if (format === 'csv') {
+        const parts: BlobPart[] = ['\uFEFF', dailyCsvHeader()];
+        let count = 0;
+        for (let i = 0; i < chunks.length; i++) {
+          const rows = await fetchRangeRows(chunks[i].from, chunks[i].to);
+          parts.push(dailyCsvRows(rows));
+          count += rows.length;
+          setProgress(`已读取 ${count} 行（第 ${i + 1}/${chunks.length} 段）…`);
+        }
+        const url = URL.createObjectURL(new Blob(parts, { type: 'text/csv;charset=utf-8' }));
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `${fileBase}.csv`;
+        anchor.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setMessage(`已下载 ${count} 行每日明细（共 ${days} 天）。`);
+      } else {
+        const all: Record<string, unknown>[] = [];
+        for (let i = 0; i < chunks.length; i++) {
+          const rows = await fetchRangeRows(chunks[i].from, chunks[i].to);
+          all.push(...rows);
+          setProgress(`已读取 ${all.length} 行（第 ${i + 1}/${chunks.length} 段）…`);
+        }
+        const XLSX = await import('xlsx');
+        const worksheet = XLSX.utils.aoa_to_sheet(dailyExportMatrix(all));
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, '每日明细');
+        XLSX.writeFile(workbook, `${fileBase}.xlsx`);
+        setMessage(`已下载 ${all.length} 行每日明细（共 ${days} 天）。`);
       }
-      const url = URL.createObjectURL(new Blob(parts, { type: 'text/csv;charset=utf-8' }));
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `亚马逊每日业绩_${exportFrom}_${exportTo}.csv`;
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setMessage(`已下载 ${count} 行每日明细。`);
     } catch (error) {
       setMessage(String(error instanceof Error ? error.message : error));
     } finally {
@@ -223,7 +281,56 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
             </div>}
             {tab === 'data' && <div className="space-y-3"><p className="text-slate-600">抽查某一天销售额最高的前 100 条明细。数值异常时，先改匹配规则，再重跑对应日期。</p><div className="flex gap-2"><input className={fieldClass} type="date" value={date || data.sampleDate || ''} onChange={e => setDate(e.target.value)} /><button className={actionClass} disabled={busy} onClick={() => load(date || data.sampleDate || '')}>查询</button></div><p>当前日期：{data.sampleDate || '暂无数据'}</p>
               <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="border-b"><th className="p-2">店铺</th><th className="p-2">ASIN</th><th className="p-2">产品</th><th className="p-2">销售额</th><th className="p-2">毛利</th><th className="p-2">广告花费</th></tr></thead><tbody>{data.data.map(row => <tr key={`${row.date}|${row.sid}|${row.asin}`} className="border-b"><td className="p-2">{row.shop_name}</td><td className="p-2">{row.asin}</td><td className="p-2">{row.product_name}</td><td className="p-2">{Number(row.sales_amount).toFixed(2)}</td><td className="p-2">{Number(row.gross_profit).toFixed(2)}</td><td className="p-2">{Number(row.ad_spend).toFixed(2)}</td></tr>)}</tbody></table></div>
-              <div className="rounded-xl border border-slate-200 p-4"><h3 className="font-bold">下载每日明细</h3><p className="my-2 text-xs text-slate-500">按日期范围下载 CSV，可直接用 Excel 打开；每次最多 31 天。</p><div className="flex flex-wrap items-center gap-2"><input className={fieldClass} style={{ width: 'auto' }} type="date" value={exportFrom} onChange={event => setExportFrom(event.target.value)} aria-label="下载起始日期" /><span>至</span><input className={fieldClass} style={{ width: 'auto' }} type="date" value={exportTo} onChange={event => setExportTo(event.target.value)} aria-label="下载结束日期" /><button className={actionClass} disabled={busy} onClick={() => void downloadDaily()}>下载 CSV</button></div></div>
+              <div className="rounded-xl border border-slate-200 p-4">
+                <h3 className="font-bold">下载每日明细</h3>
+                <p className="my-2 text-xs text-slate-500">列名与《项目业绩》表一致（日期/年份/月份 + 47 个业务字段）；可选某一天或任意区间。</p>
+                <div className="mb-2 inline-flex rounded-lg border border-slate-200 p-0.5 text-xs">
+                  {([['day', '单日'], ['range', '时间段']] as const).map(([mode, label]) => (
+                    <button key={mode} type="button" onClick={() => setExportMode(mode)} className={`rounded px-3 py-1 ${exportMode === mode ? 'bg-sky-100 font-bold text-sky-800' : 'text-slate-600'}`}>{label}</button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input className={fieldClass} style={{ width: 'auto' }} type="date" value={exportFrom} onChange={event => setExportFrom(event.target.value)} aria-label={exportMode === 'day' ? '下载日期' : '下载起始日期'} />
+                  {exportMode === 'range' && <><span>至</span><input className={fieldClass} style={{ width: 'auto' }} type="date" value={exportTo} onChange={event => setExportTo(event.target.value)} aria-label="下载结束日期" /></>}
+                  <button className={actionClass} disabled={busy} onClick={() => void downloadDaily('csv')}>下载 CSV</button>
+                  <button className={smallClass} disabled={busy} onClick={() => void downloadDaily('xlsx')}>下载 Excel</button>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+                  {([
+                    ['昨天', 1],
+                    ['近7天', 7],
+                    ['近30天', 30],
+                    ['全部（2025-01-01 起）', 0],
+                  ] as const).map(([label, days]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className={smallClass}
+                      onClick={() => {
+                        const end = new Date();
+                        end.setDate(end.getDate() - (days === 1 ? 1 : 0));
+                        const start = new Date(end);
+                        if (days === 0) {
+                          setExportFrom('2025-01-01');
+                          setExportTo(localDate(end));
+                          setExportMode('range');
+                        } else if (days === 1) {
+                          setExportFrom(localDate(end));
+                          setExportMode('day');
+                        } else {
+                          start.setDate(end.getDate() - (days - 1));
+                          setExportFrom(localDate(start));
+                          setExportTo(localDate(end));
+                          setExportMode('range');
+                        }
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-slate-500">CSV 支持任意长度区间（按 31 天分段拉取）；Excel 单次最多 92 天。</p>
+              </div>
             </div>}
           </>}
         </div>

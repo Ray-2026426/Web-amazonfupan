@@ -1,11 +1,12 @@
-import React, { useState, lazy, Suspense } from 'react';
-import { AggregatedData, DataRow, FilterState, TargetRow } from '../types';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { AggregatedData, DataRow, FilterState, TargetRow, PeriodMode } from '../types';
 import {
     formatNumber,
     formatPercent,
     formatMoneyNoDecimals,
     getPacingCompletionRatio,
     formatTargetGapPctPoints,
+    periodUnitLabel,
 } from '../utils';
 import { Activity, BadgeDollarSign, BarChart3, Goal, Megaphone, TrendingUp, X } from 'lucide-react';
 const MiniTrendChart = lazy(() => import('./MiniTrendChart').then(m => ({default: m.MiniTrendChart})));
@@ -14,7 +15,7 @@ import { METRICS } from '../utils/metrics';
 interface DashboardOverviewProps {
     current: AggregatedData;
     target: AggregatedData;
-    isWeeklyMode?: boolean;
+    periodMode?: PeriodMode;
     rawData?: DataRow[];
     filters?: FilterState;
     targetRows?: TargetRow[];
@@ -281,15 +282,21 @@ const WeeklyMetricCard = ({
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     current,
     target,
-    isWeeklyMode = false,
+    periodMode = 'month',
     rawData = [],
     filters,
     targetRows = [],
     pacingRatio = 1,
-}) => {
+}: DashboardOverviewProps) => {
+    const isWeeklyMode = periodMode === 'week';
+    const isDailyMode = periodMode === 'day';
     const [expandedMetric, setExpandedMetric] = useState<MetricCardKey | null>(null);
-    /** 趋势面板的期数范围：6 / 12 / 0=全部 */
-    const [trendRange, setTrendRange] = useState<number>(12);
+    /** 趋势面板的期数范围：默认近 12 期，日度默认近 30 天 */
+    const [trendRange, setTrendRange] = useState<number>(isDailyMode ? 30 : 12);
+    /** 切粒度时把期数重置成该粒度合理的默认值，避免「近12天」这种别扭组合 */
+    useEffect(() => {
+        setTrendRange(isDailyMode ? 30 : 12);
+    }, [periodMode]);
 
     const handleCardClick = (key: MetricCardKey) => {
         setExpandedMetric(prev => (prev === key ? null : key));
@@ -315,7 +322,8 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     const renderTrendPanel = () => {
         if (!expandedMetric || !hasChartData) return null;
         const cfg = getMetricConfig(expandedMetric);
-        const rangeText = trendRange === 0 ? '全部' : `近${trendRange}${isWeeklyMode ? '周' : '个月'}`;
+        const rangeOptions: number[] = isDailyMode ? [7, 30, 0] : [6, 12, 0];
+        const rangeText = trendRange === 0 ? '全部' : `近${trendRange}${periodUnitLabel(periodMode)}`;
 
         return (
             <div className="rounded-3xl border border-sky-200/60 bg-white p-4 shadow-[0_20px_60px_-30px_rgba(14,165,233,0.2)] ring-1 ring-sky-100/80 sm:p-5">
@@ -323,13 +331,13 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                     <div className="flex min-w-0 items-center gap-2">
                         <TrendingUp className="h-4 w-4 shrink-0 text-sky-500" />
                         <span className="truncate text-sm font-bold text-slate-700">
-                            {isWeeklyMode ? `本周${cfg.label}` : `${cfg.label}`} 历史趋势
+                            {isDailyMode ? `当日${cfg.label}` : isWeeklyMode ? `本周${cfg.label}` : `${cfg.label}`} 历史趋势
                         </span>
                         <span className="whitespace-nowrap text-[10px] text-slate-400">（{rangeText}）</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="inline-flex rounded-md bg-slate-100 p-0.5">
-                            {([6, 12, 0] as const).map(n => (
+                            {rangeOptions.map(n => (
                                 <button
                                     key={n}
                                     type="button"
@@ -361,7 +369,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                     formatter={cfg.formatter}
                     isPercent={cfg.isPercent}
                     isMoney={cfg.isMoney}
-                    isWeekly={isWeeklyMode}
+                    periodMode={periodMode}
                     targetRows={targetRows}
                     targetKey={cfg.targetKey}
                     rangeCount={trendRange}

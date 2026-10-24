@@ -12,6 +12,7 @@
  * 细线、极淡网格、无点点、悬浮高亮、克制用色。
  */
 import { useEffect, useState } from 'react';
+import type { PeriodMode } from '../types';
 
 export type ChartTheme = {
     isDark: boolean;
@@ -210,15 +211,30 @@ export function formatDelta(current: number, previous: number | undefined | null
 
 const MONTH_KEY_RE = /^(\d{4})-(\d{2})$/;
 const WEEK_KEY_RE = /^(\d{4})-W(\d{2})$/;
+const DAY_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-/** 横轴短标签：月 → 25/03；周 → W15（跨年时补两位年份，如 26W01） */
-export function buildAxisTickLabels(keys: string[], isWeekly: boolean): Record<string, string> {
+const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+/** 横轴短标签：月 → 25/03；周 → W15（跨年补年份，如 26W01）；日 → 10/23（跨年补年份） */
+export function buildAxisTickLabels(keys: string[], mode: PeriodMode): Record<string, string> {
     const labels: Record<string, string> = {};
     let lastYear = '';
     keys.forEach(key => {
-        const m = isWeekly ? key.match(WEEK_KEY_RE) : key.match(MONTH_KEY_RE);
-        const year = m ? m[1].slice(2) : '';
-        if (isWeekly) {
+        const isDay = mode === 'day';
+        const isWeekly = mode === 'week';
+        const day = DAY_KEY_RE.exec(isDay ? key : '');
+        const m = isDay ? null : isWeekly ? key.match(WEEK_KEY_RE) : key.match(MONTH_KEY_RE);
+        const year = isDay ? (day ? day[1].slice(2) : '') : m ? m[1].slice(2) : '';
+        if (isDay) {
+            if (!day) {
+                labels[key] = key;
+            } else if (year !== lastYear) {
+                // 跨年时带上年份，避免同轴出现两个「10/23」无法区分
+                labels[key] = lastYear ? `${year}/${day[2]}/${day[3]}` : `${day[2]}/${day[3]}`;
+            } else {
+                labels[key] = `${day[2]}/${day[3]}`;
+            }
+        } else if (isWeekly) {
             labels[key] = year && year !== lastYear ? `${year}W${m?.[2] ?? ''}` : `W${m?.[2] ?? ''}`;
         } else {
             // 月：始终带两位年份，避免「1月」在同轴出现两次无法区分
@@ -229,11 +245,18 @@ export function buildAxisTickLabels(keys: string[], isWeekly: boolean): Record<s
     return labels;
 }
 
-/** 悬浮提示标题：月 → 2025年5月；周 → 2025 第15周（3/2–3/8） */
+/** 悬浮提示标题：日 → 2026年10月23日（周五）；月 → 2025年5月；周 → 2025 第15周（3/2–3/8） */
 export function formatPeriodLabel(
     key: string,
     weekRange?: (weekYear: number, week: number) => { start: Date; end: Date }
 ): { title: string; subtitle?: string } {
+    const d = DAY_KEY_RE.exec(key);
+    if (d) {
+        const date = new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]));
+        const title = `${d[1]}年${Number(d[2])}月${Number(d[3])}日`;
+        if (Number.isNaN(date.getTime())) return { title };
+        return { title, subtitle: WEEKDAY_NAMES[date.getDay()] };
+    }
     const m = key.match(MONTH_KEY_RE);
     if (m) return { title: `${m[1]}年${Number(m[2])}月` };
     const w = key.match(WEEK_KEY_RE);

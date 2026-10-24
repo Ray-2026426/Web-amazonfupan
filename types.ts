@@ -235,11 +235,21 @@ export interface AppMeta {
   lastImportedAt?: number;
 }
 
+/**
+ * 看板的时间粒度。
+ * - day：单日/多日，直接使用日粒度行（云端同步的 fact_daily）
+ * - week：按自然周（周日起算）聚合
+ * - month：按自然月聚合（本地月报的原始粒度）
+ */
+export type PeriodMode = 'day' | 'week' | 'month';
+
 export interface FilterSnapshot {
   id: string;
   name: string;
   filters: FilterState;
-  isWeeklyMode: boolean;
+  periodMode: PeriodMode;
+  /** 旧版快照字段，仅在读取历史数据时出现 */
+  isWeeklyMode?: boolean;
   createdAt: number; // timestamp ms
 }
 

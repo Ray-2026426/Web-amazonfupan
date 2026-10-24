@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { X, TrendingUp, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
-import { DataRow, TargetRow } from '../types';
+import { DataRow, TargetRow, PeriodMode } from '../types';
 import {
     aggregateData,
     formatMoney,
@@ -10,6 +10,8 @@ import {
     formatBusinessWeekFromDateStr,
     getBusinessWeekRangeFromYearWeek,
     allocateWeeklyTargetsLegacy,
+    periodKeyOf,
+    periodUnitLabel,
 } from '../utils';
 import {
     Bar,
@@ -65,8 +67,11 @@ interface TrendChartModalProps {
     onClose: () => void;
     rawMonthly: DataRow[];
     rawWeekly: DataRow[];
+    /** 日粒度行（仅云端同步提供），没有时「日」按钮置灰 */
+    rawDaily?: DataRow[];
     scope: TrendChartScope;
-    sidebarWeeklyMode: boolean;
+    /** 当前看板粒度，作为弹窗打开时的默认粒度 */
+    periodMode: PeriodMode;
     columns: TrendColumn[];
     targetRows?: TargetRow[];
 }
@@ -97,6 +102,7 @@ const METRIC_GROUPS: { key: 'result' | 'process' | 'target'; label: string }[] =
 ];
 
 const RANGE_OPTIONS = [6, 12, 0] as const;
+const DAILY_RANGE_OPTIONS = [7, 30, 0] as const;
 
 const weekKeysForMonth = (monthKey: string): string[] => {
     const [y, m] = monthKey.split('-').map(Number);
@@ -110,13 +116,13 @@ const weekKeysForMonth = (monthKey: string): string[] => {
     return Array.from(keys);
 };
 
-const rowPassesDimFilters = (row: DataRow, dimFilters: Record<string, string[]>, sidebarWeekly: boolean) => {
+const rowPassesDimFilters = (row: DataRow, dimFilters: Record<string, string[]>, mode: PeriodMode) => {
     return Object.entries(dimFilters).every(([dimKey, selectedVals]) => {
         const vals = selectedVals as string[];
         if (vals.length === 0) return true;
         let rowVal = '';
         if (dimKey === 'year_month') {
-            rowVal = sidebarWeekly ? formatBusinessWeekFromDateStr(row.date) : row.date.substring(0, 7);
+            rowVal = periodKeyOf(row.date, mode);
         } else {
             rowVal = String((row as any)[dimKey] ?? '');
         }
@@ -124,29 +130,33 @@ const rowPassesDimFilters = (row: DataRow, dimFilters: Record<string, string[]>,
     });
 };
 
-const compositeKeyForRow = (row: DataRow, selectedDimensions: string[], sidebarWeekly: boolean) =>
+const compositeKeyForRow = (row: DataRow, selectedDimensions: string[], mode: PeriodMode) =>
     selectedDimensions
         .map(d => {
-            if (d === 'year_month') return sidebarWeekly ? formatBusinessWeekFromDateStr(row.date) : row.date.substring(0, 7);
+            if (d === 'year_month') return periodKeyOf(row.date, mode);
             return String((row as any)[d] || 'Unknown');
         })
         .join('|||');
 
-const compositeKeyForTargetRow = (t: TargetRow, selectedDimensions: string[], sidebarWeekly: boolean) =>
+/** 目标行只有月粒度：月 → 当月；周/日 → 用月中那天折算到对应周/日键 */
+const periodKeyForTargetMonth = (month: string, mode: PeriodMode) =>
+    mode === 'month' ? month : periodKeyOf(`${month}-15`, mode);
+
+const compositeKeyForTargetRow = (t: TargetRow, selectedDimensions: string[], mode: PeriodMode) =>
     selectedDimensions
         .map(d => {
-            if (d === 'year_month') return sidebarWeekly ? formatBusinessWeekFromDateStr(`${t.month}-15`) : t.month;
+            if (d === 'year_month') return periodKeyForTargetMonth(t.month, mode);
             return String((t as any)[d] || 'Unknown');
         })
         .join('|||');
 
-const targetRowPassesDimFilters = (t: TargetRow, dimFilters: Record<string, string[]>, sidebarWeekly: boolean) =>
+const targetRowPassesDimFilters = (t: TargetRow, dimFilters: Record<string, string[]>, mode: PeriodMode) =>
     Object.entries(dimFilters).every(([dimKey, selectedVals]) => {
         const vals = selectedVals as string[];
         if (vals.length === 0) return true;
         let rowVal = '';
         if (dimKey === 'year_month') {
-            rowVal = sidebarWeekly ? formatBusinessWeekFromDateStr(`${t.month}-15`) : t.month;
+            rowVal = periodKeyForTargetMonth(t.month, mode);
         } else {
             rowVal = String((t as any)[dimKey] ?? '');
         }
@@ -163,15 +173,15 @@ const dimFiltersForTargets = (dimFilters: Record<string, string[]>): Record<stri
 const targetMatchesVisibleGroupLoose = (
     t: TargetRow,
     scope: Extract<TrendChartScope, { mode: 'total' }>,
-    sidebarWeekly: boolean
+    mode: PeriodMode
 ): boolean => {
     const dims = scope.selectedDimensions;
     const ymIdx = dims.indexOf('year_month');
     if (ymIdx < 0) {
-        const k = compositeKeyForTargetRow(t, dims, sidebarWeekly);
+        const k = compositeKeyForTargetRow(t, dims, mode);
         return scope.visibleGroupKeys.includes(k);
     }
-    const tParts = compositeKeyForTargetRow(t, dims, sidebarWeekly).split('|||');
+    const tParts = compositeKeyForTargetRow(t, dims, mode).split('|||');
     if (tParts.length !== dims.length) return false;
     return scope.visibleGroupKeys.some(vk => {
         const vParts = vk.split('|||');
@@ -191,14 +201,16 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
     onClose,
     rawMonthly,
     rawWeekly,
+    rawDaily = [],
     scope,
-    sidebarWeeklyMode,
+    periodMode,
     columns,
     targetRows = []
 }) => {
     const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
     const [mode, setMode] = useState<'single' | 'multi'>('single');
-    const [chartWeekly, setChartWeekly] = useState(false);
+    /** 弹窗内的粒度，可在日/周/月之间切换（不改变看板本身） */
+    const [chartMode, setChartMode] = useState<PeriodMode>(periodMode);
     const [metricGroup, setMetricGroup] = useState<'result' | 'process' | 'target'>('result');
     const [rangeCount, setRangeCount] = useState<number>(12);
     const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -222,10 +234,13 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
         wasTrendOpenRef.current = isOpen;
     }, [isOpen, columns]);
 
-    /** 弹窗打开期间跟随侧栏月/周切换 */
+    /** 弹窗打开期间跟随侧栏粒度切换 */
     useEffect(() => {
-        if (isOpen) setChartWeekly(sidebarWeeklyMode);
-    }, [isOpen, sidebarWeeklyMode]);
+        if (isOpen) {
+            setChartMode(periodMode);
+            setRangeCount(periodMode === 'day' ? 30 : 12);
+        }
+    }, [isOpen, periodMode]);
 
     const commitSelection = (next: string[]) => {
         setSelectedMetrics(next);
@@ -260,7 +275,7 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
         }
     };
 
-    const baseRaw = chartWeekly ? rawWeekly : rawMonthly;
+    const baseRaw = chartMode === 'day' ? rawDaily : chartMode === 'week' ? rawWeekly : rawMonthly;
 
     const chartData = useMemo(() => {
         if (!isOpen || !baseRaw || baseRaw.length === 0) return [];
@@ -277,15 +292,15 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
         } else {
             const keySet = new Set(scope.visibleGroupKeys);
             filteredData = baseRaw.filter(row => {
-                if (!rowPassesDimFilters(row, scope.dimFilters, sidebarWeeklyMode)) return false;
-                const k = compositeKeyForRow(row, scope.selectedDimensions, sidebarWeeklyMode);
+                if (!rowPassesDimFilters(row, scope.dimFilters, chartMode)) return false;
+                const k = compositeKeyForRow(row, scope.selectedDimensions, chartMode);
                 return keySet.has(k);
             });
         }
 
         const timeGroups: Record<string, DataRow[]> = {};
         filteredData.forEach(row => {
-            const timeKey = chartWeekly ? formatBusinessWeekFromDateStr(row.date) : row.date.substring(0, 7);
+            const timeKey = periodKeyOf(row.date, chartMode);
             if (!timeGroups[timeKey]) timeGroups[timeKey] = [];
             timeGroups[timeKey].push(row);
         });
@@ -303,11 +318,11 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
             const keySet = new Set(scope.visibleGroupKeys);
             const tgtDimFilters = dimFiltersForTargets(scope.dimFilters);
             filteredTargets = targetRows.filter(t => {
-                if (!targetRowPassesDimFilters(t, tgtDimFilters, sidebarWeeklyMode)) return false;
+                if (!targetRowPassesDimFilters(t, tgtDimFilters, chartMode)) return false;
                 if (scope.selectedDimensions.includes('year_month')) {
-                    return targetMatchesVisibleGroupLoose(t, scope, sidebarWeeklyMode);
+                    return targetMatchesVisibleGroupLoose(t, scope, chartMode);
                 }
-                const k = compositeKeyForTargetRow(t, scope.selectedDimensions, sidebarWeeklyMode);
+                const k = compositeKeyForTargetRow(t, scope.selectedDimensions, chartMode);
                 return keySet.has(k);
             });
         }
@@ -330,11 +345,12 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
         const allTimeKeys = new Set(Object.keys(timeGroups));
         if (extendAxisForTargets) {
             Object.keys(targetByMonth).forEach(monthKey => {
-                if (chartWeekly) {
+                if (chartMode === 'week') {
                     weekKeysForMonth(monthKey).forEach(wk => allTimeKeys.add(wk));
-                } else {
+                } else if (chartMode === 'month') {
                     allTimeKeys.add(monthKey);
                 }
+                // 日粒度不按月目标补横轴：一天一个点，把整月补进来会刷出几十个空点
             });
         }
 
@@ -355,9 +371,12 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
         });
 
         const withTargets = aggregated.map(row => {
-            const tg = chartWeekly
+            // 目标表是月粒度：只有月度图能直接对上；周度按天拆分；日度不画目标线（会误导成「当天目标」）
+            const tg = chartMode === 'week'
                 ? allocateWeeklyTargetsLegacy(row.time, targetByMonth)
-                : targetByMonth[row.time] || { sq: 0, sa: 0, gp: 0, ad: 0 };
+                : chartMode === 'day'
+                    ? { sq: 0, sa: 0, gp: 0, ad: 0 }
+                    : targetByMonth[row.time] || { sq: 0, sa: 0, gp: 0, ad: 0 };
             const gm = tg.sa > 0 ? tg.gp / tg.sa : 0;
             const ar = tg.sa > 0 ? tg.ad / tg.sa : 0;
             return {
@@ -376,9 +395,9 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
             ? withTargets.slice(-rangeCount)
             : withTargets;
 
-        const tickLabels = buildAxisTickLabels(sliced.map(r => r.time), chartWeekly);
+        const tickLabels = buildAxisTickLabels(sliced.map(r => r.time), chartMode);
         return sliced.map(row => ({ ...row, __tick: tickLabels[row.time] }));
-    }, [isOpen, baseRaw, scope, chartWeekly, sidebarWeeklyMode, columns, targetRows, selectedMetrics, rangeCount]);
+    }, [isOpen, baseRaw, scope, chartMode, columns, targetRows, selectedMetrics, rangeCount]);
 
     useEscClose(isOpen, onClose);
 
@@ -394,6 +413,8 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
 
     const canWeekly = rawWeekly.length > 0;
     const canMonthly = rawMonthly.length > 0;
+    const canDaily = rawDaily.length > 0;
+    const rangeOptions: readonly number[] = chartMode === 'day' ? DAILY_RANGE_OPTIONS : RANGE_OPTIONS;
 
     const seriesKeyOf = (col: TrendColumn) => col.dataKey || col.title;
 
@@ -490,7 +511,7 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
     const showValueLabels = chartData.length > 0 && chartData.length <= 14;
 
     const groupColumns = columns.filter(c => (c.metricGroup || 'result') === metricGroup);
-    const rangeLabel = (n: number) => (n === 0 ? '全部' : `近${n}${chartWeekly ? '周' : '月'}`);
+    const rangeLabel = (n: number) => (n === 0 ? '全部' : `近${n}${periodUnitLabel(chartMode)}`);
 
     /** 单指标 tooltip */
     const renderSingleTooltip = ({ active, payload, label }: any) => {
@@ -697,29 +718,31 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
                     </div>
 
                     <div className="inline-flex shrink-0 rounded-md bg-slate-100 p-0.5">
-                        <button
-                            type="button"
-                            disabled={!canMonthly}
-                            onClick={() => canMonthly && setChartWeekly(false)}
-                            className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
-                                !chartWeekly ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                            } disabled:cursor-not-allowed disabled:opacity-40`}
-                        >
-                            月
-                        </button>
-                        <button
-                            type="button"
-                            disabled={!canWeekly}
-                            onClick={() => canWeekly && setChartWeekly(true)}
-                            className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
-                                chartWeekly ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                            } disabled:cursor-not-allowed disabled:opacity-40`}
-                        >
-                            周
-                        </button>
+                        {([
+                            { key: 'month' as PeriodMode, label: '月', enabled: canMonthly },
+                            { key: 'week' as PeriodMode, label: '周', enabled: canWeekly },
+                            { key: 'day' as PeriodMode, label: '日', enabled: canDaily },
+                        ]).map(({ key, label, enabled }) => (
+                            <button
+                                key={key}
+                                type="button"
+                                disabled={!enabled}
+                                title={enabled ? undefined : key === 'day' ? '日粒度需要连接云端数据' : undefined}
+                                onClick={() => {
+                                    if (!enabled) return;
+                                    setChartMode(key);
+                                    setRangeCount(key === 'day' ? 30 : 12);
+                                }}
+                                className={`rounded px-2 py-0.5 text-[10.5px] font-medium transition-all ${
+                                    chartMode === key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                                } disabled:cursor-not-allowed disabled:opacity-40`}
+                            >
+                                {label}
+                            </button>
+                        ))}
                     </div>
                     <div className="inline-flex shrink-0 rounded-md bg-slate-100 p-0.5">
-                        {RANGE_OPTIONS.map(n => (
+                        {rangeOptions.map(n => (
                             <button
                                 key={n}
                                 type="button"

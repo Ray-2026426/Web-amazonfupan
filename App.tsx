@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
-import { ActionItem, BusinessIssue, DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot, DataCoverage, AppMeta } from './types';
+import { ActionItem, BusinessIssue, DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot, DataCoverage, AppMeta, PeriodMode } from './types';
 import { 
   calculatePeriodDates, 
   filterData, 
@@ -12,6 +12,7 @@ import {
   enrichTargetData, 
   getPacingRatio,
   getWeeklyAllocatedTarget,
+  getDailyAllocatedTarget,
   analyzeTargetCompleteness,
   getISOWeekDateRange,
   formatDate,
@@ -42,6 +43,16 @@ import { DEFAULT_BUSINESS_RULES, generateBusinessIssues, updateActionForIssue } 
 import { CLOUD_ENABLED, clearCloudToken, fetchCloudFreshness, fetchCloudRows, fetchCloudTargets, getCloudToken, saveCloudToken } from './cloudData';
 
 const DEFAULT_DATA_START = '2025-01-01';
+/** 记住上次的粒度，刷新后不用重新点一次 */
+const PERIOD_MODE_KEY = 'amazon-dashboard-period-mode';
+const readStoredPeriodMode = (): PeriodMode => {
+  try {
+    const value = localStorage.getItem(PERIOD_MODE_KEY);
+    return value === 'day' || value === 'week' || value === 'month' ? value : 'month';
+  } catch {
+    return 'month';
+  }
+};
 const SAMPLE_HEADERS = '日期,ASIN,国家,店铺,负责人,销售额,销量,毛利润,广告花费,广告销售额,Sessions';
 const downloadImportTemplate = () => {
   const now = new Date();
@@ -153,7 +164,10 @@ const App: React.FC = () => {
   const [dataStartDate, setDataStartDate] = useState(DEFAULT_DATA_START);
   const [dataEndDate, setDataEndDate] = useState('');
   const [lastImportedAt, setLastImportedAt] = useState<number | undefined>();
-  const [isWeeklyMode, setIsWeeklyMode] = useState(false);
+  /** 时间粒度：日 / 周 / 月。周度的既有语义保留为 isWeeklyMode，减少无谓改动 */
+  const [periodMode, setPeriodMode] = useState<PeriodMode>(readStoredPeriodMode);
+  const isWeeklyMode = periodMode === 'week';
+  const isDailyMode = periodMode === 'day';
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatLoaded, setChatLoaded] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -268,6 +282,15 @@ const App: React.FC = () => {
       return () => window.clearInterval(timer);
   }, []);
 
+  // 记住上次的粒度；没有云端密码时回到月度，避免刷新后停在一个没有数据的日度视图
+  useEffect(() => {
+      try { localStorage.setItem(PERIOD_MODE_KEY, periodMode); } catch { /* 忽略隐私模式下的写入失败 */ }
+  }, [periodMode]);
+
+  useEffect(() => {
+      if (periodMode === 'day' && !cloudToken) setPeriodMode('month');
+  }, [periodMode, cloudToken]);
+
   useEffect(() => {
       if (!CLOUD_ENABLED || !cloudToken || isRestoringData) return;
       const controller = new AbortController();
@@ -291,9 +314,16 @@ const App: React.FC = () => {
               setCloudTargetActive(targets?.active || false);
               setCloudRowsRange(`${filters.startDate}|${filters.endDate}`);
               setCloudConnected(true);
+              // 覆盖天数：只有两三天的云端数据会让趋势图看着「没同步好」，直接在状态条里说清楚
+              const coverageDays = freshness.first_date && freshness.latest_date
+                  ? Math.round((Date.parse(freshness.latest_date) - Date.parse(freshness.first_date)) / 86400000) + 1
+                  : 0;
+              const coverageNote = coverageDays > 0 && coverageDays < 7
+                  ? ` · 云端仅 ${coverageDays} 天数据（${freshness.first_date} ~ ${freshness.latest_date}）；在「数据管理」把「每天回补最近 N 天」调到 7 天，下次同步会自动补缺口`
+                  : '';
               setCloudStatus((freshness.latestRun?.status === 'failed'
-                  ? `云端同步失败，当前业绩数据截至 ${freshness.latest_date}`
-                  : `云端业绩数据截至 ${freshness.latest_date}`) + (targets === null ? ' · 云端目标读取失败，暂用本地目标' : ''));
+                  ? `云端最近一次同步失败，当前业绩数据截至 ${freshness.latest_date}`
+                  : `云端业绩数据截至 ${freshness.latest_date}`) + coverageNote + (targets === null ? ' · 云端目标读取失败，暂用本地目标' : ''));
               setDataEndDate(freshness.latest_date);
               setLastImportedAt(freshness.latestRun?.finished_at ? Date.parse(freshness.latestRun.finished_at) : undefined);
           } catch (error) {
@@ -336,7 +366,10 @@ const App: React.FC = () => {
   const visibleCloudRows = cloudRowsRange === `${filters.startDate}|${filters.endDate}` ? cloudRows : [];
   const displayPerformanceData = cloudConnected ? visibleCloudRows : performanceData;
   const displayWeeklyData = cloudConnected ? visibleCloudRows : weeklyData;
+  /** 日粒度只在云端可用：云端 fact_daily 是真正的按天数据，本地导入的月报/周报没有日粒度 */
+  const displayDailyData = cloudConnected ? visibleCloudRows : [];
   const displayTargetData = cloudConnected && cloudTargetActive ? cloudTargetData : targetData;
+  const activeRawData = isDailyMode ? displayDailyData : isWeeklyMode ? displayWeeklyData : displayPerformanceData;
 
   // --- 2. Save Filters + data coverage when they change ---
   useEffect(() => {
@@ -430,7 +463,7 @@ const App: React.FC = () => {
             setReviewData(newReviews);
             setProductImageData(newImages);
             setBusinessActions(evaluatedActions);
-            setIsWeeklyMode(false);
+            setPeriodMode('month');
             setFilters(newFilters);
             setDataStartDate(nextMeta.dataStartDate);
             setDataEndDate(nextMeta.dataEndDate);
@@ -481,30 +514,43 @@ const App: React.FC = () => {
   };
 
   const handleLoadSnapshot = (snapshot: FilterSnapshot) => {
-      setIsWeeklyMode(snapshot.isWeeklyMode);
+      setPeriodMode(snapshot.periodMode || (snapshot.isWeeklyMode ? 'week' : 'month'));
       // 用 setTimeout 确保 mode 切换已生效再设 filters
       setFilters(snapshot.filters);
   };
 
-  const handleSetWeeklyMode = (enable: boolean) => {
-      setIsWeeklyMode(enable);
-      if (enable) {
-          // Default to Last Week
-          const now = new Date();
-          const lastWeekDay = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  /** 切换时间粒度，并把筛选区间落到该粒度的自然边界上 */
+  const handleSetPeriodMode = (mode: PeriodMode) => {
+      setPeriodMode(mode);
+      const now = new Date();
+      const fmt = (d: Date) => `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')}`;
+      // 以「数据截止日」为准，避免切到没有数据的空区间
+      const anchorStr = dataEndDate && /^\d{4}-\d{2}-\d{2}$/.test(dataEndDate) ? dataEndDate : fmt(now);
+      const [ay, am, ad] = anchorStr.split('-').map(Number);
+      const anchor = new Date(ay, am - 1, ad);
+
+      if (mode === 'week') {
+          // 默认看上一个完整自然周（数据通常截止到昨天/今天）
+          const lastWeekDay = new Date(anchor.getTime() - 7 * 24 * 60 * 60 * 1000);
           const { start, end } = getISOWeekDateRange(lastWeekDay);
-          setFilters(prev => ({
-              ...prev,
-              startDate: formatDate(start),
-              endDate: formatDate(end)
-          }));
+          setFilters(prev => ({ ...prev, startDate: formatDate(start), endDate: formatDate(end) }));
+      } else if (mode === 'day') {
+          // 默认最近 7 天（含截止日），只有一个日期时就是单日
+          const start = new Date(anchor);
+          start.setDate(anchor.getDate() - 6);
+          setFilters(prev => ({ ...prev, startDate: fmt(start), endDate: fmt(anchor) }));
+      } else {
+          // 月度回到截止日所在自然月
+          const start = new Date(ay, am - 1, 1);
+          const end = new Date(ay, am, 0);
+          setFilters(prev => ({ ...prev, startDate: fmt(start), endDate: fmt(end) }));
       }
-  }
+  };
 
   // --- Processing Logic ---
   
   const processedData = useMemo(() => {
-      const activeData = isWeeklyMode ? displayWeeklyData : displayPerformanceData;
+      const activeData = activeRawData;
       if (activeData.length === 0) return null;
       if (!filters.startDate || !filters.endDate) return null;
 
@@ -531,13 +577,15 @@ const App: React.FC = () => {
       const last = lastRows.length > 0 ? aggregateData(lastRows) : null;
       const year = yearRows.length > 0 ? aggregateData(yearRows) : null;
 
-      // Targets：月度取全月目标；周度按天拆成「周分摊月目标」。序时仅月度展示用。
-      const pacingRatio = isWeeklyMode
-          ? 1
-          : getPacingRatio(periods.current.start, periods.current.end, dataEndDate);
-      const target = isWeeklyMode
-          ? getWeeklyAllocatedTarget(displayTargetData, periods.current.start, periods.current.end, filters)
-          : getTargetForSelection(displayTargetData, periods.current.start, periods.current.end, filters, 1);
+      // Targets：月度取全月目标；周度/日度按天拆成「区间分摊月目标」。序时仅月度展示用。
+      const pacingRatio = periodMode === 'month'
+          ? getPacingRatio(periods.current.start, periods.current.end, dataEndDate)
+          : 1;
+      const target = periodMode === 'month'
+          ? getTargetForSelection(displayTargetData, periods.current.start, periods.current.end, filters, 1)
+          : periodMode === 'week'
+              ? getWeeklyAllocatedTarget(displayTargetData, periods.current.start, periods.current.end, filters)
+              : getDailyAllocatedTarget(displayTargetData, periods.current.start, periods.current.end, filters);
 
       // Inventory (Snapshot logic usually, here simplified filter)
       const invRows = filterInventoryData(inventoryData, filters);
@@ -563,7 +611,7 @@ const App: React.FC = () => {
           invRows,
           pacingRatio,
       };
-  }, [displayPerformanceData, displayWeeklyData, displayTargetData, inventoryData, filters, isWeeklyMode, dataEndDate]);
+  }, [activeRawData, displayTargetData, inventoryData, filters, periodMode, dataEndDate]);
 
   const businessIssues = useMemo(() => {
       if (!processedData) return [];
@@ -574,22 +622,22 @@ const App: React.FC = () => {
           inventory: processedData.inventory,
           warnings: processedData.warnings,
           pacingRatio: processedData.pacingRatio,
-          isWeeklyMode,
+          periodMode: periodMode,
       });
-  }, [processedData, isWeeklyMode]);
+  }, [processedData, periodMode]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#e0f2fe_0%,#eff6ff_22%,#f8fafc_52%,#f8fafc_100%)] font-sans text-slate-900">
       {sidebarOpen && <button type="button" aria-label="关闭筛选侧栏" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-slate-950/50 xl:hidden" />}
       <div className={`fixed inset-y-0 left-0 z-40 transition-transform xl:relative xl:z-20 xl:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
       <SidebarFilters 
-        data={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
+        data={activeRawData}
         inventoryData={inventoryData}
         targetData={displayTargetData}
         filters={filters} 
         setFilters={setFilters} 
         warnings={processedData?.warnings}
-        isWeeklyMode={isWeeklyMode}
+        periodMode={periodMode}
         onLoadSnapshot={handleLoadSnapshot}
       />
       </div>
@@ -606,18 +654,26 @@ const App: React.FC = () => {
                     <span className="hidden text-sm font-bold text-slate-900 sm:inline">亚马逊业绩复盘</span>
                 </div>
                 <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/90 p-1">
-                    <button 
-                        onClick={() => handleSetWeeklyMode(false)}
-                        className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${!isWeeklyMode ? 'bg-white text-sky-700 shadow-sm ring-1 ring-sky-100' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        月度
-                    </button>
-                    <button 
-                        onClick={() => handleSetWeeklyMode(true)}
-                        className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all ${isWeeklyMode ? 'bg-white text-sky-700 shadow-sm ring-1 ring-sky-100' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                        周度
-                    </button>
+                    {([
+                        { mode: 'month' as PeriodMode, label: '月度' },
+                        { mode: 'week' as PeriodMode, label: '周度' },
+                        { mode: 'day' as PeriodMode, label: '日度' },
+                    ]).map(({ mode, label }) => {
+                        const active = periodMode === mode;
+                        const disabled = mode === 'day' && !cloudConnected;
+                        return (
+                            <button
+                                key={mode}
+                                type="button"
+                                onClick={() => !disabled && handleSetPeriodMode(mode)}
+                                disabled={disabled}
+                                title={disabled ? '日度视图需要连接云端数据（云端按天同步）；本地导入的月报/周报没有日粒度' : undefined}
+                                className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-40 ${active ? 'bg-white text-sky-700 shadow-sm ring-1 ring-sky-100' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                {label}
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
             
@@ -662,8 +718,8 @@ const App: React.FC = () => {
                         <section id="overview"><DashboardOverview 
                             current={processedData.current} 
                             target={processedData.target} 
-                            isWeeklyMode={isWeeklyMode}
-                            rawData={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
+                            periodMode={periodMode}
+                            rawData={activeRawData}
                             filters={filters}
                             targetRows={displayTargetData}
                             pacingRatio={processedData.pacingRatio}
@@ -724,9 +780,9 @@ const App: React.FC = () => {
                             <div className="mb-5 rounded-2xl bg-sky-50 p-6 text-sky-300 ring-1 ring-sky-100">
                                 <FileSpreadsheet className="w-12 h-12" />
                             </div>
-                            <p className="text-lg font-semibold text-slate-700">{restoreFailed ? '本地数据暂时无法读取' : displayPerformanceData.length ? '当前选择无数据' : '暂无数据'}</p>
-                            <p className="mt-1 text-sm text-slate-500">{restoreFailed ? '请检查浏览器存储权限后刷新页面' : displayPerformanceData.length ? '请调整分析周期或切换月度视图' : '可先加载样例，也可导入自己的数据'}</p>
-                            {!restoreFailed && !displayPerformanceData.length && <div className="mt-5 flex flex-wrap justify-center gap-2">
+                            <p className="text-lg font-semibold text-slate-700">{restoreFailed ? '本地数据暂时无法读取' : activeRawData.length ? '当前选择无数据' : '暂无数据'}</p>
+                            <p className="mt-1 text-sm text-slate-500">{restoreFailed ? '请检查浏览器存储权限后刷新页面' : activeRawData.length ? '请调整分析周期，或切换到有数据的粒度（月度/周度/日度）' : isDailyMode && !cloudConnected ? '日度视图需要连接云端数据；本地导入的月报/周报没有日粒度' : '可先加载样例，也可导入自己的数据'}</p>
+                            {!restoreFailed && !activeRawData.length && <div className="mt-5 flex flex-wrap justify-center gap-2">
                                 <button type="button" onClick={downloadImportTemplate} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">下载模板</button>
                                 <button type="button" onClick={handleLoadSample} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">加载脱敏样例</button>
                                 <button type="button" onClick={() => setShowUploadModal(true)} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white">导入自己的数据</button>
@@ -762,10 +818,11 @@ const App: React.FC = () => {
                 onOpenRefundAnalysis={handleOpenRefundAnalysis}
                 onOpenCalculator={handleOpenCalculator}
                 onOpenReviewAnalysis={() => setReviewModalOpen(true)}
-                isWeeklyMode={isWeeklyMode}
-                rawPerformance={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
+                periodMode={periodMode}
+                rawPerformance={activeRawData}
                 performanceMonthly={displayPerformanceData}
                 performanceWeekly={displayWeeklyData}
+                performanceDaily={displayDailyData}
                 productImageLookup={productImageLookup}
                 dataEndDate={dataEndDate}
             /></Suspense>
@@ -828,7 +885,7 @@ const App: React.FC = () => {
             inventory={processedData?.inventory || null}
             refunds={refundData}
             filters={filters} 
-            rawPerformance={isWeeklyMode ? displayWeeklyData : displayPerformanceData}
+            rawPerformance={activeRawData}
             rawInventory={inventoryData}
             initialOpen
         /></Suspense>}

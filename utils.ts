@@ -1,5 +1,5 @@
 
-import { DataRow, TargetRow, FilterState, AggregatedData, InventoryRow, InventoryAggregated, ProductImageRow } from './types';
+import type { DataRow, TargetRow, FilterState, AggregatedData, InventoryRow, InventoryAggregated, ProductImageRow, PeriodMode } from './types';
 
 /** SKU / 品名 → 图片链接 对照表（由用户上传的商品图片表构建） */
 export interface ProductImageLookup {
@@ -130,9 +130,50 @@ export const formatBusinessWeekFromDateStr = (dateStr: string): string => {
     return `${weekYear}-W${String(week).padStart(2, '0')}`;
 };
 
+/* ------------------------------------------------------------------ *
+ * 时间粒度：日 / 周 / 月
+ * 三个粒度共用同一份日粒度行，聚合键与文案统一在这里生成，
+ * 避免各组件各自写 `isWeekly ? ... : ...` 造成口径漂移。
+ * ------------------------------------------------------------------ */
+
+/** 行的聚合键：日 → 2026-10-23；周 → 2026-W43；月 → 2026-10 */
+export const periodKeyOf = (dateStr: string, mode: PeriodMode): string => {
+    if (!dateStr) return 'Unknown';
+    if (mode === 'month') return dateStr.slice(0, 7);
+    if (mode === 'week') return formatBusinessWeekFromDateStr(dateStr);
+    return dateStr.slice(0, 10);
+};
+
+/** 量词：日 → 天；周 → 周；月 → 个月（「近12个月」读起来才顺） */
+export const periodUnitLabel = (mode: PeriodMode): string => {
+    if (mode === 'day') return '天';
+    if (mode === 'week') return '周';
+    return '个月';
+};
+
+/** 模式名：日度 / 周度 / 月度 */
+export const periodModeName = (mode: PeriodMode): string => {
+    if (mode === 'day') return '日度';
+    if (mode === 'week') return '周度';
+    return '月度';
+};
+
+/** 模式简称：日 / 周 / 月 */
+export const periodModeShort = (mode: PeriodMode): string => {
+    if (mode === 'day') return '日';
+    if (mode === 'week') return '周';
+    return '月';
+};
+
+/** 环比/同比标签：日环、周环、环（月度沿用旧文案） */
+export const periodCompareLabel = (mode: PeriodMode, kind: 'mom' | 'yoy'): string => {
+    if (mode === 'day') return kind === 'mom' ? '日环' : '日同';
+    if (mode === 'week') return kind === 'mom' ? '周环' : '周同';
+    return kind === 'mom' ? '环' : '同';
+};
+
 /** 某周序号年 + 周序号 → 该周周日～周六 */
-export const getBusinessWeekRangeFromYearWeek = (weekYear: number, week: number): { start: Date; end: Date } => {
-    const first = firstSundayWeekOfCalendarYear(weekYear);
+export const getBusinessWeekRangeFromYearWeek = (weekYear: number, week: number): { start: Date; end: Date } => {    const first = firstSundayWeekOfCalendarYear(weekYear);
     const start = new Date(first);
     start.setDate(first.getDate() + (week - 1) * 7);
     const end = new Date(start);
@@ -440,6 +481,12 @@ export const getWeeklyAllocatedTarget = (
   });
   return allocateTargetsForDateRange(start, end, byMonth);
 };
+
+/**
+ * 日度看板：当前筛选日（或连续多日）的「日分摊月目标」。
+ * 口径与周度完全一致——月目标 ÷ 当月天数，再按区间累加，跨月自动分段。
+ */
+export const getDailyAllocatedTarget = getWeeklyAllocatedTarget;
 
 // --- Currency Utilities ---
 
@@ -1116,23 +1163,28 @@ export const groupTargetsByDimension = (
 };
 
 /** 周度子表：按维度匹配月目标后，再按当前周期（或行内年周）按天拆成周目标 */
-export const groupWeeklyTargetsByDimension = (
+/**
+ * 按「时间粒度 + 其他维度」拆分目标：每个时间桶拿到「该桶内每天应摊的月目标」之和。
+ * - week：桶键 2026-W43，按自然周（周日～周六）累加
+ * - day：桶键 2026-10-23，就是当天的日分摊目标
+ * 不含 year_month 维度时，整段区间累加成一个目标（与分组键 otherKey 对应）。
+ */
+export const groupAllocatedTargetsByDimension = (
     targets: TargetRow[],
     dimensions: (keyof TargetRow | 'year_month')[],
     start: Date,
-    end: Date
+    end: Date,
+    mode: 'day' | 'week'
 ): Map<string, AggregatedData> => {
     const map = new Map<string, AggregatedData>();
     const months = collectMonthsInRange(start, end);
-    const hasWeekDim = dimensions.includes('year_month');
+    const hasPeriodDim = dimensions.includes('year_month');
     const otherDims = dimensions.filter((d) => d !== 'year_month');
 
     // otherKey -> month -> bucket
     const byOtherKeyMonth = new Map<string, Record<string, MonthlyTargetBucket>>();
 
     targets.forEach((t) => {
-        if (!months.has(t.month) && !hasWeekDim) return;
-        // 含年周拆解时，目标月需覆盖周期内月份；行级周可能跨月，仍用 months 过滤够用（当前侧栏通常一周）
         if (!months.has(t.month)) return;
 
         const otherKey = otherDims.map((d) => String((t as any)[d] || 'Unknown')).join('|||');
@@ -1149,35 +1201,41 @@ export const groupWeeklyTargetsByDimension = (
         monthMap[t.month] = cur;
     });
 
-    const weekKeysInPeriod: string[] = [];
-    if (hasWeekDim) {
+    /** 周期内每个桶的键与日期范围（跨月时由 allocateTargetsForDateRange 自动分段） */
+    const buckets: { key: string; rangeStart: Date; rangeEnd: Date }[] = [];
+    if (hasPeriodDim) {
         const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
         const endTime = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime();
         const seen = new Set<string>();
         while (cursor.getTime() <= endTime) {
-            const wk = formatBusinessWeekFromDateStr(formatDate(cursor));
-            if (!seen.has(wk)) {
-                seen.add(wk);
-                weekKeysInPeriod.push(wk);
+            const dateStr = formatDate(cursor);
+            const key = periodKeyOf(dateStr, mode);
+            if (!seen.has(key)) {
+                seen.add(key);
+                if (mode === 'day') {
+                    buckets.push({ key, rangeStart: new Date(cursor), rangeEnd: new Date(cursor) });
+                } else {
+                    const match = /^(\d{4})-W(\d{1,2})$/.exec(key);
+                    const weekYear = match ? Number(match[1]) : NaN;
+                    const weekNo = match ? Number(match[2]) : NaN;
+                    const { start: ws, end: we } = getBusinessWeekRangeFromYearWeek(weekYear, weekNo);
+                    buckets.push({ key, rangeStart: ws, rangeEnd: we });
+                }
             }
             cursor.setDate(cursor.getDate() + 1);
         }
     }
 
     byOtherKeyMonth.forEach((monthMap, otherKey) => {
-        if (!hasWeekDim) {
-            const allocated = allocateTargetsForDateRange(start, end, monthMap);
-            const key = otherKey; // dimensions 不含 year_month 时 otherKey 即 compositeKey
-            // 若 dimensions 为空，otherKey 为 ''
-            map.set(key, allocated);
+        if (!hasPeriodDim) {
+            map.set(otherKey, allocateTargetsForDateRange(start, end, monthMap));
             return;
         }
 
-        weekKeysInPeriod.forEach((weekKey) => {
-            const allocated = allocateWeeklyTargetsFromMonths(weekKey, monthMap);
+        buckets.forEach(({ key, rangeStart, rangeEnd }) => {
+            const allocated = allocateTargetsForDateRange(rangeStart, rangeEnd, monthMap);
             const parts = dimensions.map((d) => {
-                if (d === 'year_month') return weekKey;
-                // otherKey 按 otherDims 顺序拼接
+                if (d === 'year_month') return key;
                 const idx = otherDims.indexOf(d);
                 return idx >= 0 ? otherKey.split('|||')[idx] : 'Unknown';
             });
@@ -1187,6 +1245,14 @@ export const groupWeeklyTargetsByDimension = (
 
     return map;
 };
+
+/** 周度看板：周键 + 其他维度的目标拆分（groupAllocatedTargetsByDimension 的周度封装） */
+export const groupWeeklyTargetsByDimension = (
+    targets: TargetRow[],
+    dimensions: (keyof TargetRow | 'year_month')[],
+    start: Date,
+    end: Date
+): Map<string, AggregatedData> => groupAllocatedTargetsByDimension(targets, dimensions, start, end, 'week');
 
 export const groupInventoryByDimension = (
     rows: InventoryRow[],

@@ -1,16 +1,19 @@
-import { FilterSnapshot, FilterState } from '../types';
+import { FilterSnapshot, FilterState, PeriodMode } from '../types';
 
 const STORAGE_KEY = 'amazon_dashboard_filter_snapshots';
 const MAX_SNAPSHOTS = 6;
 
-/** 读取所有已保存的快照 */
+/** 读取所有已保存的快照；旧版只有 isWeeklyMode 的记录迁移为 periodMode */
 export const loadSnapshots = (): FilterSnapshot[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed as FilterSnapshot[];
+    return (parsed as FilterSnapshot[]).map(snap => ({
+      ...snap,
+      periodMode: snap.periodMode || (snap.isWeeklyMode ? 'week' : 'month'),
+    }));
   } catch {
     return [];
   }
@@ -29,7 +32,7 @@ const persistSnapshots = (snapshots: FilterSnapshot[]) => {
 export const saveSnapshot = (
   name: string,
   filters: FilterState,
-  isWeeklyMode: boolean
+  periodMode: PeriodMode
 ): FilterSnapshot[] => {
   const snapshots = loadSnapshots();
   
@@ -39,7 +42,7 @@ export const saveSnapshot = (
     id: existingIdx >= 0 ? snapshots[existingIdx].id : `snap_${Date.now()}`,
     name,
     filters: JSON.parse(JSON.stringify(filters)), // 深拷贝
-    isWeeklyMode,
+    periodMode,
     createdAt: Date.now(),
   };
 

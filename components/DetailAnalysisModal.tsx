@@ -2,8 +2,8 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { X, Layers, Check, FileSearch, ExternalLink, Copy, ArrowUp, ArrowDown, Filter, Search as SearchIcon, ListFilter, Calculator, CheckSquare, Square, RefreshCcw, MessageSquare, TrendingUp, Bot, Sparkles, Loader2, Settings, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
 import { ProductImageThumb, ImageLightbox } from './ProductImageThumb';
-import { DataRow, AggregatedData, TargetRow, InventoryRow, InventoryAggregated, FilterState } from '../types';
-import { groupDataByDimension, aggregateData, formatMoney, formatNumber, formatPercent, getPacingRatio, getPacingCompletionRatio, formatTargetGapPctPoints, groupTargetsByDimension, groupWeeklyTargetsByDimension, initialAggregated, initialInventoryAggregated, getAmazonProductLink, formatPrice, groupInventoryByDimension, aggregateInventoryData, formatDate, formatMoneyNoDecimals, formatRMB, formatBusinessWeekFromDateStr, sumAggregatedData, sumInventoryAggregated, resolveProductImage, type ProductImageLookup } from '../utils';
+import { DataRow, AggregatedData, TargetRow, InventoryRow, InventoryAggregated, FilterState, PeriodMode } from '../types';
+import { groupDataByDimension, aggregateData, formatMoney, formatNumber, formatPercent, getPacingRatio, getPacingCompletionRatio, formatTargetGapPctPoints, groupTargetsByDimension, groupAllocatedTargetsByDimension, initialAggregated, initialInventoryAggregated, getAmazonProductLink, formatPrice, groupInventoryByDimension, aggregateInventoryData, formatDate, formatMoneyNoDecimals, formatRMB, sumAggregatedData, sumInventoryAggregated, resolveProductImage, periodKeyOf, periodModeName, periodCompareLabel, type ProductImageLookup } from '../utils';
 import { TrendChartModal, TrendColumn, TrendChartScope } from './TrendChartModal';
 import { PromptSettingsModal, getActivePromptSettings } from './PromptSettingsModal';
 import { hasConfiguredAiApi, unifiedGenerateContent, AI_API_SETUP_HINT } from './aiUnifiedGenerate';
@@ -29,10 +29,11 @@ interface DetailAnalysisModalProps {
     onOpenRefundAnalysis?: (filters?: Partial<FilterState>) => void;
     onOpenCalculator?: (product?: string, country?: string) => void; 
     onOpenReviewAnalysis?: () => void; 
-    isWeeklyMode?: boolean;
+    periodMode: PeriodMode;
     rawPerformance?: DataRow[];
     performanceMonthly?: DataRow[];
     performanceWeekly?: DataRow[];
+    performanceDaily?: DataRow[];
     /** 用户上传的 SKU/品名 → 图片 对照表 */
     productImageLookup?: ProductImageLookup | null;
     /** 数据截止日 YYYY-MM-DD，用于序时达成率 */
@@ -417,13 +418,22 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
     onOpenRefundAnalysis,
     onOpenCalculator,
     onOpenReviewAnalysis,
-    isWeeklyMode,
+    periodMode,
     rawPerformance = [],
     performanceMonthly = [],
     performanceWeekly = [],
+    performanceDaily = [],
     productImageLookup = null,
     dataEndDate = '',
 }) => {
+    /**
+     * 三态粒度 → 旧布尔语义的派生。
+     * 原来的 `isWeeklyMode ? A : B` 全部保持原样（周度分支不动），
+     * 只有「日 / 月必须区分」的地方才额外读 periodMode / isDailyMode。
+     */
+    const isWeeklyMode = periodMode === 'week';
+    const isDailyMode = periodMode === 'day';
+
     const resolveDimImage = (dimKey: string, dimensions: Record<string, string>, displayVal: string): string | null => {
         if (!productImageLookup || !displayVal || displayVal.startsWith('共 ')) return null;
         if (dimKey === 'product_name') {
@@ -513,7 +523,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         }
     }, [tagColumnVisible]);
 
-    const timeLabel = isWeeklyMode ? '年周' : '年月';
+    const timeLabel = isDailyMode ? '日期' : isWeeklyMode ? '年周' : '年月';
 
     const monthlyRawSource = performanceMonthly.length > 0 ? performanceMonthly : rawPerformance;
 
@@ -683,7 +693,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         const pct = target !== 0 ? curr / target : 0;
         const isReverse = config.reverseColor;
         const isRate = !!config.isRateMetric;
-        const pacingPct = (!isWeeklyMode && !isRate)
+        const pacingPct = (periodMode === 'month' && !isRate)
             ? getPacingCompletionRatio(curr, target, pacingRatio)
             : null;
 
@@ -705,9 +715,11 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             }
         }
 
-        const label = isWeeklyMode
-            ? (isReverse ? '周预算' : (isRate ? '目标' : '周目标'))
-            : (config.targetLabel || '目标');
+        const label = isDailyMode
+            ? (isReverse ? '日预算' : (isRate ? '目标' : '日目标'))
+            : isWeeklyMode
+                ? (isReverse ? '周预算' : (isRate ? '目标' : '周目标'))
+                : (config.targetLabel || '目标');
         const valStr = fmt(target);
         const pctStr = (pct * 100).toFixed(0) + '%';
         const pacingStr = pacingPct !== null ? (pacingPct * 100).toFixed(0) + '%' : null;
@@ -776,7 +788,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                 
                 let rowVal = '';
                 if (dimKey === 'year_month') {
-                    rowVal = isWeeklyMode ? formatBusinessWeekFromDateStr(row.date) : row.date.substring(0, 7);
+                    rowVal = periodKeyOf(row.date, periodMode);
                 } else {
                     rowVal = (row as any)[dimKey];
                 }
@@ -784,7 +796,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                 return vals.includes(String(rowVal));
             });
         });
-    }, [currentRows, dimFilters, isWeeklyMode]);
+    }, [currentRows, dimFilters, periodMode]);
 
     const filteredInventoryRows = useMemo(() => {
         if (!inventoryRows || inventoryRows.length === 0) return [];
@@ -818,7 +830,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
 
         const getKey = (row: DataRow) => {
             return selectedDimensions.map(d => {
-                if (d === 'year_month') return isWeeklyMode ? formatBusinessWeekFromDateStr(row.date) : row.date.substring(0, 7);
+                if (d === 'year_month') return periodKeyOf(row.date, periodMode);
                 return row[d] || 'Unknown';
             }).join('|||');
         };
@@ -829,7 +841,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                 if (!groups[key]) {
                     const dimObj: Record<string, string> = {};
                     selectedDimensions.forEach(d => {
-                        if (d === 'year_month') dimObj[d] = isWeeklyMode ? formatBusinessWeekFromDateStr(r.date) : r.date.substring(0, 7);
+                        if (d === 'year_month') dimObj[d] = periodKeyOf(r.date, periodMode);
                         else dimObj[d] = String(r[d] || 'Unknown');
                     });
                     groups[key] = {
@@ -864,22 +876,24 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             };
         }).sort((a, b) => b.current.sales_amount - a.current.sales_amount);
 
-    }, [isOpen, type, plRowsForSubtable, selectedDimensions, isWeeklyMode]);
+    }, [isOpen, type, plRowsForSubtable, selectedDimensions, periodMode]);
 
     const groupedTargetsMap = useMemo<Map<string, AggregatedData>>(() => {
         if (!isOpen || !period || targetRows.length === 0 || type === 'Inventory') return new Map<string, AggregatedData>();
 
-        if (isWeeklyMode) {
-            return groupWeeklyTargetsByDimension(
+        // 周/日都要把月目标按天摊到各自的时间桶，否则日度会拿整月目标去比单日
+        if (isWeeklyMode || isDailyMode) {
+            return groupAllocatedTargetsByDimension(
                 targetRows,
                 selectedDimensions as (keyof TargetRow | 'year_month')[],
                 period.start,
-                period.end
+                period.end,
+                periodMode === 'day' ? 'day' : 'week'
             );
         }
 
         return groupTargetsByDimension(targetRows, selectedDimensions as (keyof TargetRow | 'year_month')[], period.start, period.end, 1);
-    }, [isOpen, type, targetRows, period, selectedDimensions, isWeeklyMode]);
+    }, [isOpen, type, targetRows, period, selectedDimensions, periodMode]);
 
     // --- 2. Inventory Logic ---
     const groupedInventoryRaw = useMemo(() => {
@@ -1226,16 +1240,18 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         const fmt = config.formatter;
         const pct = target !== 0 ? curr / target : 0;
         const isRate = !!config.isRateMetric;
-        const defaultLabel = isWeeklyMode
-            ? (config.reverseColor ? '周预算' : (isRate ? '目标' : '周目标'))
-            : '目标';
+        const defaultLabel = isDailyMode
+            ? (config.reverseColor ? '日预算' : (isRate ? '目标' : '日目标'))
+            : isWeeklyMode
+                ? (config.reverseColor ? '周预算' : (isRate ? '目标' : '周目标'))
+                : '目标';
         const label = config.targetLabel || defaultLabel;
         const valStr = fmt(target);
         const pctStr = (pct * 100).toFixed(0) + '%';
         if (isRate) {
             return `${label}: ${valStr} (${pctStr}; 距目标${formatTargetGapPctPoints(curr, target)})`;
         }
-        const pacingPct = (!isWeeklyMode)
+        const pacingPct = (periodMode === 'month')
             ? getPacingCompletionRatio(curr, target, pacingRatio)
             : null;
         const pacingExtra = pacingPct !== null ? `; 序时${(pacingPct * 100).toFixed(0)}%` : '';
@@ -1312,7 +1328,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                 `<span style="color:${pctColor};font-weight:700;font-family:ui-monospace,monospace;">(${pctStr}; 距目标${gap})</span></div>`;
         }
 
-        const pacingPct = (!isWeeklyMode)
+        const pacingPct = (periodMode === 'month')
             ? getPacingCompletionRatio(curr, target, pacingRatio)
             : null;
         const pacingHtml = pacingPct !== null
@@ -1349,7 +1365,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             const tags = computeSubtableRowDiagnosis({
                 subType: type,
                 settings: diagnosisSettings,
-                isWeekly: !!isWeeklyMode,
+                isWeekly: isWeeklyMode,
                 current: current as AggregatedData,
                 last: last as AggregatedData | null | undefined,
                 year: year as AggregatedData | null | undefined,
@@ -1394,8 +1410,8 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         if (subLine) lines.push(subLine);
 
         if (!isInventory && showCompare) {
-            const momLabel = isWeeklyMode ? '周环' : '环';
-            const yoyLabel = isWeeklyMode ? '周同' : '同';
+            const momLabel = periodCompareLabel(periodMode, 'mom');
+            const yoyLabel = periodCompareLabel(periodMode, 'yoy');
             if (last !== undefined && last !== null) {
                 const d = formatDiffForCopy(currVal, lastVal, col.diffType);
                 if (d) lines.push(`${momLabel}: ${d}`);
@@ -1436,7 +1452,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             const tags = computeSubtableRowDiagnosis({
                 subType: type,
                 settings: diagnosisSettings,
-                isWeekly: !!isWeeklyMode,
+                isWeekly: isWeeklyMode,
                 current: current as AggregatedData,
                 last: last as AggregatedData | null | undefined,
                 year: year as AggregatedData | null | undefined,
@@ -1504,8 +1520,8 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         }
 
         if (!isInventory && showCompare) {
-            const momLabel = isWeeklyMode ? '周环' : '环';
-            const yoyLabel = isWeeklyMode ? '周同' : '同';
+            const momLabel = periodCompareLabel(periodMode, 'mom');
+            const yoyLabel = periodCompareLabel(periodMode, 'yoy');
             if (last !== undefined && last !== null) {
                 const frag = diffHtmlFragment(currVal, lastVal, col.diffType);
                 if (frag) {
@@ -1563,7 +1579,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                              computeSubtableRowDiagnosis({
                                  subType: sub,
                                  settings: diagnosisSettings,
-                                 isWeekly: !!isWeeklyMode,
+                                 isWeekly: isWeeklyMode,
                                  current: row.current,
                                  last: row.last,
                                  year: row.year,
@@ -1580,7 +1596,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                  return direction === 'asc' ? valA - valB : valB - valA;
              }
         });
-    }, [finalGroupedData, sortConfig, columnConfig, selectedDimensions, type, diagnosisSettings, isWeeklyMode]);
+    }, [finalGroupedData, sortConfig, columnConfig, selectedDimensions, type, diagnosisSettings, periodMode]);
 
     const parentAsinSubtableTreeFold = useMemo(
         () =>
@@ -1678,7 +1694,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             const scopeLines: string[] = [];
             scopeLines.push(`分析类型: ${type === 'PL' ? 'P&L 业绩子表' : '流量与广告子表'}`);
             if (period) scopeLines.push(`主界面时间段: ${formatDate(period.start)} 至 ${formatDate(period.end)}`);
-            scopeLines.push(`周度模式: ${isWeeklyMode ? '是' : '否'}`);
+            scopeLines.push(`粒度: ${periodModeName(periodMode)}`);
             scopeLines.push(`子表拆解维度: ${selectedDimensions.map(d => DIMENSION_OPTIONS.find(o => o.key === d)?.label || d).join('、')}`);
             const filterParts = (Object.entries(dimFilters) as [string, string[]][])
                 .filter(([, v]) => v.length > 0)
@@ -1974,7 +1990,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             const tags = computeSubtableRowDiagnosis({
                 subType: type,
                 settings: diagnosisSettings,
-                isWeekly: !!isWeeklyMode,
+                isWeekly: isWeeklyMode,
                 current: current as AggregatedData,
                 last: last as AggregatedData | null | undefined,
                 year: year as AggregatedData | null | undefined,
@@ -2036,8 +2052,8 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
             return <div className="font-bold text-slate-700 font-mono">{(structureVal * 100).toFixed(1)}%</div>;
         }
 
-        const momLabel = isWeeklyMode ? '周环:' : '环:';
-        const yoyLabel = isWeeklyMode ? '周同:' : '同:';
+        const momLabel = `${periodCompareLabel(periodMode, 'mom')}:`;
+        const yoyLabel = `${periodCompareLabel(periodMode, 'yoy')}:`;
 
         return (
             <div className="flex flex-col items-end">
@@ -2081,7 +2097,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                         </div>
                         <div>
                             <h2 className="text-xl font-bold tracking-tight">{titleMap[type]}</h2>
-                            <p className="text-xs text-indigo-100">Deep Dive Analysis Module {isWeeklyMode ? '(Weekly)' : ''}</p>
+                            <p className="text-xs text-indigo-100">Deep Dive Analysis Module {isDailyMode ? '(Daily)' : isWeeklyMode ? '(Weekly)' : ''}</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -2788,8 +2804,9 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
                      }}
                      rawMonthly={monthlyRawSource}
                      rawWeekly={performanceWeekly}
+                     rawDaily={performanceDaily}
                      scope={trendScope}
-                     sidebarWeeklyMode={!!isWeeklyMode}
+                     periodMode={periodMode}
                      columns={mergedTrendColumns}
                      targetRows={targetRows}
                  />

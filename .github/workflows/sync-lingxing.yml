@@ -107,7 +107,10 @@ jobs:
             fi
             if [ -z "$DAYS" ] && [ -z "$FROM" ]; then DAYS=1; fi
           fi
-          if [ "${EVENT_NAME}" = "schedule" ]; then DAYS=1; fi
+          # 定时任务不写死 1 天：留空交给 sync_settings.lookback_days（默认 3 天，
+          # 可在看板「数据管理」里调 1~14）。这样某天同步失败，后一天的运行会自动
+          # 把缺口一起补上，不会像之前那样留下永久空洞。
+          if [ "${EVENT_NAME}" = "schedule" ]; then DAYS=""; fi
           if [ -n "${FROM:-}" ] && [ -n "${TO:-}" ]; then
             node scripts/sync/run.mjs --from "$FROM" --to "$TO" --out data/snapshot --upload
           elif [ -n "$DAYS" ]; then

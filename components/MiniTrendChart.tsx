@@ -1,10 +1,10 @@
 import React, { useId, useMemo } from 'react';
-import { DataRow, FilterState, TargetRow } from '../types';
+import { DataRow, FilterState, TargetRow, PeriodMode } from '../types';
 import {
     aggregateData,
-    formatBusinessWeekFromDateStr,
     getBusinessWeekRangeFromYearWeek,
     filterData,
+    periodKeyOf,
 } from '../utils';
 import {
     Area,
@@ -40,14 +40,14 @@ interface MiniTrendChartProps {
     formatter: (v: number) => string;
     isPercent: boolean;
     isMoney: boolean;
-    isWeekly: boolean;
+    periodMode: PeriodMode;
     targetRows?: TargetRow[];
     targetKey?: string;
     /** 横轴期数：默认近 12 期，传 0 表示全部 */
     rangeCount?: number;
 }
 
-/** 获取数据中最早的日期，向前扩展 12 个月作为宽范围 */
+/** 数据覆盖的完整日期范围（前后各留一天，确保边界被包含） */
 const getWideDateRange = (data: DataRow[]) => {
     if (data.length === 0) return { start: new Date('2024-01-01'), end: new Date() };
     const dates = data.map(d => d.date).sort();
@@ -66,7 +66,7 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
     formatter,
     isPercent,
     isMoney,
-    isWeekly,
+    periodMode,
     targetRows = [],
     targetKey,
     rangeCount = 12,
@@ -74,6 +74,8 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
     const theme: ChartTheme = useChartTheme();
     const gradientId = `mini-trend-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
     const mainColor = seriesColor(theme, 0);
+    /** 目标线只对月度有意义：目标表是月粒度，周/日目标由月目标分摊，画在趋势上会误导 */
+    const showTarget = periodMode === 'month' && Boolean(targetKey) && targetRows.length > 0;
 
     const chartData = useMemo(() => {
         if (rawData.length === 0) return [];
@@ -85,9 +87,7 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
         // 按时间分组
         const timeGroups: Record<string, DataRow[]> = {};
         filtered.forEach(row => {
-            const timeKey = isWeekly
-                ? formatBusinessWeekFromDateStr(row.date)
-                : row.date.substring(0, 7);
+            const timeKey = periodKeyOf(row.date, periodMode);
             if (!timeKey) return;
             if (!timeGroups[timeKey]) timeGroups[timeKey] = [];
             timeGroups[timeKey].push(row);
@@ -96,9 +96,9 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
         // 按时间排序
         const sortedKeys = Object.keys(timeGroups).sort();
 
-        // 目标数据聚合（仅月度模式）
+        // 目标数据聚合（仅月度模式，且目标表本身是月粒度）
         const targetByMonth: Record<string, number> = {};
-        if (!isWeekly && targetKey && targetRows.length > 0) {
+        if (showTarget) {
             targetRows.forEach(t => {
                 // 目标行也需要按筛选维度过滤
                 const passesFilter = (() => {
@@ -120,7 +120,7 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
         const showKeys =
             rangeCount > 0 && sortedKeys.length > rangeCount ? sortedKeys.slice(-rangeCount) : sortedKeys;
 
-        const tickLabels = buildAxisTickLabels(showKeys, isWeekly);
+        const tickLabels = buildAxisTickLabels(showKeys, periodMode);
 
         return showKeys.map(timeKey => {
             const agg = aggregateData(timeGroups[timeKey] || []);
@@ -136,7 +136,7 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
             }
 
             const targetVal =
-                !isWeekly && targetKey ? targetByMonth[timeKey] || 0 : undefined;
+                showTarget && targetKey ? targetByMonth[timeKey] || 0 : undefined;
 
             return {
                 time: timeKey,
@@ -145,7 +145,7 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
                 target: targetVal,
             };
         });
-    }, [rawData, filters, metricKey, isWeekly, targetRows, targetKey, rangeCount]);
+    }, [rawData, filters, metricKey, periodMode, targetRows, targetKey, rangeCount, showTarget]);
 
     const hasTarget = chartData.some(d => d.target !== undefined && d.target > 0);
     const lastPoint = chartData[chartData.length - 1];

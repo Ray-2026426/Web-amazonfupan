@@ -6,6 +6,7 @@ import {
     BusinessRule,
     DiagnosticStep,
     InventoryAggregated,
+    PeriodMode,
 } from '../types';
 import { formatMoneyNoDecimals, formatNumber, formatPercent } from '../utils';
 import { metricValue } from './metrics';
@@ -187,7 +188,7 @@ export const generateBusinessIssues = ({
     inventory,
     warnings,
     pacingRatio,
-    isWeeklyMode,
+    periodMode,
 }: {
     current: AggregatedData;
     last: AggregatedData | null;
@@ -195,7 +196,7 @@ export const generateBusinessIssues = ({
     inventory: InventoryAggregated | null;
     warnings: string[];
     pacingRatio: number;
-    isWeeklyMode: boolean;
+    periodMode: PeriodMode;
 }): BusinessIssue[] => {
     const issues: BusinessIssue[] = [];
     const pacing = clamp(pacingRatio || 1, 0.01, 1);
@@ -405,7 +406,8 @@ export const generateBusinessIssues = ({
         });
     }
 
-    if (issues.length === 0 && !isWeeklyMode) {
+    // 「暂无异常」提示只在月度视图给：日/周粒度看的是短周期，说「结构稳定」意义不大
+    if (issues.length === 0 && periodMode === 'month') {
         issues.push({
             id: 'issue-stable-watch',
             ruleId: 'profit-pacing-risk',

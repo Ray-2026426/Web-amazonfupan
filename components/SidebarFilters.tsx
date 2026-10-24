@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { FilterState, DataRow, InventoryRow, TargetRow, FilterSnapshot } from '../types';
+import { FilterState, DataRow, InventoryRow, TargetRow, FilterSnapshot, PeriodMode } from '../types';
 import { Filter, User, Tag, Layers, Box, Hash, Globe, ChevronDown, Check, Search, XCircle, Store, ShoppingBag, CalendarRange, AlertCircle, CalendarClock, Calendar, BookOpen, X, CalendarDays, History, Square, Save, Bookmark, Trash2, MoreHorizontal } from 'lucide-react';
-import { getISOWeekDateRange, formatDate, formatBusinessWeekFromDateStr, getBusinessWeekRangeFromYearWeek } from '../utils';
+import { getISOWeekDateRange, formatDate, formatBusinessWeekFromDateStr, getBusinessWeekRangeFromYearWeek, periodModeName, periodModeShort } from '../utils';
 import { useEscClose } from './useEscClose';
 import { saveSnapshot, loadSnapshots, deleteSnapshot, renameSnapshot } from '../utils/filterSnapshots';
 
@@ -13,7 +13,7 @@ interface SidebarProps {
   filters: FilterState;
   setFilters: React.Dispatch<React.SetStateAction<FilterState>>;
   warnings?: string[]; 
-  isWeeklyMode?: boolean;
+  periodMode?: PeriodMode;
   onLoadSnapshot?: (snapshot: FilterSnapshot) => void;
 }
 
@@ -179,7 +179,9 @@ const EnhancedDropdown = ({ title, icon, options, selected, onToggle, onBulkSet 
     );
 };
 
-export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [], targetData = [], filters, setFilters, warnings = [], isWeeklyMode = false, onLoadSnapshot }) => {
+export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [], targetData = [], filters, setFilters, warnings = [], periodMode = 'month', onLoadSnapshot }: SidebarProps) => {
+    const isWeeklyMode = periodMode === 'week';
+    const isDailyMode = periodMode === 'day';
     
     const [startVal, setStartVal] = useState('');
     const [endVal, setEndVal] = useState('');
@@ -202,7 +204,7 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
     const handleSaveSnapshot = () => {
         const name = snapshotName.trim();
         if (!name || name.length > 12) return;
-        const updated = saveSnapshot(name, filters, isWeeklyMode);
+        const updated = saveSnapshot(name, filters, periodMode);
         setSnapshots(updated);
         setSnapshotName('');
         setShowSaveInput(false);
@@ -232,9 +234,17 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
 
     const getWeekStringFromDate = (dateStr: string) => formatBusinessWeekFromDateStr(dateStr);
 
+    /** 快照粒度：新快照存 periodMode，旧快照回退到 isWeeklyMode */
+    const snapshotMode = (snap: FilterSnapshot): PeriodMode => snap.periodMode || (snap.isWeeklyMode ? 'week' : 'month');
+
     // Date Sync Effects - Unchanged
     useEffect(() => {
-        if (isWeeklyMode) {
+        if (isDailyMode) {
+            const s = filters.startDate ? filters.startDate.slice(0, 10) : '';
+            const e = filters.endDate ? filters.endDate.slice(0, 10) : '';
+            if (s && s !== startVal) setStartVal(s);
+            if (e && e !== endVal) setEndVal(e);
+        } else if (isWeeklyMode) {
             const s = getWeekStringFromDate(filters.startDate);
             const e = getWeekStringFromDate(filters.endDate);
             if (s && s !== startVal) setStartVal(s);
@@ -245,7 +255,7 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
             if (s && s !== startVal) setStartVal(s);
             if (e && e !== endVal) setEndVal(e);
         }
-    }, [filters.startDate, filters.endDate, isWeeklyMode]);
+    }, [filters.startDate, filters.endDate, periodMode]);
 
     const handleDateChange = (type: 'start' | 'end', val: string) => {
         if (type === 'start') setStartVal(val);
@@ -255,7 +265,16 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
     useEffect(() => {
         if (!startVal || !endVal) return;
         const timer = setTimeout(() => {
-            if (isWeeklyMode) {
+            if (isDailyMode) {
+                // 日度：日期选择器直接给 YYYY-MM-DD，原样落到筛选区间
+                if (startVal.length === 10 && endVal.length === 10) {
+                    const startDate = startVal <= endVal ? startVal : endVal;
+                    const endDate = startVal <= endVal ? endVal : startVal;
+                    if (startDate !== filters.startDate || endDate !== filters.endDate) {
+                        setFilters(prev => ({ ...prev, startDate, endDate }));
+                    }
+                }
+            } else if (isWeeklyMode) {
                 const [sy, sw] = startVal.split('-W').map(Number);
                 const [ey, ew] = endVal.split('-W').map(Number);
                 if (sy && sw && ey && ew) {
@@ -283,7 +302,7 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
             }
         }, 500); 
         return () => clearTimeout(timer);
-    }, [startVal, endVal, isWeeklyMode, filters.startDate, filters.endDate, setFilters]);
+    }, [startVal, endVal, periodMode, filters.startDate, filters.endDate, setFilters]);
 
     // --- Option Collection Logic ---
     const availableOptions = useMemo(() => {
@@ -487,6 +506,21 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
         setFilters(prev => ({...prev, startDate: formatDate(start), endDate: formatDate(end) }));
     };
 
+    /** 日度：最近一个有完整数据的日子（昨天） */
+    const handleYesterday = () => {
+        const now = new Date();
+        const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        const iso = toLocalISO(y);
+        setFilters(prev => ({...prev, startDate: iso, endDate: iso}));
+    };
+
+    /** 日度：最近 7 天（含今天） */
+    const handleLast7Days = () => {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+        setFilters(prev => ({...prev, startDate: toLocalISO(start), endDate: toLocalISO(now)}));
+    };
+
     const hasActiveFilters = filters.countries.length > 0 || filters.brands.length > 0 || 
                              filters.managers.length > 0 || filters.shops.length > 0 ||
                              filters.subCategories.length > 0 ||
@@ -506,7 +540,7 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                             <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-sky-400/20 bg-sky-400/10 text-sky-200">
                                 <Filter className="w-4 h-4" />
                             </div>
-                            <span>{isWeeklyMode ? '周度分析' : '业绩报告'}</span>
+                            <span>{isDailyMode ? '日度分析' : isWeeklyMode ? '周度分析' : '业绩报告'}</span>
                         </div>
                     </div>
                     <button onClick={() => setIsGuideOpen(true)} className="rounded-xl border border-slate-700 bg-slate-800/70 p-2 text-slate-400 transition-colors hover:text-white hover:border-slate-500">
@@ -515,8 +549,8 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.2em] uppercase ${isWeeklyMode ? 'border-violet-400/20 bg-violet-400/10 text-violet-200' : 'border-sky-400/20 bg-sky-400/10 text-sky-200'}`}>
-                        {isWeeklyMode ? 'Weekly' : 'Monthly'}
+                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.2em] uppercase ${isDailyMode ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200' : isWeeklyMode ? 'border-violet-400/20 bg-violet-400/10 text-violet-200' : 'border-sky-400/20 bg-sky-400/10 text-sky-200'}`}>
+                        {isDailyMode ? 'Daily' : isWeeklyMode ? 'Weekly' : 'Monthly'}
                     </span>
                     {hasActiveFilters && (
                         <button onClick={clearAllFilters} className="text-xs text-slate-400 hover:text-rose-300 flex items-center gap-1 transition-colors">
@@ -568,11 +602,11 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                                             <span
                                                 className="flex-1 truncate font-medium"
                                                 onClick={() => handleLoadSnapshot(snap)}
-                                                title={`${snap.name}（${snap.isWeeklyMode ? '周度' : '月度'}）`}
+                                                title={`${snap.name}（${periodModeName(snapshotMode(snap))}）`}
                                             >
                                                 {snap.name}
                                             </span>
-                                            <span className="text-[9px] text-slate-500 flex-shrink-0 bg-slate-700/50 rounded px-1">{snap.isWeeklyMode ? '周' : '月'}</span>
+                                            <span className="text-[9px] text-slate-500 flex-shrink-0 bg-slate-700/50 rounded px-1">{periodModeShort(snapshotMode(snap))}</span>
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); setSnapshotMenuOpen(snapshotMenuOpen === snap.id ? null : snap.id); }}
                                                 className="p-0.5 rounded opacity-0 group-hover/snap:opacity-100 transition-opacity text-slate-500 hover:text-slate-300"
@@ -658,21 +692,26 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                     分析周期
                 </div>
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                    {!isWeeklyMode ? (
+                    {isDailyMode ? (
                         <>
-                        <button onClick={handleLastMonth} className="flex items-center justify-center gap-1.5 rounded-2xl border border-slate-700 bg-slate-800/80 px-2 py-2 text-xs text-slate-300 transition-all hover:border-sky-500/60 hover:bg-sky-500/10 hover:text-white active:scale-95"><CalendarClock className="w-3 h-3" />上月</button>
-                        <button onClick={handleThisMonth} className="flex items-center justify-center gap-1.5 rounded-2xl border border-slate-700 bg-slate-800/80 px-2 py-2 text-xs text-slate-300 transition-all hover:border-sky-500/60 hover:bg-sky-500/10 hover:text-white active:scale-95"><Calendar className="w-3 h-3" />本月</button>
+                        <button onClick={handleYesterday} className="flex items-center justify-center gap-1.5 rounded-2xl border border-slate-700 bg-slate-800/80 px-2 py-2 text-xs text-slate-300 transition-all hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-white active:scale-95"><History className="w-3 h-3" />昨天</button>
+                        <button onClick={handleLast7Days} className="flex items-center justify-center gap-1.5 rounded-2xl border border-slate-700 bg-slate-800/80 px-2 py-2 text-xs text-slate-300 transition-all hover:border-emerald-500/60 hover:bg-emerald-500/10 hover:text-white active:scale-95"><CalendarDays className="w-3 h-3" />近7天</button>
                         </>
-                    ) : (
+                    ) : isWeeklyMode ? (
                         <>
                         <button onClick={handleLastWeek} className="flex items-center justify-center gap-1.5 rounded-2xl border border-slate-700 bg-slate-800/80 px-2 py-2 text-xs text-slate-300 transition-all hover:border-sky-500/60 hover:bg-sky-500/10 hover:text-white active:scale-95"><History className="w-3 h-3" />上周</button>
                         <button onClick={handleThisWeek} className="flex items-center justify-center gap-1.5 rounded-2xl border border-slate-700 bg-slate-800/80 px-2 py-2 text-xs text-slate-300 transition-all hover:border-sky-500/60 hover:bg-sky-500/10 hover:text-white active:scale-95"><CalendarDays className="w-3 h-3" />本周</button>
                         </>
+                    ) : (
+                        <>
+                        <button onClick={handleLastMonth} className="flex items-center justify-center gap-1.5 rounded-2xl border border-slate-700 bg-slate-800/80 px-2 py-2 text-xs text-slate-300 transition-all hover:border-sky-500/60 hover:bg-sky-500/10 hover:text-white active:scale-95"><CalendarClock className="w-3 h-3" />上月</button>
+                        <button onClick={handleThisMonth} className="flex items-center justify-center gap-1.5 rounded-2xl border border-slate-700 bg-slate-800/80 px-2 py-2 text-xs text-slate-300 transition-all hover:border-sky-500/60 hover:bg-sky-500/10 hover:text-white active:scale-95"><Calendar className="w-3 h-3" />本月</button>
+                        </>
                     )}
                 </div>
                 <div className="space-y-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
-                    <div className="flex items-center gap-2"><span className="text-[10px] text-slate-500 w-6 font-mono font-bold text-right">起</span><input type={isWeeklyMode ? 'text' : 'month'} value={startVal} onChange={(e) => handleDateChange('start', e.target.value)} placeholder={isWeeklyMode ? '2026-W15' : ''} title={isWeeklyMode ? '自然周：年-W周序号（周日为一周起点，第1周含1月1日）' : ''} className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-slate-200 flex-1 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 outline-none transition-colors font-mono tracking-tight" /></div>
-                    <div className="flex items-center gap-2"><span className="text-[10px] text-slate-500 w-6 font-mono font-bold text-right">止</span><input type={isWeeklyMode ? 'text' : 'month'} value={endVal} onChange={(e) => handleDateChange('end', e.target.value)} placeholder={isWeeklyMode ? '2026-W16' : ''} title={isWeeklyMode ? '自然周：年-W周序号' : ''} className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-slate-200 flex-1 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 outline-none transition-colors font-mono tracking-tight" /></div>
+                    <div className="flex items-center gap-2"><span className="text-[10px] text-slate-500 w-6 font-mono font-bold text-right">起</span><input type={isDailyMode ? 'date' : isWeeklyMode ? 'text' : 'month'} value={startVal} onChange={(e) => handleDateChange('start', e.target.value)} placeholder={isWeeklyMode ? '2026-W15' : ''} title={isDailyMode ? '按天选择分析起点（含当天）' : isWeeklyMode ? '自然周：年-W周序号（周日为一周起点，第1周含1月1日）' : ''} className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-slate-200 flex-1 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 outline-none transition-colors font-mono tracking-tight" /></div>
+                    <div className="flex items-center gap-2"><span className="text-[10px] text-slate-500 w-6 font-mono font-bold text-right">止</span><input type={isDailyMode ? 'date' : isWeeklyMode ? 'text' : 'month'} value={endVal} onChange={(e) => handleDateChange('end', e.target.value)} placeholder={isWeeklyMode ? '2026-W16' : ''} title={isDailyMode ? '按天选择分析终点（含当天）；起止相同即单日' : isWeeklyMode ? '自然周：年-W周序号' : ''} className="bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-slate-200 flex-1 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 outline-none transition-colors font-mono tracking-tight" /></div>
                 </div>
                 {warnings.length > 0 && (
                     <div className="mt-3 rounded-2xl border border-amber-500/20 bg-amber-500/8 p-3 text-[10px]">
