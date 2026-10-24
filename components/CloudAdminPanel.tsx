@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { parseTargetData } from '../dataLoader';
 import { enrichTargetData } from '../utils';
 import { dailyCsvHeader, dailyCsvRows, dailyExportMatrix, type ExportLabels } from '../dailyExport';
+import { FIELD_GROUPS, FIELD_MAPPINGS } from '../shared/field-mapping.mjs';
 import { useEscClose } from './useEscClose';
-import { AlertCircle, Database, Download, RefreshCw, RotateCcw, Save, Settings2, Table2, Upload, X } from 'lucide-react';
+import { AlertCircle, Database, Download, RefreshCw, RotateCcw, Save, Search, Settings2, Table2, Upload, X } from 'lucide-react';
 
 type FieldMapping = { web_field: string; export_label: string; lingxing_field: string };
 type Run = { id: number; started_at: string; range_from: string; range_to: string; status: string; rows_daily: number; error: string | null };
@@ -21,19 +22,7 @@ type AdminData = {
 
 const TOKEN_KEY = 'amazon-dashboard-admin-token';
 
-/** 映射表固定这 8 行：顺序即界面上从上到下的顺序 */
-const FIELD_META: Record<string, { label: string; hint: string }> = {
-  asin: { label: 'ASIN', hint: '表格与筛选里的 ASIN' },
-  parent_asin: { label: '父ASIN', hint: '父 ASIN 列' },
-  shop_name: { label: '店铺', hint: '店铺列与店铺筛选' },
-  country: { label: '国家', hint: '国家列与国家筛选' },
-  manager: { label: '负责人', hint: '负责人列与筛选' },
-  product_name: { label: '品名', hint: '品名列、筛选、下载' },
-  sub_category: { label: '二级分类', hint: '二级分类列与筛选' },
-  brand: { label: '品牌', hint: '品牌列与筛选' },
-};
-const FIELD_ORDER = ['asin', 'parent_asin', 'shop_name', 'country', 'manager', 'product_name', 'sub_category', 'brand'];
-
+/** 映射表字段较多，按分组展示，并支持关键字过滤 */
 type Tab = 'overview' | 'fields' | 'targets' | 'data';
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'overview', label: '概览', icon: <Settings2 className="h-3.5 w-3.5" /> },
@@ -57,6 +46,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   const [exportTo, setExportTo] = useState('');
   const [exportMode, setExportMode] = useState<'day' | 'range'>('range');
   const [draft, setDraft] = useState<Record<string, { export_label: string; lingxing_field: string }>>({});
+  const [query, setQuery] = useState('');
 
   const localDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -102,9 +92,9 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   useEffect(() => {
     if (!data) return;
     const next: Record<string, { export_label: string; lingxing_field: string }> = {};
-    for (const key of FIELD_ORDER) {
-      const row = data.fieldMappings.find(item => item.web_field === key);
-      next[key] = { export_label: row?.export_label ?? '', lingxing_field: row?.lingxing_field ?? '' };
+    for (const item of FIELD_MAPPINGS) {
+      const row = data.fieldMappings.find(saved => saved.web_field === item.web_field);
+      next[item.web_field] = { export_label: row?.export_label ?? item.export_label, lingxing_field: row?.lingxing_field ?? item.lingxing_field };
     }
     setDraft(next);
   }, [data]);
@@ -393,86 +383,115 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
               {tab === 'fields' && <section className={cardClass}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className={sectionTitle}>字段映射</h3>
+                    <h3 className={sectionTitle}>字段映射（37 个字段）</h3>
                     <p className={sectionHint}>
-                      一行对应一个字段：左边是下载表格里的列名，中间是看板里实际展示的字段，右边是领星 MCP 返回的字段路径。
-                      改右边即可跟随领星字段变化，改左边能自定义下载列名。保存后对下一次同步/下载生效。
+                      左边是下载表格里的列名，中间是看板实际展示的字段，右边是领星返回的取值路径。
+                      <span className="font-mono text-slate-600">pp.</span> 取自产品表现，<span className="font-mono text-slate-600">op.</span> 取自订单利润。
+                      改右边跟随领星字段变化，改左边自定义下载列名；保存后对下一次同步 / 下载生效。
                     </p>
                   </div>
-                  <button className={ghostClass} disabled={busy} onClick={() => save({ action: 'field_mapping_reset' }, '已全部恢复默认映射')}>
-                    <RotateCcw className="h-3.5 w-3.5" />全部恢复默认
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                      <input
+                        className="w-44 rounded-xl border border-slate-200 bg-white py-2 pl-8 pr-2.5 text-xs text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                        placeholder="搜索字段 / 路径"
+                        value={query}
+                        onChange={event => setQuery(event.target.value)}
+                        aria-label="搜索字段"
+                      />
+                    </div>
+                    <button className={ghostClass} disabled={busy} onClick={() => save({ action: 'field_mapping_reset' }, '已全部恢复默认映射')}>
+                      <RotateCcw className="h-3.5 w-3.5" />全部恢复默认
+                    </button>
+                  </div>
                 </div>
 
-                <div className="mt-5 overflow-x-auto">
+                <div className="mt-5 max-h-[52vh] overflow-auto rounded-xl border border-slate-100">
                   {data.fieldMappingReady === false && (
-                    <p className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200/70 bg-amber-50 px-3.5 py-2.5 text-[11px] leading-relaxed text-amber-800">
+                    <p className="sticky top-0 z-10 flex items-start gap-2 border-b border-amber-200/70 bg-amber-50 px-3.5 py-2.5 text-[11px] leading-relaxed text-amber-800">
                       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      云端还没有字段映射表，下面是内置默认值。请先在 Supabase SQL Editor 执行 db/schema.sql，保存才会生效。
+                      云端还没有字段映射表，下面是内置默认值。请先在 Supabase SQL Editor 执行 db/migrate-field-mappings.sql，保存才会生效。
                     </p>
                   )}
-                  <table className="w-full min-w-[720px] text-left text-xs">
-                    <thead className="text-[11px] uppercase tracking-wide text-slate-400">
+                  <table className="w-full min-w-[760px] text-left text-xs">
+                    <thead className="sticky top-0 z-[5] bg-white text-[11px] uppercase tracking-wide text-slate-400 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
                       <tr>
-                        <th className="w-[26%] py-2 pr-3 font-medium">下载表格字段名</th>
-                        <th className="w-[22%] py-2 pr-3 font-medium">Web 展示字段</th>
-                        <th className="w-[38%] py-2 pr-3 font-medium">领星字段名（路径）</th>
-                        <th className="py-2 font-medium" />
+                        <th className="w-[26%] px-3 py-2.5 font-medium">下载表格字段名</th>
+                        <th className="w-[20%] px-3 py-2.5 font-medium">Web 展示字段</th>
+                        <th className="w-[38%] px-3 py-2.5 font-medium">领星字段名（路径）</th>
+                        <th className="px-3 py-2.5 font-medium" />
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {FIELD_ORDER.map(key => {
-                        const meta = FIELD_META[key];
-                        const row = draft[key] || { export_label: '', lingxing_field: '' };
-                        const changed = (() => {
-                          const saved = data.fieldMappings.find(item => item.web_field === key);
-                          return !saved || saved.export_label !== row.export_label || saved.lingxing_field !== row.lingxing_field;
-                        })();
+                    <tbody>
+                      {FIELD_GROUPS.map(group => {
+                        const keyword = query.trim().toLowerCase();
+                        const rows = FIELD_MAPPINGS.filter(item => item.group === group.key).filter(item => {
+                          if (!keyword) return true;
+                          const row = draft[item.web_field];
+                          return [item.web_label, row?.export_label, row?.lingxing_field]
+                            .filter(Boolean)
+                            .some(text => String(text).toLowerCase().includes(keyword));
+                        });
+                        if (!rows.length) return null;
                         return (
-                          <tr key={key} className="align-middle">
-                            <td className="py-2.5 pr-3">
-                              <input
-                                className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-                                value={row.export_label}
-                                onChange={event => setDraft(prev => ({ ...prev, [key]: { ...row, export_label: event.target.value } }))}
-                                aria-label={`${meta.label} 的下载列名`}
-                              />
-                            </td>
-                            <td className="py-2.5 pr-3">
-                              <div className="flex flex-col">
-                                <span className="font-medium text-slate-800">{meta.label}</span>
-                                <span className="text-[11px] text-slate-400">{meta.hint}</span>
-                              </div>
-                            </td>
-                            <td className="py-2.5 pr-3">
-                              <input
-                                className="w-full rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-1.5 font-mono text-[11px] text-slate-700 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
-                                value={row.lingxing_field}
-                                onChange={event => setDraft(prev => ({ ...prev, [key]: { ...row, lingxing_field: event.target.value } }))}
-                                spellCheck={false}
-                                aria-label={`${meta.label} 的领星字段路径`}
-                              />
-                            </td>
-                            <td className="py-2.5">
-                              <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  className={ghostClass}
-                                  disabled={busy || !changed}
-                                  onClick={() => save({ action: 'field_mapping', web_field: key, export_label: row.export_label, lingxing_field: row.lingxing_field }, `${meta.label} 映射已保存`)}
-                                >
-                                  <Save className="h-3.5 w-3.5" />保存
-                                </button>
-                                <button
-                                  className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
-                                  disabled={busy}
-                                  title="恢复该字段默认值"
-                                  onClick={() => save({ action: 'field_mapping_reset', web_field: key }, `${meta.label} 已恢复默认`)}
-                                >
-                                  <RotateCcw className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
+                          <React.Fragment key={group.key}>
+                            <tr className="bg-slate-50/80">
+                              <td colSpan={4} className="px-3 py-1.5 text-[11px] font-semibold text-slate-500">{group.label}</td>
+                            </tr>
+                            {rows.map(item => {
+                              const key = item.web_field;
+                              const row = draft[key] || { export_label: item.export_label, lingxing_field: item.lingxing_field };
+                              const saved = data.fieldMappings.find(entry => entry.web_field === key);
+                              const changed = !saved || saved.export_label !== row.export_label || saved.lingxing_field !== row.lingxing_field;
+                              return (
+                                <tr key={key} className="border-t border-slate-100 align-middle hover:bg-slate-50/60">
+                                  <td className="px-3 py-2">
+                                    <input
+                                      className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                                      value={row.export_label}
+                                      onChange={event => setDraft(prev => ({ ...prev, [key]: { ...row, export_label: event.target.value } }))}
+                                      aria-label={`${item.web_label} 的下载列名`}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex flex-col">
+                                      <span className="font-medium text-slate-800">{item.web_label}</span>
+                                      <span className="font-mono text-[10px] text-slate-400">{key}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      className="w-full rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-1.5 font-mono text-[11px] text-slate-700 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
+                                      value={row.lingxing_field}
+                                      onChange={event => setDraft(prev => ({ ...prev, [key]: { ...row, lingxing_field: event.target.value } }))}
+                                      spellCheck={false}
+                                      aria-label={`${item.web_label} 的领星字段路径`}
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <button
+                                        className={ghostClass}
+                                        disabled={busy || !changed}
+                                        onClick={() => save({ action: 'field_mapping', web_field: key, export_label: row.export_label, lingxing_field: row.lingxing_field }, `${item.web_label} 映射已保存`)}
+                                      >
+                                        <Save className="h-3.5 w-3.5" />保存
+                                      </button>
+                                      <button
+                                        className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+                                        disabled={busy}
+                                        title="恢复该字段默认值"
+                                        onClick={() => save({ action: 'field_mapping_reset', web_field: key }, `${item.web_label} 已恢复默认`)}
+                                      >
+                                        <RotateCcw className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
@@ -482,8 +501,10 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                 <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-[11px] leading-relaxed text-slate-500">
                   路径写法：<code className="font-mono text-slate-700">brands[]</code> 取数组第一个非空值 ·
                   <code className="ml-1 font-mono text-slate-700">parent_asins[].parent_asin</code> 取子字段 ·
-                  <code className="ml-1 font-mono text-slate-700">price_list[].local_name@max(volume)</code> 取销量最大的那条 ·
-                  <code className="ml-1 font-mono text-slate-700">categories[]@level(2)</code> 按分隔符取第 2 段。
+                  <code className="ml-1 font-mono text-slate-700">seller_store_countries[0].country</code> 指定下标 ·
+                  <code className="ml-1 font-mono text-slate-700">price_list[].local_name@max(volume)</code> 取销量最大的一条 ·
+                  <code className="ml-1 font-mono text-slate-700">categories[]@level(2)</code> 按分隔符取第 2 段。<br />
+                  比率列（CVR、销量CVR、CTR、广告CVR、CPC、ROAS、ACOS、ACoAS、ASoAS、自然CVR）由分子分母现算，不参与映射；成本与广告金额自动取绝对值。
                 </div>
               </section>}
 

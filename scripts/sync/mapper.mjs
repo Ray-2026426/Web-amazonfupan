@@ -14,6 +14,8 @@
  *   · 销售额 / 广告销售额保留原币种（币种记在 snapshot.meta.currency）
  */
 
+import { ABS_FIELDS, DEFAULT_FIELD_PATHS } from '../../shared/field-mapping.mjs';
+
 /** 领星大量金额字段是字符串，统一转数字 */
 export const num = (v) => {
     if (v === null || v === undefined || v === '') return 0;
@@ -59,16 +61,7 @@ function shopMeta(shop, row) {
  *   price_list[].local_name@max(volume)  取 volume 最大的那个元素的 local_name
  * ------------------------------------------------------------------ */
 
-export const DEFAULT_FIELD_PATHS = {
-    asin: 'asin',
-    parent_asin: 'parent_asins[].parent_asin',
-    shop_name: 'seller_store_countries[].seller_name',
-    country: 'seller_store_countries[].country',
-    manager: 'principal_names[]',
-    product_name: 'price_list[].local_name@max(volume)',
-    sub_category: 'categories[]@level(2)',
-    brand: 'brands[]',
-};
+export { DEFAULT_FIELD_PATHS };
 
 const PATH_RE = /^([A-Za-z0-9_]+)(?:\[(\d*)\])?(?:\.([A-Za-z0-9_]+))?$/;
 
@@ -142,11 +135,11 @@ function normalizeFieldMap(fieldMap) {
 const EMPTY_COST = {
     refund_amount: 0,
     gross_profit: 0,
-    first_mile: 0,
-    fba_fee: 0,
-    storage_fee: 0,
-    purchase: 0,
-    commission: 0,
+    logistics_costs: 0,
+    fulfillment_fee: 0,
+    fba_storage_fee: 0,
+    purchase_costs: 0,
+    selling_fee: 0,
 };
 
 /** 「有活动」判定：任一经纬度非 0 才保留，避免把整个 ASIN 目录（97% 是零）搬进库 */
@@ -163,6 +156,15 @@ function legacyProductName(row) {
     return best?.local_name || prices.find((p) => p?.local_name)?.local_name || row.local_name || '';
 }
 
+/** 按「pp. / op.」前缀取值：op 取自成本对象，pp 取自产品表现行 */
+function readValue(row, cost, path) {
+    const text = String(path || '').trim();
+    const match = /^(pp|op)\.(.+)$/.exec(text);
+    if (!match) return resolveField(row, text);
+    if (match[1] === 'op') return cost ? cost[match[2]] ?? '' : '';
+    return resolveField(row, match[2]);
+}
+
 /**
  * 单行转换。
  * @param {object} args
@@ -176,57 +178,61 @@ export function toDataRow({ shop, row, cost, date, fieldMap }) {
     const meta = shopMeta(shop, row);
     const c = cost || EMPTY_COST;
     const paths = normalizeFieldMap(fieldMap);
-    const pick = (field, fallback = '') => resolveField(row, paths[field]) || fallback;
-    const asin = pick('asin') || '-';
+    const pickText = (field, fallback = '') => toText(readValue(row, c, paths[field])) || fallback;
+    const pickNumber = (field) => {
+        const value = num(readValue(row, c, paths[field]));
+        return ABS_FIELDS.has(field) ? Math.abs(value) : value;
+    };
+    const asin = pickText('asin') || '-';
     const data = {
         id: `${meta.sid}|${asin}|${date}`,
         date,
         /** 数据库主键用的两个维度（DataRow 本身不需要，但入库需要） */
         sid: meta.sid,
         asin,
-        country: pick('country', meta.country),
-        shop_name: pick('shop_name', meta.shop_name),
-        brand: pick('brand'),
-        manager: pick('manager'),
-        sub_category: pick('sub_category') || categoryLevel2(row.categories),
-        parent_asin: pick('parent_asin') || row.parent_asin || '',
+        country: pickText('country', meta.country),
+        shop_name: pickText('shop_name', meta.shop_name),
+        brand: pickText('brand'),
+        manager: pickText('manager'),
+        sub_category: pickText('sub_category') || categoryLevel2(row.categories),
+        parent_asin: pickText('parent_asin') || row.parent_asin || '',
         child_asin: asin,
         // 领星 item_name 是 Amazon 标题，不是内部品名。品名默认取 price_list 里销量最大的 local_name。
-        product_name: pick('product_name') || legacyProductName(row),
+        product_name: pickText('product_name') || legacyProductName(row),
 
-        sales_quantity: num(row.volume),
-        order_quantity: num(row.order_items),
-        sales_amount: num(row.amount),
-        gross_profit: num(c.gross_profit),
-        fba_sellable_qty: num(row.afn_fulfillable_quantity),
-        sessions: num(row.sessions_total),
+        sales_quantity: pickNumber('sales_quantity'),
+        order_quantity: pickNumber('order_quantity'),
+        sales_amount: pickNumber('sales_amount'),
+        gross_profit: pickNumber('gross_profit'),
+        fba_sellable_qty: pickNumber('fba_sellable_qty'),
+        sessions: pickNumber('sessions'),
 
-        first_mile_cost: abs(c.first_mile),
-        procurement_cost: abs(c.purchase),
-        storage_fee: abs(c.storage_fee),
-        fba_fee: abs(c.fba_fee),
-        refund_cost: abs(c.refund_amount),
-        platform_commission: abs(c.commission),
+        first_mile_cost: pickNumber('first_mile_cost'),
+        procurement_cost: pickNumber('procurement_cost'),
+        storage_fee: pickNumber('storage_fee'),
+        fba_fee: pickNumber('fba_fee'),
+        refund_cost: pickNumber('refund_cost'),
+        platform_commission: pickNumber('platform_commission'),
 
-        ad_spend: abs(row.spend),
-        ad_sales: abs(row.ad_sales_amount),
-        ad_orders: num(row.ad_order_quantity),
-        sp_spend: abs(row.ads_sp_cost),
-        sp_sales: abs(row.ads_sp_sales),
-        sd_spend: abs(row.ads_sd_cost),
-        sd_sales: abs(row.ads_sd_sales),
-        sb_spend: abs(row.shared_ads_sb_cost),
-        sb_sales: abs(row.shared_ads_sb_sales),
-        sbv_spend: abs(row.shared_ads_sbv_cost),
-        sbv_sales: abs(row.shared_ads_sbv_sales),
+        ad_spend: pickNumber('ad_spend'),
+        ad_sales: pickNumber('ad_sales'),
+        ad_orders: pickNumber('ad_orders'),
+        sp_spend: pickNumber('sp_spend'),
+        sp_sales: pickNumber('sp_sales'),
+        sd_spend: pickNumber('sd_spend'),
+        sd_sales: pickNumber('sd_sales'),
+        sb_spend: pickNumber('sb_spend'),
+        sb_sales: pickNumber('sb_sales'),
+        sbv_spend: pickNumber('sbv_spend'),
+        sbv_sales: pickNumber('sbv_sales'),
 
-        impressions: num(row.impressions),
-        clicks: num(row.clicks),
-        natural_orders: num(row.nature_order_items),
-        natural_clicks: num(row.nature_click),
+        impressions: pickNumber('impressions'),
+        clicks: pickNumber('clicks'),
+        natural_orders: pickNumber('natural_orders'),
+        natural_clicks: pickNumber('natural_clicks'),
 
-        rating: num(row.avg_star),
-        review_count: num(row.reviews_count),
+        rating: pickNumber('rating'),
+        review_count: pickNumber('review_count'),
     };
     return data;
 }
@@ -243,11 +249,11 @@ export function mergeOrderProfit(opRows, { firstMileField = 'logistics_costs' } 
         const cur = map.get(key) || { ...EMPTY_COST };
         cur.refund_amount += abs(r.refund_amount);
         cur.gross_profit += num(r.gross_profit);
-        cur.first_mile += abs(r[firstMileField]);
-        cur.fba_fee += abs(r.fulfillment_fee);
-        cur.storage_fee += abs(r.fba_storage_fee);
-        cur.purchase += abs(r.purchase_costs);
-        cur.commission += abs(r.selling_fee);
+        cur.logistics_costs += abs(r[firstMileField]);
+        cur.fulfillment_fee += abs(r.fulfillment_fee);
+        cur.fba_storage_fee += abs(r.fba_storage_fee);
+        cur.purchase_costs += abs(r.purchase_costs);
+        cur.selling_fee += abs(r.selling_fee);
         map.set(key, cur);
     }
     return map;

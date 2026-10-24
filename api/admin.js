@@ -1,4 +1,5 @@
 import { adminAuthorized, fetchTable, isValidDate, writeTable } from '../serverless/supabase.js';
+import { FIELD_KEYS, FIELD_MAPPINGS } from '../shared/field-mapping.mjs';
 import { randomUUID } from 'node:crypto';
 
 const clean = (value, label, max = 100) => {
@@ -7,18 +8,10 @@ const clean = (value, label, max = 100) => {
   return text;
 };
 
-/** 可配置映射的字段：web 内部字段 → 下载列名 + 领星取值路径 */
-const FIELD_KEYS = ['asin', 'parent_asin', 'shop_name', 'country', 'manager', 'product_name', 'sub_category', 'brand'];
-const DEFAULT_FIELD_MAPPINGS = {
-  asin: { export_label: 'ASIN', lingxing_field: 'asin' },
-  parent_asin: { export_label: '父ASIN', lingxing_field: 'parent_asins[].parent_asin' },
-  shop_name: { export_label: '店铺', lingxing_field: 'seller_store_countries[].seller_name' },
-  country: { export_label: '国家', lingxing_field: 'seller_store_countries[].country' },
-  manager: { export_label: '负责人', lingxing_field: 'principal_names[]' },
-  product_name: { export_label: '品名', lingxing_field: 'price_list[].local_name@max(volume)' },
-  sub_category: { export_label: '二级分类', lingxing_field: 'categories[]@level(2)' },
-  brand: { export_label: '品牌', lingxing_field: 'brands[]' },
-};
+/** 可配置映射的字段：唯一定义在 shared/field-mapping.mjs，与同步脚本、后台 UI 共用 */
+const DEFAULT_FIELD_MAPPINGS = Object.fromEntries(
+  FIELD_MAPPINGS.map((item) => [item.web_field, { export_label: item.export_label, lingxing_field: item.lingxing_field }]),
+);
 const targetTextFields = ['brand', 'country', 'shop_name', 'manager', 'sub_category', 'parent_asin', 'child_asin', 'product_name'];
 const targetNumberFields = ['sales_quantity_target', 'sales_amount_target', 'gross_profit_target', 'gross_margin_target', 'ad_spend_target'];
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

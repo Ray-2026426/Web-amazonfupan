@@ -35,8 +35,29 @@ test('映射路径解析支持数组、下标、层级与按销量取最大', ()
   assert.equal(resolveField(row, 'price_list[].local_name@max(volume)'), '大号');
   assert.equal(resolveField(row, 'categories[]@level(2)'), 'A分类');
   assert.equal(resolveField(row, 'not_exists[]'), '');
-  // 默认映射覆盖 8 个字段，且引用的正是上面这些路径
-  assert.deepEqual(Object.keys(DEFAULT_FIELD_PATHS).sort(), ['asin', 'brand', 'country', 'manager', 'parent_asin', 'product_name', 'shop_name', 'sub_category']);
+  // 37 个字段全部有默认映射（8 个基础信息 + 12 个销量收入成本 + 8 个流量 + 11 个广告）
+  assert.equal(Object.keys(DEFAULT_FIELD_PATHS).length, 37);
+  assert.equal(DEFAULT_FIELD_PATHS.gross_profit, 'op.gross_profit');
+  assert.equal(DEFAULT_FIELD_PATHS.sales_amount, 'pp.amount');
+});
+
+test('数值字段也走映射：pp 取产品表现，op 取订单利润并取绝对值', () => {
+  const row = { asin: 'B001', volume: 10, amount: '1,234.5', spend: -20, ad_sales_amount: -300 };
+  const cost = { gross_profit: -50, logistics_costs: 12, purchase_costs: 8 };
+  const data = toDataRow({ date: '2026-10-18', shop: { id: 1, name: '店' }, row, cost });
+  assert.equal(data.sales_quantity, 10);
+  assert.equal(data.sales_amount, 1234.5);
+  assert.equal(data.ad_spend, 20);
+  assert.equal(data.ad_sales, 300);
+  assert.equal(data.gross_profit, -50);
+  assert.equal(data.first_mile_cost, 12);
+  assert.equal(data.procurement_cost, 8);
+  // 把销售额改指向订单利润的字段，取值来源随之改变
+  const swapped = toDataRow({
+    date: '2026-10-18', shop: { id: 1, name: '店' }, row, cost,
+    fieldMap: { sales_amount: 'op.purchase_costs' },
+  });
+  assert.equal(swapped.sales_amount, 8);
 });
 
 test('云端字段映射改变下一次同步的取值', () => {
