@@ -312,8 +312,15 @@ async function main() {
             rawPPRows += (payload.list || []).length;
             if (payload.total_sum?.amount !== undefined) {
                 const amount = (payload.list || []).reduce((sum, row) => sum + num(row.amount), 0);
-                if (Math.abs(amount - num(payload.total_sum.amount)) > 0.05) {
-                    throw new Error(`${date} 店铺 ${sid} 销售额与领星汇总不一致`);
+                const expectedAmount = num(payload.total_sum.amount);
+                /*
+                 * 容差 0.05 元对「单店整天上千行」太严：
+                 * 每行金额保留两位小数，上千行累加后的舍入漂移就可能超过 5 分钱（实测踩过一次）。
+                 * 改成「绝对 5 分钱 或 千分之二」取大者——丢一页数据通常是几个百分点，仍能拦住。
+                 */
+                const tolerance = Math.max(0.05, Math.abs(expectedAmount) * 0.002);
+                if (Math.abs(amount - expectedAmount) > tolerance) {
+                    throw new Error(`${date} 店铺 ${sid} 销售额与领星汇总不一致：明细 ${amount.toFixed(2)} vs 汇总 ${expectedAmount.toFixed(2)}`);
                 }
             }
             if (payload.total_sum?.volume !== undefined) {
