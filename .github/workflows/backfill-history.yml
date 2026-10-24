@@ -114,11 +114,25 @@ jobs:
           CHUNK_FROM: ${{ matrix.chunk.from }}
           CHUNK_TO: ${{ matrix.chunk.to }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           echo "同步 $CHUNK_FROM ~ $CHUNK_TO"
-          node scripts/sync/run.mjs --from "$CHUNK_FROM" --to "$CHUNK_TO" --upload
+          # 领星偶发 429 / 网络抖动会让整块失败；整块是幂等的（按天原子替换），
+          # 所以这里自动重试一次，仍失败才真的判失败。
+          attempt=1
+          until node scripts/sync/run.mjs --from "$CHUNK_FROM" --to "$CHUNK_TO" --upload; do
+            if [ "$attempt" -ge 2 ]; then
+              echo "::error title=回补失败::$CHUNK_FROM ~ $CHUNK_TO 连续 2 次失败"
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            echo "第 $attempt 次尝试：等待 90 秒后重跑 $CHUNK_FROM ~ $CHUNK_TO"
+            sleep 90
+          done
 
       - name: 记录失败（便于事后补跑）
         if: failure()
+        env:
+          CHUNK_FROM: ${{ matrix.chunk.from }}
+          CHUNK_TO: ${{ matrix.chunk.to }}
         run: |
           echo "::error title=回补失败::$CHUNK_FROM ~ $CHUNK_TO 失败，修好后单独重跑这一段即可"
