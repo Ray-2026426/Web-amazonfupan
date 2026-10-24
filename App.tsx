@@ -776,18 +776,28 @@ const App: React.FC = () => {
                     )}
 
                     {!processedData && (
-                        <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-                            <div className="mb-5 rounded-2xl bg-sky-50 p-6 text-sky-300 ring-1 ring-sky-100">
-                                <FileSpreadsheet className="w-12 h-12" />
+                        // 云端第一次拉数（或切换区间后还没拿到新数据）时只显示加载态，
+                        // 不要甩「暂无数据 + 导入数据」，那会让人以为数据丢了
+                        (cloudLoading || (CLOUD_ENABLED && Boolean(cloudToken) && !cloudConnected && !cloudStatus)) && !activeRawData.length ? (
+                            <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+                                <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
+                                <p className="text-lg font-semibold text-slate-700">正在加载数据…</p>
+                                <p className="mt-1 text-sm text-slate-500">{cloudStatus ? '正在从云端读取业绩数据' : '正在连接云端数据'}</p>
                             </div>
-                            <p className="text-lg font-semibold text-slate-700">{restoreFailed ? '本地数据暂时无法读取' : activeRawData.length ? '当前选择无数据' : '暂无数据'}</p>
-                            <p className="mt-1 text-sm text-slate-500">{restoreFailed ? '请检查浏览器存储权限后刷新页面' : activeRawData.length ? '请调整分析周期，或切换到有数据的粒度（月度/周度/日度）' : isDailyMode && !cloudConnected ? '日度视图需要连接云端数据；本地导入的月报/周报没有日粒度' : '可先加载样例，也可导入自己的数据'}</p>
-                            {!restoreFailed && !activeRawData.length && <div className="mt-5 flex flex-wrap justify-center gap-2">
-                                <button type="button" onClick={downloadImportTemplate} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">下载模板</button>
-                                <button type="button" onClick={handleLoadSample} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">加载脱敏样例</button>
-                                <button type="button" onClick={() => setShowUploadModal(true)} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white">导入自己的数据</button>
-                            </div>}
-                        </div>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+                                <div className="mb-5 rounded-2xl bg-sky-50 p-6 text-sky-300 ring-1 ring-sky-100">
+                                    <FileSpreadsheet className="w-12 h-12" />
+                                </div>
+                                <p className="text-lg font-semibold text-slate-700">{restoreFailed ? '本地数据暂时无法读取' : activeRawData.length ? '当前选择无数据' : cloudConnected ? '当前区间云端暂无数据' : '暂无数据'}</p>
+                                <p className="mt-1 text-sm text-slate-500">{restoreFailed ? '请检查浏览器存储权限后刷新页面' : activeRawData.length ? '请调整分析周期，或切换到有数据的粒度（月度/周度/日度）' : isDailyMode && !cloudConnected ? '日度视图需要连接云端数据；本地导入的月报/周报没有日粒度' : cloudConnected ? '可调整分析周期，或到「数据管理 → 数据质量」看哪些日期缺数据并补数' : '可先加载样例，也可导入自己的数据'}</p>
+                                {!restoreFailed && !activeRawData.length && !cloudConnected && <div className="mt-5 flex flex-wrap justify-center gap-2">
+                                    <button type="button" onClick={downloadImportTemplate} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">下载模板</button>
+                                    <button type="button" onClick={handleLoadSample} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">加载脱敏样例</button>
+                                    <button type="button" onClick={() => setShowUploadModal(true)} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white">导入自己的数据</button>
+                                </div>}
+                            </div>
+                        )
                     )}
                 </div>
             )}
