@@ -4,7 +4,7 @@ import { enrichTargetData } from '../utils';
 import { dailyCsvHeader, dailyCsvRows, dailyExportMatrix, type ExportLabels } from '../dailyExport';
 import { FIELD_GROUPS, FIELD_MAPPINGS } from '../shared/field-mapping.mjs';
 import { useEscClose } from './useEscClose';
-import { AlertCircle, Database, Download, RefreshCw, RotateCcw, Save, Search, Settings2, Table2, Upload, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Database, Download, RefreshCw, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Upload, X } from 'lucide-react';
 
 type FieldMapping = { web_field: string; export_label: string; lingxing_field: string };
 type Run = { id: number; started_at: string; range_from: string; range_to: string; status: string; rows_daily: number; error: string | null };
@@ -23,13 +23,18 @@ type AdminData = {
 const TOKEN_KEY = 'amazon-dashboard-admin-token';
 
 /** 映射表字段较多，按分组展示，并支持关键字过滤 */
-type Tab = 'overview' | 'fields' | 'targets' | 'data';
+type Tab = 'overview' | 'quality' | 'fields' | 'targets' | 'data';
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'overview', label: '概览', icon: <Settings2 className="h-3.5 w-3.5" /> },
+  { key: 'quality', label: '数据质量', icon: <ShieldCheck className="h-3.5 w-3.5" /> },
   { key: 'fields', label: '字段映射', icon: <Table2 className="h-3.5 w-3.5" /> },
   { key: 'targets', label: '目标表', icon: <Database className="h-3.5 w-3.5" /> },
   { key: 'data', label: '数据下载', icon: <Download className="h-3.5 w-3.5" /> },
 ];
+
+type CoverageDay = { date: string; rows: number; sales_amount: number; gross_profit: number; updated_at: string };
+type DayStatus = 'ok' | 'empty' | 'missing';
+type CalendarCell = { date: string; day: number; status: DayStatus; info?: CoverageDay } | null;
 
 export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?: () => void }> = ({ onClose, onTargetsUpdated }) => {
   useEscClose(true, onClose);
@@ -47,6 +52,11 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   const [exportMode, setExportMode] = useState<'day' | 'range'>('range');
   const [draft, setDraft] = useState<Record<string, { export_label: string; lingxing_field: string }>>({});
   const [query, setQuery] = useState('');
+  // 数据质量
+  const [qualityDays, setQualityDays] = useState<30 | 90 | 400>(90);
+  const [coverage, setCoverage] = useState<{ from: string; to: string; days: CoverageDay[] } | null>(null);
+  const [coverageBusy, setCoverageBusy] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const localDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -246,8 +256,115 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
     }
   };
 
-  const cardClass = 'rounded-2xl border border-slate-200/70 bg-white p-5';
-  const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100';
+  /* ---------------- 数据质量：按天覆盖 + 一键补数 ---------------- */
+
+  const loadCoverage = async (range: number) => {
+    const to = localDate(new Date());
+    const start = new Date();
+    start.setDate(start.getDate() - (range - 1));
+    const from = localDate(start);
+    setCoverageBusy(true);
+    try {
+      const response = await fetch(`/api/coverage?from=${from}&to=${to}`, { headers: { Authorization: `Bearer ${token}` } });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || `读取失败：${response.status}`);
+      setCoverage({ from: result.from ?? from, to: result.to ?? to, days: result.days ?? [] });
+      setSelected(new Set());
+    } catch (error) {
+      setMessage(String(error instanceof Error ? error.message : error));
+    } finally {
+      setCoverageBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === 'quality' && token) void loadCoverage(qualityDays);
+  }, [tab, qualityDays, token]);
+
+  const coverageMap = useMemo(() => new Map((coverage?.days || []).map(day => [day.date, day])), [coverage]);
+
+  const calendar = useMemo<{ key: string; label: string; cells: CalendarCell[] }[]>(() => {
+    if (!coverage) return [];
+    const out: { key: string; label: string; cells: CalendarCell[] }[] = [];
+    const end = new Date(`${coverage.to}T00:00:00`);
+    let cursor = new Date(new Date(`${coverage.from}T00:00:00`).getFullYear(), new Date(`${coverage.from}T00:00:00`).getMonth(), 1);
+    while (cursor <= end) {
+      const year = cursor.getFullYear();
+      const month = cursor.getMonth();
+      const lead = new Date(year, month, 1).getDay();
+      const dim = new Date(year, month + 1, 0).getDate();
+      const cells: CalendarCell[] = Array.from({ length: lead }, () => null);
+      for (let day = 1; day <= dim; day++) {
+        const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        if (date < coverage.from || date > coverage.to) { cells.push(null); continue; }
+        const info = coverageMap.get(date);
+        const status: DayStatus = !info ? 'missing' : Number(info.sales_amount) === 0 ? 'empty' : 'ok';
+        cells.push({ date, day, status, info });
+      }
+      out.push({ key: `${year}-${month}`, label: `${year} 年 ${month + 1} 月`, cells });
+      cursor = new Date(year, month + 1, 1);
+    }
+    return out;
+  }, [coverage, coverageMap]);
+
+  const counts = useMemo(() => {
+    let ok = 0;
+    let empty = 0;
+    const missingDates: string[] = [];
+    for (const month of calendar) {
+      for (const cell of month.cells) {
+        if (!cell) continue;
+        if (cell.status === 'ok') ok += 1;
+        else if (cell.status === 'empty') empty += 1;
+        else missingDates.push(cell.date);
+      }
+    }
+    return { ok, empty, missing: missingDates.length, missingDates };
+  }, [calendar]);
+
+  const toggleDate = (date: string) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(date)) next.delete(date);
+    else next.add(date);
+    return next;
+  });
+
+  const dispatchBackfill = async (dates: string[]) => {
+    if (!dates.length) {
+      setMessage('先选择要补的日期');
+      return;
+    }
+    setBusy(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/backfill', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dates }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || `触发失败：${response.status}`);
+      setMessage(`已提交 ${result.count} 天的补数任务（${result.from} ~ ${result.to}）。跑完后刷新这页即可看到新状态。`);
+      setSelected(new Set());
+    } catch (error) {
+      setMessage(String(error instanceof Error ? error.message : error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectedList = [...selected].sort();
+
+  const dayClass = (status: DayStatus, active: boolean) => {
+    const tone = status === 'ok'
+      ? 'bg-emerald-50 text-emerald-700 ring-emerald-100 hover:ring-emerald-300'
+      : status === 'empty'
+        ? 'bg-amber-50 text-amber-700 ring-amber-100 hover:ring-amber-300'
+        : 'bg-slate-50 text-slate-400 ring-slate-200 hover:ring-slate-300';
+    return `relative h-9 rounded-lg text-[11px] font-medium ring-1 transition ${tone} ${active ? 'ring-2 ring-slate-900' : ''}`;
+  };
+
+  const cardClass = 'rounded-2xl border border-slate-200/70 bg-white p-5';  const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100';
   const primaryClass = 'inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40';
   const ghostClass = 'inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-40';
   const sectionTitle = 'text-sm font-semibold text-slate-900';
@@ -379,6 +496,89 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                   </div>
                 </section>
               </div>}
+
+              {tab === 'quality' && <section className={cardClass}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className={sectionTitle}>数据质量</h3>
+                    <p className={sectionHint}>
+                      按天看云端日明细：<span className="text-emerald-700">绿色</span>有数据、
+                      <span className="text-amber-700">黄色</span>有明细但销售额为 0（多半没拉全）、
+                      <span className="text-slate-500">灰色</span>完全没数据。点日期选中，再一键补数。
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="inline-flex rounded-xl bg-slate-100 p-0.5 text-xs">
+                      {([30, 90, 400] as const).map(range => (
+                        <button
+                          key={range}
+                          type="button"
+                          onClick={() => setQualityDays(range)}
+                          className={`rounded-lg px-2.5 py-1.5 font-medium transition ${qualityDays === range ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                          近 {range} 天
+                        </button>
+                      ))}
+                    </div>
+                    <button className={ghostClass} disabled={coverageBusy} onClick={() => void loadCoverage(qualityDays)}>
+                      <RefreshCw className={`h-3.5 w-3.5 ${coverageBusy ? 'animate-spin' : ''}`} />刷新
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100"><CheckCircle2 className="h-3 w-3" />正常 {counts.ok}</span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 ring-1 ring-amber-100"><AlertCircle className="h-3 w-3" />销售额为 0 {counts.empty}</span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200">缺失 {counts.missing}</span>
+                  <div className="ml-auto flex flex-wrap gap-2">
+                    <button
+                      className={primaryClass}
+                      disabled={busy || selectedList.length === 0}
+                      onClick={() => void dispatchBackfill(selectedList)}
+                    >
+                      {selectedList.length === 1 ? `补这一天（${selectedList[0]}）` : selectedList.length > 1 ? `补选中的 ${selectedList.length} 天` : '补选中的日期'}
+                    </button>
+                    <button
+                      className={ghostClass}
+                      disabled={busy || counts.missing === 0}
+                      onClick={() => void dispatchBackfill(counts.missingDates)}
+                    >
+                      补齐缺失的 {counts.missing} 天
+                    </button>
+                  </div>
+                </div>
+
+                {coverageBusy && !coverage && <p className="py-10 text-center text-xs text-slate-400">正在读取每日覆盖…</p>}
+
+                {coverage && <div className="mt-4">
+                  <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[10px] text-slate-400">
+                    {['日', '一', '二', '三', '四', '五', '六'].map(label => <span key={label}>{label}</span>)}
+                  </div>
+                  <div className="max-h-[46vh] space-y-4 overflow-y-auto pr-1">
+                    {calendar.map(month => (
+                      <div key={month.key}>
+                        <p className="mb-1.5 text-[11px] font-medium text-slate-400">{month.label}</p>
+                        <div className="grid grid-cols-7 gap-1">
+                          {month.cells.map((cell, index) => cell ? (
+                            <button
+                              key={cell.date}
+                              type="button"
+                              onClick={() => toggleDate(cell.date)}
+                              className={dayClass(cell.status, selected.has(cell.date))}
+                              title={cell.info
+                                ? `${cell.date} · ${cell.info.rows} 行 · 销售额 ${Number(cell.info.sales_amount).toFixed(2)} · 毛利 ${Number(cell.info.gross_profit).toFixed(2)}`
+                                : `${cell.date} · 云端无数据`}
+                            >
+                              {cell.day}
+                            </button>
+                          ) : <span key={`blank-${month.key}-${index}`} />)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {!calendar.length && <p className="py-10 text-center text-xs text-slate-400">这个区间还没有任何数据</p>}
+                </div>}
+              </section>}
 
               {tab === 'fields' && <section className={cardClass}>
                 <div className="flex flex-wrap items-start justify-between gap-3">

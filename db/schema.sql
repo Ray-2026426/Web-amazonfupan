@@ -142,6 +142,17 @@ create index if not exists idx_fact_daily_date_sid on fact_daily (date, sid);
 create index if not exists idx_fact_daily_asin on fact_daily (asin);
 create index if not exists idx_fact_daily_period on fact_daily (date, sid, asin);
 
+-- 每日覆盖：数据质量页用，一天一行，方便一次看清哪些日期缺数据、哪些数字异常
+create or replace view v_fact_daily_coverage as
+select
+    date,
+    count(*)::int as rows,
+    coalesce(sum(sales_amount), 0) as sales_amount,
+    coalesce(sum(gross_profit), 0) as gross_profit,
+    max(updated_at) as updated_at
+from fact_daily
+group by date;
+
 -- 写入和读取均经过服务端；前端只有单独的只读访问密码，拿不到 Supabase 密钥。
 alter table fact_daily  enable row level security;
 alter table sync_runs   enable row level security;
@@ -149,10 +160,10 @@ alter table sync_runs   enable row level security;
 drop policy if exists "read fact_daily" on fact_daily;
 drop policy if exists "read sync_runs" on sync_runs;
 revoke all on table fact_daily, sync_runs from anon, authenticated;
-revoke all on table v_fact_month, v_fact_week from anon, authenticated;
+revoke all on table v_fact_month, v_fact_week, v_fact_daily_coverage from anon, authenticated;
 grant usage on schema public to service_role;
 grant select, insert, update, delete on table fact_daily, sync_runs to service_role;
-grant select on table v_fact_month, v_fact_week to service_role;
+grant select on table v_fact_month, v_fact_week, v_fact_daily_coverage to service_role;
 grant usage, select on sequence sync_runs_id_seq to service_role;
 
 -- 视图默认沿用基表权限（Postgres 15+ 的 security_invoker 让 RLS 生效）

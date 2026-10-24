@@ -1,5 +1,5 @@
 -- ============================================================
--- 云端字段映射：一次性迁移脚本
+-- 管理后台升级：字段映射表 + 数据覆盖视图（一次性迁移）
 --
 -- 用法：Supabase 控制台 → 左侧 SQL Editor → New query → 粘贴本文件全部内容 → Run
 -- 可重复执行：建表用 if not exists，写默认值用 on conflict do nothing，
@@ -67,3 +67,17 @@ grant select, insert, update, delete on table field_mappings to service_role;
 
 -- 5) 自检：应返回 37
 select count(*) as field_count from field_mappings;
+
+-- 6) 每日覆盖视图：数据质量页一天一行，看哪些日期缺数据、金额是否异常
+create or replace view v_fact_daily_coverage as
+select
+    date,
+    count(*)::int as rows,
+    coalesce(sum(sales_amount), 0) as sales_amount,
+    coalesce(sum(gross_profit), 0) as gross_profit,
+    max(updated_at) as updated_at
+from fact_daily
+group by date;
+
+revoke all on table v_fact_daily_coverage from anon, authenticated;
+grant select on table v_fact_daily_coverage to service_role;

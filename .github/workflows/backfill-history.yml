@@ -5,17 +5,22 @@ name: 历史数据回补
 # 约 2~4 分钟/天，一次跑 297 天会远超 GitHub Actions 单次 120 分钟上限。
 # 这里把区间切成若干小块，用 matrix 顺序执行，每块一个独立任务。
 #
-# 触发：Actions →「历史数据回补」→ Run workflow
-#   from        2025-01-01
+# 触发：Actions →「历史数据回补」→ Run workflow，或看板「数据质量」页一键补数
+#   dates       指定日期，逗号分隔（优先；用于补单个/多选日期）
+#   from        起始日期
 #   to          留空 = 昨天
 #   chunk_days  每块天数，默认 14（约 40~60 分钟，留足余量）
 #   max_parallel 同时几个，默认 1（领星限流，调大容易 429）
 on:
   workflow_dispatch:
     inputs:
+      dates:
+        description: '指定日期，逗号分隔（如 2026-10-02,2026-10-05；优先于 from/to）'
+        required: false
+        default: ''
       from:
-        description: '起始日期 YYYY-MM-DD'
-        required: true
+        description: '起始日期 YYYY-MM-DD（用 dates 时可留空）'
+        required: false
         default: '2025-01-01'
       to:
         description: '结束日期 YYYY-MM-DD（留空 = 昨天）'
@@ -44,44 +49,38 @@ jobs:
       chunks: ${{ steps.plan.outputs.chunks }}
       total: ${{ steps.plan.outputs.total }}
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: 切分日期区间
         id: plan
         env:
           INPUT_FROM: ${{ github.event.inputs.from }}
           INPUT_TO: ${{ github.event.inputs.to }}
+          INPUT_DATES: ${{ github.event.inputs.dates }}
           INPUT_CHUNK: ${{ github.event.inputs.chunk_days }}
         run: |
           set -euo pipefail
-          FROM="${INPUT_FROM:-2025-01-01}"
-          TO="${INPUT_TO:-$(date -u -d 'yesterday' +%F)}"
           CHUNK="${INPUT_CHUNK:-14}"
-          if ! [[ "$FROM" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ && "$TO" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-            echo "::error::日期格式应为 YYYY-MM-DD"; exit 1
+          TO="${INPUT_TO:-$(date -u -d 'yesterday' +%F)}"
+          if [ -n "${INPUT_DATES:-}" ]; then
+            chunks=$(node scripts/sync/plan-chunks.mjs --dates "$INPUT_DATES" --chunk "$CHUNK")
+            label="指定日期（$INPUT_DATES）"
+          else
+            chunks=$(node scripts/sync/plan-chunks.mjs --from "${INPUT_FROM:-2025-01-01}" --to "$TO" --chunk "$CHUNK")
+            label="${INPUT_FROM:-2025-01-01} ~ $TO"
           fi
-          if [[ "$FROM" > "$TO" ]]; then echo "::error::起始日期晚于结束日期"; exit 1; fi
-          if ! [[ "$CHUNK" =~ ^[0-9]+$ ]] || [ "$CHUNK" -lt 1 ] || [ "$CHUNK" -gt 31 ]; then
-            echo "::error::chunk_days 应为 1~31"; exit 1
-          fi
-
-          chunks="["
-          cursor="$FROM"
-          count=0
-          while :; do
-            end=$(date -u -d "$cursor + $((CHUNK - 1)) days" +%F)
-            if [[ "$end" > "$TO" ]]; then end="$TO"; fi
-            chunks+="{\"from\":\"$cursor\",\"to\":\"$end\"},"
-            count=$((count + 1))
-            if [[ "$end" == "$TO" ]]; then break; fi
-            cursor=$(date -u -d "$end + 1 day" +%F)
-          done
-          chunks="${chunks%,}]"
+          count=$(node -e 'console.log(JSON.parse(process.argv[1]).length)' "$chunks")
 
           # matrix 任务数上限，避免误输入产生上百个 job
           if [ "$count" -gt 60 ]; then
-            echo "::error::$count 个任务超过上限 60，请把 chunk_days 调大"; exit 1
+            echo "::error::$count 个任务超过上限 60，请减少日期或把 chunk_days 调大"; exit 1
           fi
 
-          echo "共 $count 个任务，区间 $FROM ~ $TO，每块 $CHUNK 天"
+          echo "共 $count 个任务：$label（每块最多 $CHUNK 天）"
           echo "chunks=$chunks" >> "$GITHUB_OUTPUT"
           echo "total=$count" >> "$GITHUB_OUTPUT"
 
