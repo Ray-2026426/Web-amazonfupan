@@ -119,3 +119,22 @@ test('weekly target grouping still allocates by natural week', () => {
   const week = byWeek.get(utils.periodKeyOf('2026-10-19', 'week'));
   assert.equal(week.sales_amount, 70);
 });
+
+test('日度目标 = 月目标 ÷ 当月天数（销量/销售额/毛利/广告同一套口径）', () => {
+  const monthly = { '2026-10': { sales_quantity: 310, sales_amount: 3100, gross_profit: 620, ad_spend: 155 } };
+  // 10 月有 31 天：每项都是月目标的 1/31
+  assert.equal(utils.allocateDailyTargetsFromMonths('2026-10-01', monthly).sales_amount, 100);
+  assert.equal(utils.allocateDailyTargetsFromMonths('2026-10-23', monthly).sales_amount, 100);
+  assert.equal(utils.allocateDailyTargetsFromMonths('2026-10-23', monthly).sales_quantity, 10);
+  assert.equal(utils.allocateDailyTargetsFromMonths('2026-10-23', monthly).gross_profit, 20);
+  assert.equal(utils.allocateDailyTargetsFromMonths('2026-10-23', monthly).ad_spend, 5);
+
+  // 趋势图用的旧字段名也要能拿到同样的数
+  const legacy = { '2026-10': { sq: 310, sa: 3100, gp: 620, ad: 155 } };
+  const day = utils.allocateDailyTargetsLegacy('2026-10-23', legacy);
+  assert.deepEqual(day, { sq: 10, sa: 100, gp: 20, ad: 5 });
+
+  // 11 月只有 30 天，同样月目标下日目标更大
+  const november = { '2026-11': { sales_quantity: 0, sales_amount: 3000, gross_profit: 0, ad_spend: 0 } };
+  assert.equal(utils.allocateDailyTargetsFromMonths('2026-11-05', november).sales_amount, 100);
+});

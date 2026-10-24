@@ -409,6 +409,41 @@ export const allocateWeeklyTargetsLegacy = (
   };
 };
 
+/** 日度目标：按「YYYY-MM-DD」把当月月目标按天拆分（月目标 ÷ 当月天数） */
+export const allocateDailyTargetsFromMonths = (
+  dayKey: string,
+  targetByMonth: Record<string, MonthlyTargetBucket>
+): AggregatedData => {
+  const match = dayKey.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return { ...initialAggregated };
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return allocateTargetsForDateRange(date, date, targetByMonth);
+};
+
+/** 日度目标（旧字段名 {sq,sa,gp,ad}），供趋势图使用 */
+export const allocateDailyTargetsLegacy = (
+  dayKey: string,
+  targetByMonth: Record<string, { sq: number; sa: number; gp: number; ad: number }>
+): { sq: number; sa: number; gp: number; ad: number } => {
+  const mapped: Record<string, MonthlyTargetBucket> = {};
+  Object.keys(targetByMonth).forEach((mk) => {
+    const t = targetByMonth[mk];
+    mapped[mk] = {
+      sales_quantity: t.sq,
+      sales_amount: t.sa,
+      gross_profit: t.gp,
+      ad_spend: t.ad,
+    };
+  });
+  const a = allocateDailyTargetsFromMonths(dayKey, mapped);
+  return {
+    sq: a.sales_quantity,
+    sa: a.sales_amount,
+    gp: a.gross_profit,
+    ad: a.ad_spend,
+  };
+};
+
 const collectMonthsInRange = (start: Date, end: Date): Set<string> => {
   const set = new Set<string>();
   const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());

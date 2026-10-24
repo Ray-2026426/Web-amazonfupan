@@ -5,6 +5,8 @@ import {
     getBusinessWeekRangeFromYearWeek,
     filterData,
     periodKeyOf,
+    allocateWeeklyTargetsLegacy,
+    allocateDailyTargetsLegacy,
 } from '../utils';
 import {
     Area,
@@ -74,8 +76,15 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
     const theme: ChartTheme = useChartTheme();
     const gradientId = `mini-trend-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
     const mainColor = seriesColor(theme, 0);
-    /** 目标线只对月度有意义：目标表是月粒度，周/日目标由月目标分摊，画在趋势上会误导 */
-    const showTarget = periodMode === 'month' && Boolean(targetKey) && targetRows.length > 0;
+    /** 目标表是月粒度：月图直接对齐，周/日按「月目标 ÷ 当月天数」分摊到对应时间桶 */
+    const TARGET_SHORT: Record<string, 'sq' | 'sa' | 'gp' | 'ad'> = {
+        sales_quantity_target: 'sq',
+        sales_amount_target: 'sa',
+        gross_profit_target: 'gp',
+        ad_spend_target: 'ad',
+    };
+    const targetShort = targetKey ? TARGET_SHORT[targetKey] : undefined;
+    const showTarget = Boolean(targetShort) && targetRows.length > 0;
 
     const chartData = useMemo(() => {
         if (rawData.length === 0) return [];
@@ -96,8 +105,8 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
         // 按时间排序
         const sortedKeys = Object.keys(timeGroups).sort();
 
-        // 目标数据聚合（仅月度模式，且目标表本身是月粒度）
-        const targetByMonth: Record<string, number> = {};
+        // 目标数据聚合：按「月」累计各目标字段，再按当前粒度分摊到时间桶
+        const targetByMonth: Record<string, { sq: number; sa: number; gp: number; ad: number }> = {};
         if (showTarget) {
             targetRows.forEach(t => {
                 // 目标行也需要按筛选维度过滤
@@ -111,8 +120,9 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
                     return true;
                 })();
                 if (!passesFilter) return;
-                const m = t.month;
-                targetByMonth[m] = (targetByMonth[m] || 0) + ((t as any)[targetKey] || 0);
+                const cur = targetByMonth[t.month] || { sq: 0, sa: 0, gp: 0, ad: 0 };
+                cur[targetShort!] += (t as any)[targetKey!] || 0;
+                targetByMonth[t.month] = cur;
             });
         }
 
@@ -135,8 +145,13 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
                 value = (agg as any)[metricKey] || 0;
             }
 
-            const targetVal =
-                showTarget && targetKey ? targetByMonth[timeKey] || 0 : undefined;
+            const targetVal = showTarget
+                ? periodMode === 'month'
+                    ? targetByMonth[timeKey]?.[targetShort!] || 0
+                    : periodMode === 'week'
+                        ? allocateWeeklyTargetsLegacy(timeKey, targetByMonth)[targetShort!]
+                        : allocateDailyTargetsLegacy(timeKey, targetByMonth)[targetShort!]
+                : undefined;
 
             return {
                 time: timeKey,

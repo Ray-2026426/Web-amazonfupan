@@ -10,6 +10,7 @@ import {
     formatBusinessWeekFromDateStr,
     getBusinessWeekRangeFromYearWeek,
     allocateWeeklyTargetsLegacy,
+    allocateDailyTargetsLegacy,
     periodKeyOf,
     periodUnitLabel,
 } from '../utils';
@@ -371,11 +372,11 @@ export const TrendChartModal: React.FC<TrendChartModalProps> = ({
         });
 
         const withTargets = aggregated.map(row => {
-            // 目标表是月粒度：只有月度图能直接对上；周度按天拆分；日度不画目标线（会误导成「当天目标」）
+            // 目标表是月粒度：月图直接对齐；周图按周内每天累加；日图取「月目标 ÷ 当月天数」
             const tg = chartMode === 'week'
                 ? allocateWeeklyTargetsLegacy(row.time, targetByMonth)
                 : chartMode === 'day'
-                    ? { sq: 0, sa: 0, gp: 0, ad: 0 }
+                    ? allocateDailyTargetsLegacy(row.time, targetByMonth)
                     : targetByMonth[row.time] || { sq: 0, sa: 0, gp: 0, ad: 0 };
             const gm = tg.sa > 0 ? tg.gp / tg.sa : 0;
             const ar = tg.sa > 0 ? tg.ad / tg.sa : 0;
