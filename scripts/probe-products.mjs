@@ -12,8 +12,8 @@ console.log(`店铺样例：id=${shop?.id} name=${shop?.name || shop?.seller_nam
 const sid = String(shop?.id || '');
 
 const probes = [
-    ['erp_listing', { sid, offset: 0, length: 5 }],
-    ['analytics_show_product_list', { sid, offset: 0, length: 5 }],
+    ['erp_listing', { sids: sid, offset: 0, length: 5 }],
+    ['analytics_show_product_list', { seller_id: sid, start_date: '2026-10-01', end_date: '2026-10-20', offset: 0, length: 5 }],
 ];
 
 for (const [toolId, params] of probes) {
