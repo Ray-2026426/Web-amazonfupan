@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   probe:
@@ -15,7 +15,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: 列出库存相关工具与字段
+      - name: 探测并写结果文件
         env:
           LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
         run: node scripts/probe-inventory.mjs
+      - name: 提交结果
+        run: |
+          git config user.name "probe-bot"
+          git config user.email "probe@example.com"
+          git add reports/probe-inventory.json
+          git commit -m "chore(probe): 库存接口探测结果" || echo "无变化"
+          git push
