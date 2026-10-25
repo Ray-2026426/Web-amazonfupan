@@ -51,6 +51,12 @@ export interface DataRow {
   // Ratings
   rating: number; // New
   review_count: number; // New
+
+  /**
+   * FBA 国际运费：领星已把它算进头程，又在毛利里扣了一次。
+   * 只存原值；看板勾选「修正毛利」时才把绝对值加回 gross_profit。
+   */
+  fba_international_fee?: number;
 }
 
 export interface TargetRow {
@@ -289,6 +295,9 @@ export interface AggregatedData {
   // Natural Metrics
   natural_orders: number;
   natural_clicks: number;
+
+  /** FBA 国际运费合计（原值；看板勾选修正时用于把毛利加回来） */
+  fba_international_fee?: number;
   
   // Calculated Ratios
   gross_margin: number;

@@ -137,6 +137,8 @@ const NUMERIC_FIELDS = [
     'ad_spend', 'ad_sales', 'ad_orders', 'sp_spend', 'sp_sales', 'sd_spend', 'sd_sales',
     'sb_spend', 'sb_sales', 'sbv_spend', 'sbv_sales', 'impressions', 'clicks',
     'natural_orders', 'natural_clicks', 'rating', 'review_count',
+    // FBA 国际运费：已含在头程里，单独存一列供看板「加回毛利」开关使用
+    'fba_international_fee',
 ];
 const TEXT_FIELDS = ['country', 'shop_name', 'brand', 'manager', 'sub_category', 'parent_asin', 'product_name'];
 

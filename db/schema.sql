@@ -46,11 +46,14 @@ create table if not exists fact_daily (
     natural_clicks      numeric,
     rating              numeric,
     review_count        numeric,
+    -- FBA 国际运费：领星把它算进了头程，又在毛利里扣了一次；单独存下来，看板可选择加回
+    fba_international_fee numeric,
     currency            text        not null default 'USD',
     updated_at          timestamptz not null default now(),
     primary key (date, sid, asin, currency)
 );
 alter table fact_daily add column if not exists order_quantity numeric;
+alter table fact_daily add column if not exists fba_international_fee numeric;
 
 -- 月汇总 / 周汇总：用视图从 fact_daily 现算，而不是另存一张表。
 -- 原因：定时任务每次只拉 3 天，如果按窗口推汇总，跨月/跨周会写出「半个月」的错数。
@@ -83,7 +86,8 @@ select
     (array_agg(review_count order by date desc))[1] as review_count,
     (array_agg(fba_sellable_qty order by date desc))[1] as fba_sellable_qty,
     (array_agg(rating order by date desc))[1] as rating,
-    sum(order_quantity) as order_quantity
+    sum(order_quantity) as order_quantity,
+    sum(fba_international_fee) as fba_international_fee
 from fact_daily
 group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
 
@@ -116,7 +120,8 @@ select
     sum(natural_clicks) as natural_clicks,
     (array_agg(review_count order by date desc))[1] as review_count,
     (array_agg(fba_sellable_qty order by date desc))[1] as fba_sellable_qty,
-    (array_agg(rating order by date desc))[1] as rating
+    (array_agg(rating order by date desc))[1] as rating,
+    sum(fba_international_fee) as fba_international_fee
 from fact_daily
 group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12;
 
@@ -194,7 +199,7 @@ begin
         fba_sellable_qty, sessions, first_mile_cost, procurement_cost, storage_fee,
         fba_fee, refund_cost, platform_commission, ad_spend, ad_sales, ad_orders,
         sp_spend, sp_sales, sd_spend, sd_sales, sb_spend, sb_sales, sbv_spend, sbv_sales,
-        impressions, clicks, natural_orders, natural_clicks, rating, review_count
+        impressions, clicks, natural_orders, natural_clicks, rating, review_count, fba_international_fee
     )
     select
         p_date, r.sid, r.asin, p_currency, r.country, r.shop_name, r.brand, r.manager, r.sub_category,
@@ -202,7 +207,7 @@ begin
         r.fba_sellable_qty, r.sessions, r.first_mile_cost, r.procurement_cost, r.storage_fee,
         r.fba_fee, r.refund_cost, r.platform_commission, r.ad_spend, r.ad_sales, r.ad_orders,
         r.sp_spend, r.sp_sales, r.sd_spend, r.sd_sales, r.sb_spend, r.sb_sales, r.sbv_spend, r.sbv_sales,
-        r.impressions, r.clicks, r.natural_orders, r.natural_clicks, r.rating, r.review_count
+        r.impressions, r.clicks, r.natural_orders, r.natural_clicks, r.rating, r.review_count, r.fba_international_fee
     from jsonb_to_recordset(p_rows) as r (
         date date, sid text, asin text, country text, shop_name text, brand text,
         manager text, sub_category text, parent_asin text, product_name text,
@@ -213,7 +218,8 @@ begin
         ad_sales numeric, ad_orders numeric, sp_spend numeric, sp_sales numeric,
         sd_spend numeric, sd_sales numeric, sb_spend numeric, sb_sales numeric,
         sbv_spend numeric, sbv_sales numeric, impressions numeric, clicks numeric,
-        natural_orders numeric, natural_clicks numeric, rating numeric, review_count numeric
+        natural_orders numeric, natural_clicks numeric, rating numeric, review_count numeric,
+        fba_international_fee numeric
     );
     get diagnostics inserted_count = row_count;
     if inserted_count <> jsonb_array_length(p_rows) then

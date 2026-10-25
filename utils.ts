@@ -788,7 +788,8 @@ export const initialAggregated: AggregatedData = {
     gross_margin: 0,
     avg_ticket: 0,
     review_count: 0,
-    average_rating: 0
+    average_rating: 0,
+    fba_international_fee: 0
 };
 
 export const initialInventoryAggregated: InventoryAggregated = {
@@ -816,8 +817,23 @@ export const initialInventoryAggregated: InventoryAggregated = {
 
 // --- Aggregation Logic ---
 
-export const aggregateData = (rows: DataRow[]): AggregatedData => {
-    const agg = { ...initialAggregated };
+/**
+ * 毛利修正：把 FBA 国际运费加回毛利。
+ *
+ * 背景：领星「订单利润」里，FBA 国际运费（shared_fba_international_inbound_fee）已经含在头程费用里，
+ * 但计算毛利时又扣了一次，导致订单毛利偏低。勾选修正后，逐行把该费用的绝对值加回 gross_profit，
+ * 后续所有聚合、趋势、达成率都会自动用修正后的值。
+ */
+export const applyFbaFeeCorrection = (rows: DataRow[], enabled: boolean): DataRow[] => {
+    if (!enabled) return rows;
+    return rows.map((row) => {
+        const fee = Math.abs(Number(row.fba_international_fee) || 0);
+        if (!fee) return row;
+        return { ...row, gross_profit: Number(row.gross_profit || 0) + fee };
+    });
+};
+
+export const aggregateData = (rows: DataRow[]): AggregatedData => {    const agg = { ...initialAggregated };
     let ratingSum = 0;
     let ratingCount = 0;
 
@@ -848,6 +864,7 @@ export const aggregateData = (rows: DataRow[]): AggregatedData => {
         agg.clicks += row.clicks;
         agg.natural_orders += row.natural_orders;
         agg.natural_clicks += row.natural_clicks;
+        agg.fba_international_fee = (agg.fba_international_fee || 0) + (row.fba_international_fee || 0);
         
         if (row.rating > 0) {
             ratingSum += row.rating * row.review_count; 
@@ -935,6 +952,7 @@ export const sumAggregatedData = (list: AggregatedData[]): AggregatedData => {
         acc.clicks += d.clicks;
         acc.natural_orders += d.natural_orders;
         acc.natural_clicks += d.natural_clicks;
+        acc.fba_international_fee = (acc.fba_international_fee || 0) + (d.fba_international_fee || 0);
         acc.review_count += d.review_count;
         if (d.average_rating > 0 && d.review_count > 0) {
             totalRatingScore += d.average_rating * d.review_count;

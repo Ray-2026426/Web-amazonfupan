@@ -32,7 +32,7 @@ export default async function handler(req, res) {
     console.error('[coverage]', error);
     return res.status(502).json({
       error: 'coverage_unavailable',
-      message: '读取数据覆盖失败：请确认已在 Supabase 执行最新 db/migrate-field-mappings.sql（含 v_fact_daily_coverage 视图）',
+      message: '读取数据覆盖失败：请确认已在 Supabase 执行最新 db/schema.sql（含 v_fact_daily_coverage 视图）',
     });
   }
 }

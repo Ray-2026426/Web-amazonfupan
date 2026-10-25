@@ -13,6 +13,7 @@ import {
   getPacingRatio,
   getWeeklyAllocatedTarget,
   getDailyAllocatedTarget,
+  applyFbaFeeCorrection,
   analyzeTargetCompleteness,
   getISOWeekDateRange,
   formatDate,
@@ -168,6 +169,13 @@ const App: React.FC = () => {
   const [periodMode, setPeriodMode] = useState<PeriodMode>(readStoredPeriodMode);
   const isWeeklyMode = periodMode === 'week';
   const isDailyMode = periodMode === 'day';
+  /** 毛利修正：FBA 国际运费已含在头程，领星算毛利时又扣了一次，勾选后加回来 */
+  const [addBackFbaFee, setAddBackFbaFee] = useState(() => {
+    try { return localStorage.getItem('amazon-dashboard-fba-fee-adjust') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('amazon-dashboard-fba-fee-adjust', addBackFbaFee ? '1' : '0'); } catch { /* 忽略 */ }
+  }, [addBackFbaFee]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatLoaded, setChatLoaded] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -364,10 +372,14 @@ const App: React.FC = () => {
   };
 
   const visibleCloudRows = cloudRowsRange === `${filters.startDate}|${filters.endDate}` ? cloudRows : [];
-  const displayPerformanceData = cloudConnected ? visibleCloudRows : performanceData;
-  const displayWeeklyData = cloudConnected ? visibleCloudRows : weeklyData;
+  const basePerformance = cloudConnected ? visibleCloudRows : performanceData;
+  const baseWeekly = cloudConnected ? visibleCloudRows : weeklyData;
+  const baseDaily = cloudConnected ? visibleCloudRows : [];
+  // 「毛利修正」：勾选后把 FBA 国际运费加回毛利（该费用已含在头程，领星又扣了一次）
+  const displayPerformanceData = useMemo(() => applyFbaFeeCorrection(basePerformance, addBackFbaFee), [basePerformance, addBackFbaFee]);
+  const displayWeeklyData = useMemo(() => applyFbaFeeCorrection(baseWeekly, addBackFbaFee), [baseWeekly, addBackFbaFee]);
   /** 日粒度只在云端可用：云端 fact_daily 是真正的按天数据，本地导入的月报/周报没有日粒度 */
-  const displayDailyData = cloudConnected ? visibleCloudRows : [];
+  const displayDailyData = useMemo(() => applyFbaFeeCorrection(baseDaily, addBackFbaFee), [baseDaily, addBackFbaFee]);
   const displayTargetData = cloudConnected && cloudTargetActive ? cloudTargetData : targetData;
   const activeRawData = isDailyMode ? displayDailyData : isWeeklyMode ? displayWeeklyData : displayPerformanceData;
 
@@ -682,6 +694,18 @@ const App: React.FC = () => {
                 <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block"></div>
 
                 <AppSettingsButton />
+
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={addBackFbaFee}
+                    onClick={() => setAddBackFbaFee(value => !value)}
+                    title="FBA 国际运费已经算进头程费用里，领星计算毛利时又扣了一次。开启后把它的绝对值加回毛利，修正重复扣除。"
+                    className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition ${addBackFbaFee ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600'}`}
+                >
+                    <span className={`h-2 w-2 rounded-full ${addBackFbaFee ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                    毛利修正
+                </button>
 
                 {CLOUD_ENABLED && <button type="button" onClick={() => setShowCloudLogin(true)} className={`rounded-xl border px-3 py-2 text-xs font-bold ${cloudConnected ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-sky-200 bg-white text-sky-700'}`}>{cloudLoading ? '云端加载中…' : cloudConnected ? '云端数据已连接' : '连接云端数据'}</button>}
                 {CLOUD_ENABLED && <button type="button" onClick={() => setShowCloudAdmin(true)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">数据管理</button>}

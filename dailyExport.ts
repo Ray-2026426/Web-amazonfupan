@@ -60,6 +60,7 @@ export const DAILY_EXPORT_COLUMNS = [
   ['storage_fee', '仓储费用'],
   ['procurement_cost', '采购费用'],
   ['platform_commission', '佣金费用'],
+  ['fba_international_fee', 'FBA国际运费'],
   ['sid', '店铺ID'],
   ['currency', '币种'],
 ] as const;

@@ -622,7 +622,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                   {data.fieldMappingReady === false && (
                     <p className="sticky top-0 z-10 flex items-start gap-2 border-b border-amber-200/70 bg-amber-50 px-3.5 py-2.5 text-[11px] leading-relaxed text-amber-800">
                       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      云端还没有字段映射表，下面是内置默认值。请先在 Supabase SQL Editor 执行 db/migrate-field-mappings.sql，保存才会生效。
+                      云端还没有字段映射表，下面是内置默认值。请先在 Supabase SQL Editor 执行 db/schema.sql（可重复执行），保存才会生效。
                     </p>
                   )}
                   <table className="w-full min-w-[760px] text-left text-xs">

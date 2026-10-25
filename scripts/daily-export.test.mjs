@@ -25,9 +25,9 @@ test('导出列与参考表字段名、顺序一致', () => {
   // 日期/年份/月份 是日粒度下的时间前缀，其余 47 列必须逐字对齐参考表
   assert.deepEqual(titles.slice(3, 50), REFERENCE_FIELDS);
   assert.deepEqual(titles.slice(0, 3), ['日期', '年份', '月份']);
-  // 参考表没有的两列放在最后，不影响前面的位置
-  assert.deepEqual(titles.slice(50), ['店铺ID', '币种']);
-  assert.equal(titles.length, 52);
+  // 参考表没有的列放在最后，不影响前面的位置
+  assert.deepEqual(titles.slice(50), ['FBA国际运费', '店铺ID', '币种']);
+  assert.equal(titles.length, 53);
 });
 
 test('时间列由日期派生，写法与参考表一致', () => {

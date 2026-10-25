@@ -79,8 +79,7 @@ test('a month range still returns the whole monthly target', () => {
   assert.equal(month.sales_amount, 310);
 });
 
-test('daily target grouping gives each date its own share', () => {
-  const targets = [target('2026-10', 310)];
+test('daily target grouping gives each date its own share', () => {  const targets = [target('2026-10', 310)];
   const byDate = utils.groupAllocatedTargetsByDimension(
     targets,
     ['year_month'],
@@ -137,4 +136,24 @@ test('日度目标 = 月目标 ÷ 当月天数（销量/销售额/毛利/广告�
   // 11 月只有 30 天，同样月目标下日目标更大
   const november = { '2026-11': { sales_quantity: 0, sales_amount: 3000, gross_profit: 0, ad_spend: 0 } };
   assert.equal(utils.allocateDailyTargetsFromMonths('2026-11-05', november).sales_amount, 100);
+});
+
+test('毛利修正：勾选后只把 FBA 国际运费的绝对值加回毛利', () => {
+  const rows = [
+    { date: '2026-10-01', gross_profit: 100, sales_amount: 1000, fba_international_fee: -20 },
+    { date: '2026-10-01', gross_profit: 50, sales_amount: 500 },
+  ];
+  // 不勾选：原样返回，毛利不变
+  const off = utils.applyFbaFeeCorrection(rows, false);
+  assert.equal(off[0].gross_profit, 100);
+  // 勾选：加回绝对值（-20 → +20），没有运费的行走原值
+  const on = utils.applyFbaFeeCorrection(rows, true);
+  assert.equal(on[0].gross_profit, 120);
+  assert.equal(on[1].gross_profit, 50);
+  // 聚合与毛利率跟着修正后的毛利走
+  const agg = utils.aggregateData(on);
+  assert.equal(agg.gross_profit, 170);
+  assert.equal(agg.gross_margin, 170 / 1500);
+  // 不修改原始行，避免切换开关时数据被反复加回去
+  assert.equal(rows[0].gross_profit, 100);
 });

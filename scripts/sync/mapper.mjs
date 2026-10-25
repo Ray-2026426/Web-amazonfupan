@@ -140,6 +140,12 @@ const EMPTY_COST = {
     fba_storage_fee: 0,
     purchase_costs: 0,
     selling_fee: 0,
+    /**
+     * FBA 国际运费（领星字段 shared_fba_international_inbound_fee）。
+     * 注意：这项费用已经包含在头程 logistics_costs 里，领星算毛利时又扣了一次。
+     * 我们只把它单独存下来，是否「加回毛利」交给看板开关决定，不改变默认口径。
+     */
+    fba_international_inbound_fee: 0,
 };
 
 /** 「有活动」判定：任一经纬度非 0 才保留，避免把整个 ASIN 目录（97% 是零）搬进库 */
@@ -213,6 +219,7 @@ export function toDataRow({ shop, row, cost, date, fieldMap }) {
         fba_fee: pickNumber('fba_fee'),
         refund_cost: pickNumber('refund_cost'),
         platform_commission: pickNumber('platform_commission'),
+        fba_international_fee: abs(c.fba_international_inbound_fee),
 
         ad_spend: pickNumber('ad_spend'),
         ad_sales: pickNumber('ad_sales'),
@@ -274,6 +281,7 @@ export function toCostOnlyRow({ shop, asin, cost, date, meta }) {
         fba_fee: abs(c.fulfillment_fee),
         refund_cost: abs(c.refund_amount),
         platform_commission: abs(c.selling_fee),
+        fba_international_fee: abs(c.fba_international_inbound_fee),
 
         ad_spend: 0, ad_sales: 0, ad_orders: 0,
         sp_spend: 0, sp_sales: 0, sd_spend: 0, sd_sales: 0,
@@ -315,6 +323,7 @@ export function mergeOrderProfit(opRows, { firstMileField = 'logistics_costs' } 
         cur.fba_storage_fee += abs(r.fba_storage_fee);
         cur.purchase_costs += abs(r.purchase_costs);
         cur.selling_fee += abs(r.selling_fee);
+        cur.fba_international_inbound_fee += abs(r.shared_fba_international_inbound_fee);
         map.set(key, cur);
     }
     return map;

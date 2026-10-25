@@ -101,6 +101,15 @@ test('全零成本的 ASIN 不补行；补行后日毛利合计与订单利润�
   assert.equal(total, 6);
 });
 
+test('FBA 国际运费单独归集，供看板「毛利修正」使用', () => {
+  const costs = mergeOrderProfit([{
+    sids: [1], price_list: [{ asin: 'A' }], gross_profit: 10, shared_fba_international_inbound_fee: -7.5,
+  }]);
+  assert.equal(costs.get('1|A').fba_international_inbound_fee, 7.5);
+  const row = toDataRow({ date: '2026-10-01', shop: { id: 1, name: '店' }, row: { asin: 'A' }, cost: costs.get('1|A') });
+  assert.equal(row.fba_international_fee, 7.5);
+});
+
 test('云端字段映射改变下一次同步的取值', () => {
   const fieldMap = new Map([
     ['product_name', 'item_name'],
