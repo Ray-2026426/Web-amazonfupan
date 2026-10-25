@@ -1,0 +1,36 @@
+name: 补数队列消费
+
+# 页面上的「一键补数」在没有 GitHub 令牌时会写进 sync_requests 队列，
+# 这个工作流每 10 分钟消费一次。好处：Vercel 不需要任何 GitHub 权限，
+# 补数变成数据库里的可审计记录。
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: lingxing-queue
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  consume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 消费待处理的补数请求
+        env:
+          LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
+          LINGXING_CURRENCY: ${{ vars.LINGXING_CURRENCY || 'USD' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: node scripts/sync/consume-queue.mjs

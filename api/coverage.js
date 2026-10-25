@@ -21,13 +21,26 @@ export default async function handler(req, res) {
   }
 
   try {
-    const rows = await fetchTable('v_fact_daily_coverage', [
-      ['select', 'date,rows,sales_amount,gross_profit,updated_at'],
-      ['date', `gte.${from}`],
-      ['date', `lte.${to}`],
-      ['order', 'date.asc'],
-    ], days + 5);
-    return res.status(200).json({ from, to, days: rows });
+    const [rows, checks] = await Promise.all([
+      fetchTable('v_fact_daily_coverage', [
+        ['select', 'date,rows,sales_amount,gross_profit,updated_at'],
+        ['date', `gte.${from}`],
+        ['date', `lte.${to}`],
+        ['order', 'date.asc'],
+      ], days + 5),
+      // 对账差异：还没建表时忽略，不影响覆盖本身
+      fetchTable('daily_checks', [
+        ['select', 'date,diff_ratio'],
+        ['date', `gte.${from}`],
+        ['date', `lte.${to}`],
+      ], days + 5).catch(() => []),
+    ]);
+    const diffByDate = new Map(checks.map((item) => [item.date, item.diff_ratio]));
+    return res.status(200).json({
+      from,
+      to,
+      days: rows.map((row) => ({ ...row, diff_ratio: diffByDate.get(row.date) ?? null })),
+    });
   } catch (error) {
     console.error('[coverage]', error);
     return res.status(502).json({

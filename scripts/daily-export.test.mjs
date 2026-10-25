@@ -26,8 +26,8 @@ test('导出列与参考表字段名、顺序一致', () => {
   assert.deepEqual(titles.slice(3, 50), REFERENCE_FIELDS);
   assert.deepEqual(titles.slice(0, 3), ['日期', '年份', '月份']);
   // 参考表没有的列放在最后，不影响前面的位置
-  assert.deepEqual(titles.slice(50), ['FBA国际运费', '店铺ID', '币种']);
-  assert.equal(titles.length, 53);
+  assert.deepEqual(titles.slice(50), ['FBA国际运费', '修正后毛利', '店铺ID', '币种']);
+  assert.equal(titles.length, 54);
 });
 
 test('时间列由日期派生，写法与参考表一致', () => {
@@ -73,4 +73,13 @@ test('CSV 表头与行顺序和 Excel 一致', () => {
   assert.equal(cells[2], '10月');
   assert.equal(cells[header.indexOf('销售额')], '100');
   assert.equal(cells[header.indexOf('CVR')], '0.2');
+});
+
+test('修正后毛利 = 原毛利 + FBA 国际运费绝对值', () => {
+  const matrix = dailyExportMatrix([{ date: '2026-10-01', gross_profit: 100, fba_international_fee: -20 }]);
+  const header = matrix[0];
+  const row = matrix[1];
+  assert.equal(row[header.indexOf('订单毛利润')], 100);
+  assert.equal(row[header.indexOf('FBA国际运费')], -20);
+  assert.equal(row[header.indexOf('修正后毛利')], 120);
 });

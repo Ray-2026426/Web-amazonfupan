@@ -32,8 +32,8 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'data', label: '数据下载', icon: <Download className="h-3.5 w-3.5" /> },
 ];
 
-type CoverageDay = { date: string; rows: number; sales_amount: number; gross_profit: number; updated_at: string };
-type DayStatus = 'ok' | 'empty' | 'missing';
+type CoverageDay = { date: string; rows: number; sales_amount: number; gross_profit: number; updated_at: string; diff_ratio?: number | null };
+type DayStatus = 'ok' | 'empty' | 'missing' | 'anomaly';
 type CalendarCell = { date: string; day: number; status: DayStatus; info?: CoverageDay } | null;
 
 export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?: () => void }> = ({ onClose, onTargetsUpdated }) => {
@@ -294,6 +294,43 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
 
   const coverageMap = useMemo(() => new Map((coverage?.days || []).map(day => [day.date, day])), [coverage]);
 
+  /** 基准值：有数据的日子的销售额/行数中位数，用来识别「明显掉下来」的异常日 */
+  const baseline = useMemo(() => {
+    const valid = (coverage?.days || []).filter(day => Number(day.rows) > 0);
+    const median = (values: number[]) => {
+      if (!values.length) return 0;
+      const sorted = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    };
+    return {
+      sales: median(valid.map(day => Number(day.sales_amount))),
+      rows: median(valid.map(day => Number(day.rows))),
+    };
+  }, [coverage]);
+
+  /** 异常判定：对账差异 >2%、亏损日、销售额或行数明显低于中位数 */
+  const anomalyReasons = (info: CoverageDay | undefined): string[] => {
+    if (!info) return [];
+    const reasons: string[] = [];
+    const sales = Number(info.sales_amount);
+    const profit = Number(info.gross_profit);
+    const rows = Number(info.rows);
+    if (info.diff_ratio !== null && info.diff_ratio !== undefined && Math.abs(Number(info.diff_ratio)) > 0.02) {
+      reasons.push(`与领星毛利差异 ${(Number(info.diff_ratio) * 100).toFixed(1)}%`);
+    }
+    if (sales > 0 && profit < 0 && profit / sales < -0.1) {
+      reasons.push(`当日亏损（毛利率 ${((profit / sales) * 100).toFixed(0)}%）`);
+    }
+    if (baseline.sales > 0 && sales > 0 && sales < baseline.sales * 0.4) {
+      reasons.push(`销售额仅为中位数的 ${((sales / baseline.sales) * 100).toFixed(0)}%`);
+    }
+    if (baseline.rows > 0 && rows > 0 && rows < baseline.rows * 0.5) {
+      reasons.push(`行数仅为中位数的 ${((rows / baseline.rows) * 100).toFixed(0)}%`);
+    }
+    return reasons;
+  };
+
   const calendar = useMemo<{ key: string; label: string; cells: CalendarCell[] }[]>(() => {
     if (!coverage) return [];
     const out: { key: string; label: string; cells: CalendarCell[] }[] = [];
@@ -309,28 +346,36 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
         const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         if (date < coverage.from || date > coverage.to) { cells.push(null); continue; }
         const info = coverageMap.get(date);
-        const status: DayStatus = !info ? 'missing' : Number(info.sales_amount) === 0 ? 'empty' : 'ok';
+        const status: DayStatus = !info
+          ? 'missing'
+          : Number(info.sales_amount) === 0
+            ? 'empty'
+            : anomalyReasons(info).length
+              ? 'anomaly'
+              : 'ok';
         cells.push({ date, day, status, info });
       }
       out.push({ key: `${year}-${month}`, label: `${year} 年 ${month + 1} 月`, cells });
       cursor = new Date(year, month + 1, 1);
     }
     return out;
-  }, [coverage, coverageMap]);
+  }, [coverage, coverageMap, baseline]);
 
   const counts = useMemo(() => {
     let ok = 0;
     let empty = 0;
+    let anomaly = 0;
     const missingDates: string[] = [];
     for (const month of calendar) {
       for (const cell of month.cells) {
         if (!cell) continue;
         if (cell.status === 'ok') ok += 1;
         else if (cell.status === 'empty') empty += 1;
+        else if (cell.status === 'anomaly') anomaly += 1;
         else missingDates.push(cell.date);
       }
     }
-    return { ok, empty, missing: missingDates.length, missingDates };
+    return { ok, empty, anomaly, missing: missingDates.length, missingDates };
   }, [calendar]);
 
   const toggleDate = (date: string) => setSelected(prev => {
@@ -355,7 +400,9 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || `触发失败：${response.status}`);
-      setMessage(`已提交 ${result.count} 天的补数任务（${result.from} ~ ${result.to}）。跑完后刷新这页即可看到新状态。`);
+      setMessage(result.queued
+        ? `已加入补数队列（${result.count} 天：${result.from} ~ ${result.to}），后台任务会在 10 分钟内开始；跑完刷新这页即可看到新状态。`
+        : `已提交 ${result.count} 天的补数任务（${result.from} ~ ${result.to}）。跑完后刷新这页即可看到新状态。`);
       setSelected(new Set());
     } catch (error) {
       setMessage(String(error instanceof Error ? error.message : error));
@@ -371,7 +418,9 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
       ? 'bg-emerald-50 text-emerald-700 ring-emerald-100 hover:ring-emerald-300'
       : status === 'empty'
         ? 'bg-amber-50 text-amber-700 ring-amber-100 hover:ring-amber-300'
-        : 'bg-slate-50 text-slate-400 ring-slate-200 hover:ring-slate-300';
+        : status === 'anomaly'
+          ? 'bg-rose-50 text-rose-700 ring-rose-100 hover:ring-rose-300'
+          : 'bg-slate-50 text-slate-400 ring-slate-200 hover:ring-slate-300';
     return `relative h-9 rounded-lg text-[11px] font-medium ring-1 transition ${tone} ${active ? 'ring-2 ring-slate-900' : ''}`;
   };
 
@@ -513,8 +562,9 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                   <div>
                     <h3 className={sectionTitle}>数据质量</h3>
                     <p className={sectionHint}>
-                      按天看云端日明细：<span className="text-emerald-700">绿色</span>有数据、
-                      <span className="text-amber-700">黄色</span>有明细但销售额为 0（多半没拉全）、
+                      按天看云端日明细：<span className="text-emerald-700">绿色</span>正常、
+                      <span className="text-rose-700">红色</span>数字异常（与领星差异大 / 亏损 / 突然掉量）、
+                      <span className="text-amber-700">黄色</span>有明细但销售额为 0、
                       <span className="text-slate-500">灰色</span>完全没数据。点日期选中，再一键补数。
                     </p>
                   </div>
@@ -539,6 +589,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100"><CheckCircle2 className="h-3 w-3" />正常 {counts.ok}</span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 ring-1 ring-rose-100"><AlertCircle className="h-3 w-3" />异常 {counts.anomaly}</span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 ring-1 ring-amber-100"><AlertCircle className="h-3 w-3" />销售额为 0 {counts.empty}</span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200">缺失 {counts.missing}</span>
                   <div className="ml-auto flex flex-wrap gap-2">
@@ -577,7 +628,10 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                               onClick={() => toggleDate(cell.date)}
                               className={dayClass(cell.status, selected.has(cell.date))}
                               title={cell.info
-                                ? `${cell.date} · ${cell.info.rows} 行 · 销售额 ${Number(cell.info.sales_amount).toFixed(2)} · 毛利 ${Number(cell.info.gross_profit).toFixed(2)}`
+                                ? [
+                                    `${cell.date} · ${cell.info.rows} 行 · 销售额 ${Number(cell.info.sales_amount).toFixed(2)} · 毛利 ${Number(cell.info.gross_profit).toFixed(2)}`,
+                                    ...anomalyReasons(cell.info).map(reason => `⚠ ${reason}`),
+                                  ].join('\n')
                                 : `${cell.date} · 云端无数据`}
                             >
                               {cell.day}

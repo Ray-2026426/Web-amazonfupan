@@ -61,6 +61,7 @@ export const DAILY_EXPORT_COLUMNS = [
   ['procurement_cost', '采购费用'],
   ['platform_commission', '佣金费用'],
   ['fba_international_fee', 'FBA国际运费'],
+  ['adjusted_gross_profit', '修正后毛利'],
   ['sid', '店铺ID'],
   ['currency', '币种'],
 ] as const;
@@ -94,6 +95,8 @@ function field(row: Record<string, unknown>, key: string): unknown {
     case 'acoas': return divide(n('ad_spend'), n('sales_amount'));
     case 'asoas': return divide(n('ad_sales'), n('sales_amount'));
     case 'natural_cvr': return divide(n('natural_orders'), n('natural_clicks'));
+    // 与看板默认口径一致：原毛利 + FBA 国际运费绝对值
+    case 'adjusted_gross_profit': return n('gross_profit') + Math.abs(n('fba_international_fee'));
     default: return row[key];
   }
 }

@@ -159,6 +159,27 @@ select
 from fact_daily
 group by date;
 
+-- 每日对账：同步时把「我们算的毛利」与「领星订单利润合计」记下来，
+-- 数据质量页据此标出差异过大的日期，不用等人工发现。
+create table if not exists daily_checks (
+    date date primary key,
+    expected_gross_profit numeric,
+    actual_gross_profit numeric,
+    diff_ratio numeric,
+    checked_at timestamptz not null default now()
+);
+
+-- 补数队列：没有 GitHub 令牌时，页面把请求写这里，定时工作流来消费
+create table if not exists sync_requests (
+    id bigserial primary key,
+    dates text[] not null,
+    status text not null default 'pending' check (status in ('pending', 'running', 'done', 'failed')),
+    note text,
+    created_at timestamptz not null default now(),
+    processed_at timestamptz
+);
+create index if not exists idx_sync_requests_pending on sync_requests (status, created_at);
+
 -- 写入和读取均经过服务端；前端只有单独的只读访问密码，拿不到 Supabase 密钥。
 alter table fact_daily  enable row level security;
 alter table sync_runs   enable row level security;
@@ -167,10 +188,12 @@ drop policy if exists "read fact_daily" on fact_daily;
 drop policy if exists "read sync_runs" on sync_runs;
 revoke all on table fact_daily, sync_runs from anon, authenticated;
 revoke all on table v_fact_month, v_fact_week, v_fact_daily_coverage from anon, authenticated;
+revoke all on table daily_checks, sync_requests from anon, authenticated;
 grant usage on schema public to service_role;
-grant select, insert, update, delete on table fact_daily, sync_runs to service_role;
+grant select, insert, update, delete on table fact_daily, sync_runs, daily_checks, sync_requests to service_role;
 grant select on table v_fact_month, v_fact_week, v_fact_daily_coverage to service_role;
 grant usage, select on sequence sync_runs_id_seq to service_role;
+grant usage, select on sequence sync_requests_id_seq to service_role;
 
 -- 视图默认沿用基表权限（Postgres 15+ 的 security_invoker 让 RLS 生效）
 alter view v_fact_month set (security_invoker = true);

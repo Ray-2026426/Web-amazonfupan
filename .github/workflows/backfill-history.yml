@@ -38,6 +38,10 @@ on:
         description: '同时运行的任务数（默认 1，避免领星 429）'
         required: false
         default: '1'
+      retry:
+        description: '自动重试次数（内部使用，默认 0）'
+        required: false
+        default: '0'
 
 concurrency:
   group: lingxing-backfill
@@ -45,6 +49,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write # 失败块自动重试需要重新触发本工作流
 
 jobs:
   plan:
@@ -135,10 +140,28 @@ jobs:
             sleep 90
           done
 
-      - name: 记录失败（便于事后补跑）
+      - name: 失败自动重试（最多 2 次）
         if: failure()
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RETRY: ${{ github.event.inputs.retry || '0' }}
           CHUNK_FROM: ${{ matrix.chunk.from }}
           CHUNK_TO: ${{ matrix.chunk.to }}
+          INPUT_PATCH: ${{ github.event.inputs.patch }}
         run: |
-          echo "::error title=回补失败::$CHUNK_FROM ~ $CHUNK_TO 失败，修好后单独重跑这一段即可"
+          set -euo pipefail
+          if [ "${RETRY:-0}" -ge 2 ]; then
+            echo "::error title=需要人工处理::$CHUNK_FROM ~ $CHUNK_TO 已自动重试 2 次仍失败"
+            exit 0
+          fi
+          next=$((RETRY + 1))
+          body=$(printf '{"ref":"main","inputs":{"from":"%s","to":"%s","chunk_days":"30","max_parallel":"1","patch":"%s","retry":"%s"}}' \
+            "$CHUNK_FROM" "$CHUNK_TO" "${INPUT_PATCH:-false}" "$next")
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -d "$body" \
+            "https://api.github.com/repos/$REPO/actions/workflows/backfill-history.yml/dispatches"
+          echo "已提交第 $next 次重试：$CHUNK_FROM ~ $CHUNK_TO"

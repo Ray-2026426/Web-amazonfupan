@@ -746,6 +746,11 @@ const App: React.FC = () => {
                 </div>
             ) : (
                 <div className="max-w-[1680px] mx-auto space-y-6 pb-20">
+                    {processedData && (
+                        <p className="text-[11px] text-slate-400">
+                            毛利口径：{addBackFbaFee ? '已加回 FBA 国际运费（原始值见导出表「订单毛利润」）' : '领星原始值，未加回 FBA 国际运费'}
+                        </p>
+                    )}
                     
                     {/* 1. Overview Cards */}
                     {processedData && (

@@ -1,4 +1,4 @@
-import { adminAuthorized } from '../serverless/supabase.js';
+import { adminAuthorized, writeTable } from '../serverless/supabase.js';
 
 /**
  * 一键补数：把选中的日期交给 GitHub Actions 的「历史数据回补」工作流。
@@ -19,12 +19,6 @@ export default async function handler(req, res) {
   if (!adminAuthorized(req)) return res.status(401).json({ error: 'unauthorized', message: '管理密码不正确' });
 
   const token = process.env.GITHUB_DISPATCH_TOKEN;
-  if (!token) {
-    return res.status(501).json({
-      error: 'dispatch_not_configured',
-      message: '一键补数还没配置：请在 Vercel 环境变量里加 GITHUB_DISPATCH_TOKEN（GitHub 细粒度令牌，Actions 权限 Read and write），再重新部署',
-    });
-  }
 
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
   const dates = Array.isArray(body?.dates) ? body.dates.map((item) => String(item).trim()) : [];
@@ -35,6 +29,26 @@ export default async function handler(req, res) {
   for (const date of unique) {
     if (!ISO_RE.test(date)) return res.status(400).json({ error: 'invalid_date', message: `日期格式无效：${date}` });
     if (date < EARLIEST) return res.status(400).json({ error: 'too_early', message: `不能早于 ${EARLIEST}：${date}` });
+  }
+
+  // 没有 GitHub 令牌时退回「队列模式」：写进 sync_requests，由定时工作流消费（最多延迟 10 分钟）
+  if (!token) {
+    try {
+      await writeTable('sync_requests', 'POST', { dates: unique, status: 'pending' });
+      return res.status(200).json({
+        queued: true,
+        count: unique.length,
+        from: unique[0],
+        to: unique[unique.length - 1],
+        message: `已加入补数队列（${unique.length} 天），后台任务会在 10 分钟内开始`,
+      });
+    } catch (error) {
+      console.error('[backfill] enqueue failed', error);
+      return res.status(501).json({
+        error: 'dispatch_not_configured',
+        message: '一键补数还没配置：请配置 GITHUB_DISPATCH_TOKEN，或在 Supabase 执行最新 db/schema.sql（含 sync_requests 队列表）',
+      });
+    }
   }
 
   try {

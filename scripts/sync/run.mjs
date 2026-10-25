@@ -54,6 +54,8 @@ const KEEP_ZERO = has('include-zero');
 const SHOP_LIMIT = Number(arg('shops-limit', '0')) || 0;
 const PAGE = Number(arg('page', '1000')) || 1000;
 const CLI_DAYS = Number(arg('days', '0')) || 0;
+/** 显式日期列表（补数队列用）：--dates 2026-10-01,2026-10-03 */
+const CLI_DATES = String(arg('dates', '') || '').split(',').map((item) => item.trim()).filter(Boolean);
 
 /** 默认同步窗口：T-3 ~ T-1（领星的流量/广告数据有回填延迟，T-1 可能不完整，T-2 已稳定） */
 function defaultRange(days) {
@@ -236,6 +238,29 @@ async function uploadToSupabase({ dailyRows, currency, startedAt, range, dates, 
 }
 
 /* --------------------------- 主流程 --------------------------- */
+/** 对账结果 → daily_checks 行（差异率保留 4 位小数） */
+function reconciliationRows(list) {
+    return (list || [])
+        .filter((item) => item.expectedGrossProfit !== null && item.expectedGrossProfit !== undefined)
+        .map((item) => ({
+            date: item.date,
+            expected_gross_profit: Number(item.expectedGrossProfit),
+            actual_gross_profit: Number(item.actualGrossProfit),
+            diff_ratio: Number(item.expectedGrossProfit) === 0
+                ? null
+                : Number(((Number(item.actualGrossProfit) - Number(item.expectedGrossProfit)) / Math.abs(Number(item.expectedGrossProfit))).toFixed(4)),
+            checked_at: new Date().toISOString(),
+        }));
+}
+
+async function saveDailyChecks(list) {
+    if (!SUPABASE_URL || !SUPABASE_KEY) return;
+    const rows = reconciliationRows(list);
+    if (!rows.length) return;
+    await postgrest('daily_checks', rows, 'date');
+    log(`已写入 ${rows.length} 天对账结果（daily_checks）`);
+}
+
 /**
  * 补丁模式（--cost-only）：
  * 只重拉「订单利润」，把两件事补进已有数据，不动产品表现（省 80% 时间）：
@@ -269,6 +294,7 @@ async function runPatch({ dates, usedShops, startedAt, range }) {
     let addedCostRows = 0;
     let skippedDays = 0;
     const failures = [];
+    const checks = [];
 
     for (const date of dates) {
         try {
@@ -318,6 +344,7 @@ async function runPatch({ dates, usedShops, startedAt, range }) {
             patchedDays += 1;
             patchedRows += rows.length;
             addedCostRows += added;
+            checks.push({ date, expectedGrossProfit: expected, actualGrossProfit: actual });
             log(
                 `${date} 补丁完成 ${existing.length} → ${rows.length} 行（新增成本行 ${added}），毛利 ${actual.toFixed(2)}` +
                     `${expected === null ? '' : ` vs 领星 ${expected.toFixed(2)}`}`
@@ -327,6 +354,8 @@ async function runPatch({ dates, usedShops, startedAt, range }) {
             log(`✗ ${date} 补丁失败：${error.message.slice(0, 160)}`);
         }
     }
+
+    await saveDailyChecks(checks).catch((error) => log(`⚠ 对账结果写入失败：${String(error.message || error)}`));
 
     await postgrest('sync_runs', [{
         started_at: startedAt,
@@ -353,15 +382,17 @@ async function main() {
     const startedAt = new Date().toISOString();
     const controls = FIXTURES ? { settings: { enabled: true, lookback_days: 3 }, fieldMappings: new Map() } : await loadControls();
     const explicitRange = arg('from') && arg('to');
-    if (!controls.settings.enabled && !explicitRange && !CLI_DAYS) {
+    if (!controls.settings.enabled && !explicitRange && !CLI_DAYS && !CLI_DATES.length) {
         log('管理后台已暂停自动同步，本次定时任务跳过');
         return;
     }
-    const range = explicitRange ? { from: arg('from'), to: arg('to') } : defaultRange(CLI_DAYS || controls.settings.lookback_days || 3);
-    const dates = datesBetween(range.from, range.to);
+    const range = CLI_DATES.length
+        ? { from: CLI_DATES.slice().sort()[0], to: CLI_DATES.slice().sort().slice(-1)[0] }
+        : explicitRange ? { from: arg('from'), to: arg('to') } : defaultRange(CLI_DAYS || controls.settings.lookback_days || 3);
+    const dates = CLI_DATES.length ? [...new Set(CLI_DATES)].sort() : datesBetween(range.from, range.to);
     if (!dates.length || dates.length > (PATCH ? 400 : 90)) throw new Error(`同步日期范围必须是 1–${PATCH ? 400 : 90} 天`);
     runContext = { startedAt, range };
-    log(`范围 ${range.from} ~ ${range.to}（${dates.length} 天），币种 ${CURRENCY}${FIXTURES ? '，离线模式' : ''}${PATCH ? '，补丁模式（只回填运费与成本行）' : ''}`);
+    log(`范围 ${range.from} ~ ${range.to}（${dates.length} 天${CLI_DATES.length ? '，按指定日期列表' : ''}），币种 ${CURRENCY}${FIXTURES ? '，离线模式' : ''}${PATCH ? '，补丁模式（只回填运费与成本行）' : ''}`);
 
     const shops = FIXTURES ? fixtureShops() : (await getClient().call('get_my_sids', null)).list || [];
     const activeShops = shops.filter((s) => !s.is_concept);
@@ -638,6 +669,8 @@ async function main() {
             dates,
             report,
         });
+        // 每日对账结果单独落库，数据质量页据此标出「与领星差异过大」的日期
+        await saveDailyChecks(reconciliations).catch((error) => log(`⚠ 对账结果写入失败：${String(error.message || error)}`));
     }
 
     return { snapshot: mergedSnapshot, report };
