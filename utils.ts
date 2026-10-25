@@ -347,6 +347,9 @@ const monthKeyFromDate = (d: Date) =>
 const daysInCalendarMonth = (year: number, monthIndex0: number) =>
   new Date(year, monthIndex0 + 1, 0).getDate();
 
+/** 目标分摊取整：日/周目标直接四舍五入到整数，避免界面上出现长小数 */
+const roundTarget = (value: number): number => Math.round(value);
+
 /** 区间内每一天取「该自然月目标 ÷ 当月天数」再累加（跨月则分段） */
 export const allocateTargetsForDateRange = (
   start: Date,
@@ -368,6 +371,11 @@ export const allocateTargetsForDateRange = (
     }
     cursor.setDate(cursor.getDate() + 1);
   }
+  // 日/周分摊会出现 32.2580645… 这种无限小数，按用户口径直接取整
+  agg.sales_quantity = roundTarget(agg.sales_quantity);
+  agg.sales_amount = roundTarget(agg.sales_amount);
+  agg.gross_profit = roundTarget(agg.gross_profit);
+  agg.ad_spend = roundTarget(agg.ad_spend);
   agg.gross_margin = agg.sales_amount > 0 ? agg.gross_profit / agg.sales_amount : 0;
   return agg;
 };
@@ -585,7 +593,8 @@ export const formatPrice = (amount: number | undefined, country: string = '美�
 
 export const formatNumber = (num: number | undefined): string => {
     if (num === undefined || num === null) return '0';
-    return new Intl.NumberFormat('en-US').format(num);
+    // 计数类一律取整：日/周分摊目标不再出现 32.258 这种小数
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(num);
 };
 
 export const formatPercent = (num: number | undefined): string => {

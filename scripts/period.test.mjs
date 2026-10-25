@@ -157,3 +157,13 @@ test('毛利修正：勾选后只把 FBA 国际运费的绝对值加回毛利', 
   // 不修改原始行，避免切换开关时数据被反复加回去
   assert.equal(rows[0].gross_profit, 100);
 });
+
+test('目标分摊与展示都取整', () => {
+  const monthly = { '2026-10': { sales_quantity: 1000, sales_amount: 1000, gross_profit: 0, ad_spend: 0 } };
+  const day = utils.allocateDailyTargetsFromMonths('2026-10-05', monthly);
+  // 1000 ÷ 31 = 32.2580645… → 取整为 32
+  assert.equal(day.sales_quantity, 32);
+  assert.equal(day.sales_amount, 32);
+  assert.equal(utils.formatNumber(32.258064516), '32');
+  assert.equal(utils.formatNumber(10), '10');
+});
