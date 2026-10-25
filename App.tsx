@@ -340,6 +340,8 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [focusPath]);
   const [cloudRefreshTick, setCloudRefreshTick] = useState(0);
+  /** 区间 → 云端结果缓存：5 分钟内切回同一区间直接命中，不再等三次接口 */
+  const cloudRangeCache = useRef(new Map<string, { at: number; rows: DataRow[]; targets: any; latestDate: string }>());
   /** 命令面板（⌘K）：键盘完成切粒度、跳区间、开数据管理、下钻等操作 */
   const [commandOpen, setCommandOpen] = useState(false);
   /** 云端管理面板打开时定位到哪个 tab（图片上传浮层点进来时用） */
@@ -461,6 +463,23 @@ const App: React.FC = () => {
       setCloudLoading(true);
       const refresh = async () => {
           try {
+              /**
+               * 区间缓存：切回刚看过的区间直接命中，不再等三次接口。
+               * 5 分钟内有效；切到新区间才真正请求。
+               */
+              const cacheKey = `${filters.startDate}|${filters.endDate}`;
+              const cached = cloudRangeCache.current.get(cacheKey);
+              if (cached && Date.now() - cached.at < 5 * 60 * 1000) {
+                  setCloudRows(cached.rows);
+                  setCloudTargetData(cached.targets?.rows || []);
+                  setCloudTargetActive(cached.targets?.active || false);
+                  setCloudRowsRange(cacheKey);
+                  setCloudConnected(true);
+                  setCloudCutoff(cached.latestDate || '');
+                  setCloudStatus('');
+                  setCloudLoading(false);
+                  return;
+              }
               const freshness = await fetchCloudFreshness(cloudToken, controller.signal);
               if (!freshness.latest_date) throw new Error('云端尚无数据；同步服务完成首次抓取后会自动显示');
               if (!filters.startDate || !filters.endDate) {
@@ -477,6 +496,7 @@ const App: React.FC = () => {
               setCloudTargetData(targets?.rows || []);
               setCloudTargetActive(targets?.active || false);
               setCloudRowsRange(`${filters.startDate}|${filters.endDate}`);
+              cloudRangeCache.current.set(cacheKey, { at: Date.now(), rows, targets, latestDate: freshness.latest_date });
               setCloudConnected(true);
               setCloudCutoff(freshness.latest_date || '');
               setCloudLastSync(freshness.latestRun?.finished_at
@@ -1133,7 +1153,7 @@ const App: React.FC = () => {
                         // 不要甩「暂无数据 + 导入数据」，那会让人以为数据丢了
                         (cloudLoading || (CLOUD_ENABLED && Boolean(cloudToken) && !cloudConnected && !cloudStatus)) && !activeRawData.length ? (
                             <div>
-                                <LoadingSkeleton />
+                                <LoadingSkeleton label={`正在加载 ${filters.startDate} ~ ${filters.endDate} 的业绩数据…`} />
                             </div>
                         ) : (
                             <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
