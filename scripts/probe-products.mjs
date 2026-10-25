@@ -1,31 +1,46 @@
 #!/usr/bin/env node
 /**
- * 一次性探测：领星 MCP 里跟「产品管理 / 商品图片」相关的工具，以及它们的入参 schema。
- * 只在 Actions 里跑（需要 LINGXING_MCP_KEY），输出打印到日志供人看。
+ * 探测二：Listing / 产品报表类接口的返回字段，重点找图片 URL。
  */
-import { createClient, fetchCatalog } from './lingxing-client.mjs';
+import { createClient } from './lingxing-client.mjs';
 
 const client = createClient({ intervalMs: 1500, verbose: true });
 
-const catalog = await fetchCatalog(client, null);
-console.log(`工具总数：${catalog.length}`);
-console.log(`目录条目字段：${Object.keys(catalog[0] || {}).join(', ')}`);
+const shops = (await client.call('get_my_sids', null)).list || [];
+const shop = shops.find((item) => !item.is_concept) || shops[0];
+console.log(`店铺样例：id=${shop?.id} name=${shop?.name || shop?.seller_name || ''}`);
+const sid = String(shop?.id || '');
 
-const KEYWORD = /产品|商品|图片|image|product|local_inventory|listing/i;
-const hits = catalog.filter((tool) => KEYWORD.test(`${tool.toolId || ''} ${tool.displayName || ''} ${tool.description || ''}`));
-console.log(`匹配到 ${hits.length} 个相关工具：`);
-for (const tool of hits) {
-    const desc = String(tool.description || '').replace(/\s+/g, ' ').slice(0, 110);
-    console.log(`- ${tool.toolId} | ${tool.displayName} | ${desc}`);
-}
+const probes = [
+    ['erp_listing', { sid, offset: 0, length: 5 }],
+    ['analytics_show_product_list', { sid, offset: 0, length: 5 }],
+];
 
-// 打印前 8 个的入参 schema
-for (const tool of hits.slice(0, 8)) {
+for (const [toolId, params] of probes) {
     try {
-        const schema = await client.gateway('search', { toolId: tool.toolId });
-        console.log(`\n=== ${tool.toolId} 入参 ===`);
-        console.log(JSON.stringify(schema).slice(0, 1200));
+        const schema = await client.gateway('search', { toolId });
+        console.log(`\n=== ${toolId} 入参 ===`);
+        console.log(JSON.stringify(schema?.inputSchema || schema).slice(0, 900));
     } catch (error) {
-        console.log(`\n=== ${tool.toolId} 入参读取失败：${String(error.message || error).slice(0, 160)}`);
+        console.log(`\n=== ${toolId} schema 失败：${String(error.message || error).slice(0, 160)}`);
+    }
+    try {
+        const data = await client.call(toolId, params);
+        const list = data?.list || data?.data || [];
+        const first = Array.isArray(list) ? list[0] : list;
+        console.log(`=== ${toolId} 返回 ${Array.isArray(list) ? list.length : '?'} 行，字段：`);
+        console.log(Object.keys(first || {}).join(', '));
+        const urls = [];
+        const walk = (obj, prefix) => {
+            for (const [key, value] of Object.entries(obj || {})) {
+                const path = prefix ? `${prefix}.${key}` : key;
+                if (typeof value === 'string' && /^https?:\/\//.test(value)) urls.push(`${path} = ${value.slice(0, 120)}`);
+                else if (value && typeof value === 'object') walk(value, path);
+            }
+        };
+        walk(first, '');
+        console.log(urls.length ? `图片/链接字段：\n${urls.slice(0, 10).join('\n')}` : '没有找到 http(s) 链接字段');
+    } catch (error) {
+        console.log(`=== ${toolId} 调用失败：${String(error.message || error).slice(0, 200)}`);
     }
 }
