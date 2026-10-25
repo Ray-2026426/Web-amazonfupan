@@ -159,11 +159,44 @@ select
 from fact_daily
 group by date;
 
+-- ---------------------------------------------------------------------------
+-- 每日库存快照：每天抓一次领星「FBA 库存」，按 日期+店铺+MSKU 存一行
+-- ---------------------------------------------------------------------------
+create table if not exists fact_inventory (
+    date date not null,
+    sid text not null,
+    asin text,
+    msku text not null,
+    fnsku text,
+    product_name text,
+    shop_name text,
+    parent_asin text,
+    fulfillable numeric,          -- FBA 可售
+    reserved numeric,             -- 预留
+    inbound_shipped numeric,      -- 在途：已发货
+    inbound_receiving numeric,    -- 在途：收货中
+    inbound_working numeric,      -- 在途：处理中
+    researching numeric,          -- 调查中
+    unsellable numeric,           -- 不可售
+    total_onhand numeric,         -- 在库合计
+    days_of_supply numeric,       -- 可售天数（领星口径）
+    sell_through numeric,         -- 售罄率
+    health text,                  -- 库存健康度
+    unit_cost numeric,
+    total_cost numeric,
+    pic_url text,
+    updated_at timestamptz not null default now(),
+    primary key (date, sid, msku)
+);
+create index if not exists idx_fact_inventory_date on fact_inventory (date);
+alter table fact_inventory enable row level security;
+revoke all on table fact_inventory from anon, authenticated;
+grant select, insert, update, delete on table fact_inventory to service_role;
+
 -- 每日对账：同步时把「我们算的毛利」与「领星订单利润合计」记下来，
 -- 数据质量页据此标出差异过大的日期，不用等人工发现。
 create table if not exists daily_checks (
-    date date primary key,
-    expected_gross_profit numeric,
+    date date primary key,    expected_gross_profit numeric,
     actual_gross_profit numeric,
     diff_ratio numeric,
     checked_at timestamptz not null default now()

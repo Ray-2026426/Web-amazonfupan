@@ -1,0 +1,41 @@
+name: 库存每日快照
+
+on:
+  schedule:
+    - cron: '0 1 * * *' # 北京时间 09:00，抓昨天的库存快照
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '指定日期 YYYY-MM-DD（留空 = 昨天）'
+        required: false
+        default: ''
+
+concurrency:
+  group: lingxing-inventory
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 抓取库存快照
+        env:
+          LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_DATE:-}" ]; then
+            node scripts/sync/inventory.mjs --date "$INPUT_DATE"
+          else
+            node scripts/sync/inventory.mjs
+          fi
