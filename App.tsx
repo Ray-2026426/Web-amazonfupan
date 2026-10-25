@@ -36,6 +36,9 @@ const KeywordAnalysisModal = lazy(() => import('./components/KeywordAnalysisModa
 const ChatBot = lazy(() => import('./components/ChatBot').then(m => ({default: m.ChatBot})));
 import { AppSettingsButton } from './components/AppSettingsButton';
 const CloudAdminPanel = lazy(() => import('./components/CloudAdminPanel').then(m => ({ default: m.CloudAdminPanel })));
+/** 含 recharts，懒加载避免拖大首屏包体 */
+const ProfitWaterfall = lazy(() => import('./components/ProfitWaterfall').then(m => ({ default: m.ProfitWaterfall })));
+const StockHealth = lazy(() => import('./components/StockHealth').then(m => ({ default: m.StockHealth })));
 import { BusinessCommandCenter } from './components/BusinessCommandCenter';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles } from 'lucide-react';
@@ -799,6 +802,18 @@ const App: React.FC = () => {
                         /></section>
                     )}
 
+                    {/* 2.5 毛利瀑布：销售额一路减到毛利，并拆出变化来自「量」还是「率」 */}
+                    {processedData && (
+                        <Suspense fallback={null}>
+                            <ProfitWaterfall
+                                current={processedData.current}
+                                last={processedData.last}
+                                currentRows={processedData.currentRows}
+                                lastRows={processedData.lastRows}
+                            />
+                        </Suspense>
+                    )}
+
                     {/* 3. Traffic Table */}
                     {processedData && (
                         <section id="traffic"><TrafficTable 
@@ -819,6 +834,9 @@ const App: React.FC = () => {
                             onOpenDetail={() => { setDetailType('Inventory'); setDetailModalOpen(true); }}
                         /></section>
                     )}
+
+                    {/* 4.5 库存健康：可售天数 = 可售库存 ÷ 近 28 天日均销量 */}
+                    {processedData && <Suspense fallback={null}><StockHealth rows={activeRawData} /></Suspense>}
 
                     {!processedData && (
                         // 云端第一次拉数（或切换区间后还没拿到新数据）时只显示加载态，
