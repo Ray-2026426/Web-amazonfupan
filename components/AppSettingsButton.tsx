@@ -17,12 +17,14 @@ export const AppSettingsButton: React.FC<{
     cloudEnabled?: boolean;
     cloudConnected?: boolean;
     cloudLoading?: boolean;
+    /** 云端数据截止日，正常状态不占版面，显示在这里 */
+    cloudCutoff?: string;
     onOpenCloudLogin?: () => void;
     onOpenCloudAdmin?: () => void;
     /** 毛利修正：把 FBA 国际运费加回毛利 */
     addBackFbaFee?: boolean;
     onToggleFbaFee?: (next: boolean) => void;
-}> = ({ cloudEnabled = false, cloudConnected = false, cloudLoading = false, onOpenCloudLogin, onOpenCloudAdmin, addBackFbaFee = true, onToggleFbaFee }) => {
+}> = ({ cloudEnabled = false, cloudConnected = false, cloudLoading = false, cloudCutoff = '', onOpenCloudLogin, onOpenCloudAdmin, addBackFbaFee = true, onToggleFbaFee }) => {
     const [open, setOpen] = useState(false);
     const [settings, setSettings] = useState<AppSettings>(() => loadAppSettings());
     const panelRef = useRef<HTMLDivElement>(null);
@@ -126,7 +128,7 @@ export const AppSettingsButton: React.FC<{
                                 <div className="mb-1.5 flex items-center justify-between">
                                     <span className="text-[11px] font-semibold text-slate-500">数据源</span>
                                     <span className={`text-[10px] font-semibold ${cloudConnected ? 'text-emerald-600' : 'text-slate-400'}`}>
-                                        {cloudLoading ? '云端加载中…' : cloudConnected ? '已连接' : '未连接'}
+                                        {cloudLoading ? '云端加载中…' : cloudConnected ? `已连接${cloudCutoff ? ` · 截止 ${cloudCutoff}` : ''}` : '未连接'}
                                     </span>
                                 </div>
                                 <div className="grid grid-cols-2 gap-1.5">

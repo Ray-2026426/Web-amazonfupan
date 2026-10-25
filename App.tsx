@@ -196,6 +196,8 @@ const App: React.FC = () => {
   const [cloudConnected, setCloudConnected] = useState(false);
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudStatus, setCloudStatus] = useState('');
+  /** 云端数据截止日（正常状态不占用版面，显示在设置面板里） */
+  const [cloudCutoff, setCloudCutoff] = useState('');
   const [cloudRefreshTick, setCloudRefreshTick] = useState(0);
   // Modal States
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -327,16 +329,21 @@ const App: React.FC = () => {
               setCloudTargetActive(targets?.active || false);
               setCloudRowsRange(`${filters.startDate}|${filters.endDate}`);
               setCloudConnected(true);
-              // 覆盖天数：只有两三天的云端数据会让趋势图看着「没同步好」，直接在状态条里说清楚
+              setCloudCutoff(freshness.latest_date || '');
+              // 状态条只在「需要你处理」时出现：同步失败、覆盖天数太少、目标读取失败。
+              // 正常情况不占地方，截止日期挪到设置面板里显示。
               const coverageDays = freshness.first_date && freshness.latest_date
                   ? Math.round((Date.parse(freshness.latest_date) - Date.parse(freshness.first_date)) / 86400000) + 1
                   : 0;
-              const coverageNote = coverageDays > 0 && coverageDays < 7
-                  ? ` · 云端仅 ${coverageDays} 天数据（${freshness.first_date} ~ ${freshness.latest_date}）；在「数据管理」把「每天回补最近 N 天」调到 7 天，下次同步会自动补缺口`
-                  : '';
-              setCloudStatus((freshness.latestRun?.status === 'failed'
-                  ? `云端最近一次同步失败，当前业绩数据截至 ${freshness.latest_date}`
-                  : `云端业绩数据截至 ${freshness.latest_date}`) + coverageNote + (targets === null ? ' · 云端目标读取失败，暂用本地目标' : ''));
+              const issues: string[] = [];
+              if (freshness.latestRun?.status === 'failed') {
+                  issues.push(`云端最近一次同步失败，数据截至 ${freshness.latest_date}`);
+              }
+              if (coverageDays > 0 && coverageDays < 7) {
+                  issues.push(`云端仅 ${coverageDays} 天数据（${freshness.first_date} ~ ${freshness.latest_date}），可在「数据管理」补数`);
+              }
+              if (targets === null) issues.push('云端目标读取失败，暂用本地目标');
+              setCloudStatus(issues.join(' · '));
               setDataEndDate(freshness.latest_date);
               setLastImportedAt(freshness.latestRun?.finished_at ? Date.parse(freshness.latestRun.finished_at) : undefined);
           } catch (error) {
@@ -369,7 +376,8 @@ const App: React.FC = () => {
       setCloudTargetData([]);
       setCloudTargetActive(false);
       setCloudRowsRange('');
-      setCloudStatus('已切换到本地导入数据');
+      setCloudStatus('');
+      setCloudCutoff('');
       loadFromDB('meta').then((meta: AppMeta | null) => {
           setDataEndDate(meta?.dataEndDate || '');
           setLastImportedAt(meta?.lastImportedAt);
@@ -706,6 +714,7 @@ const App: React.FC = () => {
                     cloudEnabled={CLOUD_ENABLED}
                     cloudConnected={cloudConnected}
                     cloudLoading={cloudLoading}
+                    cloudCutoff={cloudCutoff}
                     onOpenCloudLogin={() => setShowCloudLogin(true)}
                     onOpenCloudAdmin={() => setShowCloudAdmin(true)}
                     addBackFbaFee={addBackFbaFee}
@@ -727,7 +736,7 @@ const App: React.FC = () => {
 
         {/* Scrollable Content */}
         <main className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">
-            {CLOUD_ENABLED && cloudStatus && <div role="status" className={`mx-auto mb-3 max-w-[1680px] rounded-xl border px-4 py-2 text-sm ${cloudConnected && !cloudStatus.includes('失败') ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>{cloudStatus}{cloudConnected && (cloudTargetActive ? ' · 目标使用云端目标表；库存、退货、评论仍使用本地导入' : ' · 目标、库存、退货、评论仍使用本地导入')}</div>}
+            {CLOUD_ENABLED && cloudStatus && <div role="status" className="mx-auto mb-3 max-w-[1680px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">{cloudStatus}</div>}
             {persistenceError && <div role="alert" className="mx-auto mb-3 flex max-w-[1680px] items-center justify-between rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"><span>{persistenceError}</span><button type="button" onClick={() => setPersistenceError('')} className="ml-3 font-bold">关闭</button></div>}
             {isRestoringData ? (
                 <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/80 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
@@ -737,7 +746,6 @@ const App: React.FC = () => {
                 </div>
             ) : (
                 <div className="max-w-[1680px] mx-auto space-y-6 pb-20">
-                    {processedData && <nav aria-label="报表模块" className="flex gap-2 overflow-x-auto whitespace-nowrap text-xs font-semibold text-slate-600">{[['overview','业绩概览'],['issues','优先事项'],['pl','利润表'],['traffic','流量广告'],['inventory','库存']].map(([id,label]) => <a key={id} href={`#${id}`} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 hover:border-sky-300 hover:text-sky-700">{label}</a>)}</nav>}
                     
                     {/* 1. Overview Cards */}
                     {processedData && (
@@ -808,7 +816,7 @@ const App: React.FC = () => {
                             <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
                                 <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
                                 <p className="text-lg font-semibold text-slate-700">正在加载数据…</p>
-                                <p className="mt-1 text-sm text-slate-500">{cloudStatus ? '正在从云端读取业绩数据' : '正在连接云端数据'}</p>
+                                <p className="mt-1 text-sm text-slate-500">{cloudConnected ? '正在从云端读取业绩数据' : '正在连接云端数据'}</p>
                             </div>
                         ) : (
                             <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
