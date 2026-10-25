@@ -19,12 +19,14 @@ export const AppSettingsButton: React.FC<{
     cloudLoading?: boolean;
     /** 云端数据截止日，正常状态不占版面，显示在这里 */
     cloudCutoff?: string;
+    /** 最近一次成功同步时间 */
+    cloudLastSync?: string;
     onOpenCloudLogin?: () => void;
     onOpenCloudAdmin?: () => void;
     /** 毛利修正：把 FBA 国际运费加回毛利 */
     addBackFbaFee?: boolean;
     onToggleFbaFee?: (next: boolean) => void;
-}> = ({ cloudEnabled = false, cloudConnected = false, cloudLoading = false, cloudCutoff = '', onOpenCloudLogin, onOpenCloudAdmin, addBackFbaFee = true, onToggleFbaFee }) => {
+}> = ({ cloudEnabled = false, cloudConnected = false, cloudLoading = false, cloudCutoff = '', cloudLastSync = '', onOpenCloudLogin, onOpenCloudAdmin, addBackFbaFee = true, onToggleFbaFee }) => {
     const [open, setOpen] = useState(false);
     const [settings, setSettings] = useState<AppSettings>(() => loadAppSettings());
     const panelRef = useRef<HTMLDivElement>(null);
@@ -147,6 +149,13 @@ export const AppSettingsButton: React.FC<{
                                         数据管理
                                     </button>
                                 </div>
+                                {cloudConnected && (cloudCutoff || cloudLastSync) && (
+                                    <p className="mt-1.5 text-[10px] leading-snug text-slate-400">
+                                        {cloudCutoff ? `最新数据 ${cloudCutoff}` : ''}
+                                        {cloudCutoff && cloudLastSync ? ' · ' : ''}
+                                        {cloudLastSync ? `上次同步 ${cloudLastSync}` : ''}
+                                    </p>
+                                )}
                             </div>
                         )}
 

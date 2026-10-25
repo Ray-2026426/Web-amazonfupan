@@ -334,6 +334,10 @@ create table if not exists target_imports (
     activated_at timestamptz
 );
 create unique index if not exists idx_target_import_one_active on target_imports (active) where active;
+-- 覆盖率摘要：上传时由前端算好，避免后台扫全表
+alter table target_imports add column if not exists covered_shops integer;
+alter table target_imports add column if not exists covered_asins integer;
+alter table target_imports add column if not exists months text;
 
 create table if not exists target_rows (
     import_id uuid not null references target_imports(id) on delete cascade,

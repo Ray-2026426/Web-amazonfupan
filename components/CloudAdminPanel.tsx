@@ -9,15 +9,17 @@ import { AlertCircle, CheckCircle2, Database, Download, RefreshCw, RotateCcw, Sa
 type FieldMapping = { web_field: string; export_label: string; lingxing_field: string };
 type Run = { id: number; started_at: string; range_from: string; range_to: string; status: string; rows_daily: number; error: string | null };
 type Sample = { date: string; sid: string; asin: string; shop_name: string; product_name: string; sales_amount: number; gross_profit: number; ad_spend: number };
+type QueueItem = { id: number; dates: string[]; status: string; created_at: string; processed_at: string | null; note: string | null };
 type AdminData = {
   settings: { enabled: boolean; lookback_days: number } | null;
   fieldMappings: FieldMapping[];
   /** false = 云端还没建 field_mappings 表，当前显示的是内置默认值 */
   fieldMappingReady?: boolean;
   runs: Run[];
+  syncRequests?: QueueItem[];
   sampleDate: string | null;
   data: Sample[];
-  targetImport: { id: string; source_filename: string; expected_rows: number; activated_at: string } | null;
+  targetImport: { id: string; source_filename: string; expected_rows: number; activated_at: string; covered_shops?: number | null; covered_asins?: number | null; months?: string | null } | null;
 };
 
 const TOKEN_KEY = 'amazon-dashboard-admin-token';
@@ -145,7 +147,19 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
         [row.sales_quantity_target, row.sales_amount_target, row.gross_profit_target, row.ad_spend_target].some(value => Number(value) !== 0),
       );
       if (!rows.length) throw new Error('目标表中没有非零目标数据');
-      const started = await request('POST', { action: 'targets_start', source_filename: targetFile.name, expected_rows: rows.length }) as { import_id: string };
+      // 覆盖率摘要：上传时就算好，后台直接存，不用再扫几十万行
+      const shopSet = new Set(rows.map(row => `${row.country || ''}|${row.shop_name || ''}`));
+      const asinSet = new Set(rows.map(row => row.child_asin).filter(Boolean));
+      const months = [...new Set(rows.map(row => row.month))].sort();
+      const monthLabel = months.length ? `${months[0]} ~ ${months[months.length - 1]}` : '';
+      const started = await request('POST', {
+        action: 'targets_start',
+        source_filename: targetFile.name,
+        expected_rows: rows.length,
+        covered_shops: shopSet.size,
+        covered_asins: asinSet.size,
+        months: monthLabel,
+      }) as { import_id: string };
       const size = 400;
       for (let offset = 0; offset < rows.length; offset += size) {
         await request('POST', {
@@ -159,7 +173,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
       setData(refreshed);
       setTargetFile(null);
       setProgress('');
-      setMessage(`目标表已保存到云端，共 ${rows.length} 行；以后打开看板会自动读取。`);
+      setMessage(`目标表已保存：${rows.length} 行，覆盖 ${shopSet.size} 个店铺 / ${asinSet.size} 个 ASIN${monthLabel ? `（${monthLabel}）` : ''}。`);
       onTargetsUpdated?.();
     } catch (error) {
       setProgress('');
@@ -773,11 +787,67 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                 </div>
               </section>}
 
+              {tab === 'quality' && <section className={`${cardClass} mt-4`}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className={sectionTitle}>补数任务</h3>
+                    <p className={sectionHint}>点「补这一天 / 补齐缺失」后，任务会排在这里。没有配置 GitHub 令牌时最多等 10 分钟，由定时任务接手。</p>
+                  </div>
+                  <button className={ghostClass} disabled={busy} onClick={() => void load(date || data.sampleDate || '')}>刷新</button>
+                </div>
+                {(data.syncRequests || []).length ? (
+                  <div className="mt-3 space-y-1.5">
+                    {(data.syncRequests || []).map(item => (
+                      <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2 text-[11px]">
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
+                          item.status === 'done' ? 'bg-emerald-50 text-emerald-700'
+                            : item.status === 'running' ? 'bg-sky-50 text-sky-700'
+                              : item.status === 'failed' ? 'bg-rose-50 text-rose-700'
+                                : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          {item.status === 'done' ? '已完成' : item.status === 'running' ? '进行中' : item.status === 'failed' ? '失败' : '排队中'}
+                        </span>
+                        <span className="text-slate-600">
+                          {item.dates.length} 天{Array.isArray(item.dates) && item.dates.length ? `（${item.dates[0]} ~ ${item.dates[item.dates.length - 1]}）` : ''}
+                        </span>
+                        <span className="text-slate-400">{new Date(item.created_at).toLocaleString('zh-CN', { hour12: false })}</span>
+                        {item.note && <span className="text-rose-500">{item.note}</span>}
+                        {item.status === 'failed' && (
+                          <button
+                            type="button"
+                            className="ml-auto rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:border-sky-300 hover:text-sky-700"
+                            onClick={() => void dispatchBackfill(item.dates)}
+                          >
+                            重新提交
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className={`${sectionHint} mt-2`}>暂无补数记录。</p>}
+              </section>}
+
               {tab === 'targets' && <div className="space-y-4">
                 <section className={cardClass}>
                   <h3 className={sectionTitle}>当前生效的目标表</h3>
                   {data.targetImport ? (
-                    <p className={`${sectionHint} text-slate-700`}>{data.targetImport.source_filename} · {data.targetImport.expected_rows} 行 · {new Date(data.targetImport.activated_at).toLocaleString('zh-CN')} 上传</p>
+                    <>
+                      <p className={`${sectionHint} text-slate-700`}>{data.targetImport.source_filename} · {data.targetImport.expected_rows} 行 · {new Date(data.targetImport.activated_at).toLocaleString('zh-CN')} 上传</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700 ring-1 ring-slate-200">
+                          覆盖店铺 {data.targetImport.covered_shops ?? '—'}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700 ring-1 ring-slate-200">
+                          覆盖 ASIN {data.targetImport.covered_asins ?? '—'}
+                        </span>
+                        {data.targetImport.months && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700 ring-1 ring-slate-200">
+                            月份 {data.targetImport.months}
+                          </span>
+                        )}
+                      </div>
+                      <p className={`${sectionHint} mt-2`}>任何没有出现在目标表里的店铺 / ASIN，其达成率都会显示为空，而不是 0%。</p>
+                    </>
                   ) : <p className={sectionHint}>尚未上传目标表。</p>}
                 </section>
                 <section className={cardClass}>

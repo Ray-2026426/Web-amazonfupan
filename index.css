@@ -120,3 +120,13 @@ html[data-table-density="comfortable"] table td { padding-top: 0.85rem; padding-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ------------------------------------------------------------------ *
+ * 长表格性能：让浏览器跳过视口外的行（只排版/绘制可见部分）。
+ * 数据量上来后（几万行明细），这一条能明显减少滚动掉帧。
+ * contain-intrinsic-size 给一个近似行高，避免滚动条抖动。
+ * ------------------------------------------------------------------ */
+tbody > tr {
+  content-visibility: auto;
+  contain-intrinsic-size: 40px;
+}

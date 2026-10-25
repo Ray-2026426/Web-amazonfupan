@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect, useDeferredValue, Suspense, lazy } from 'react';
 import { ActionItem, BusinessIssue, DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot, DataCoverage, AppMeta, PeriodMode } from './types';
 import { 
   calculatePeriodDates, 
@@ -44,6 +44,8 @@ import { DEFAULT_BUSINESS_RULES, generateBusinessIssues, updateActionForIssue } 
 import { CLOUD_ENABLED, clearCloudToken, fetchCloudFreshness, fetchCloudRows, fetchCloudTargets, getCloudToken, saveCloudToken } from './cloudData';
 
 const DEFAULT_DATA_START = '2025-01-01';
+/** 稳定的空数组：避免每次渲染都造新引用，导致下游 useMemo 全部失效重算 */
+const EMPTY_ROWS: DataRow[] = [];
 /** 记住上次的粒度，刷新后不用重新点一次 */
 const PERIOD_MODE_KEY = 'amazon-dashboard-period-mode';
 const readStoredPeriodMode = (): PeriodMode => {
@@ -198,6 +200,8 @@ const App: React.FC = () => {
   const [cloudStatus, setCloudStatus] = useState('');
   /** 云端数据截止日（正常状态不占用版面，显示在设置面板里） */
   const [cloudCutoff, setCloudCutoff] = useState('');
+  /** 最近一次成功同步的时间，同样收在设置面板 */
+  const [cloudLastSync, setCloudLastSync] = useState('');
   const [cloudRefreshTick, setCloudRefreshTick] = useState(0);
   // Modal States
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -330,6 +334,9 @@ const App: React.FC = () => {
               setCloudRowsRange(`${filters.startDate}|${filters.endDate}`);
               setCloudConnected(true);
               setCloudCutoff(freshness.latest_date || '');
+              setCloudLastSync(freshness.latestRun?.finished_at
+                  ? new Date(freshness.latestRun.finished_at).toLocaleString('zh-CN', { hour12: false })
+                  : '');
               // 状态条只在「需要你处理」时出现：同步失败、覆盖天数太少、目标读取失败。
               // 正常情况不占地方，截止日期挪到设置面板里显示。
               const coverageDays = freshness.first_date && freshness.latest_date
@@ -384,10 +391,10 @@ const App: React.FC = () => {
       }).catch(error => setPersistenceError(`读取本地状态失败：${String(error)}`));
   };
 
-  const visibleCloudRows = cloudRowsRange === `${filters.startDate}|${filters.endDate}` ? cloudRows : [];
+  const visibleCloudRows = cloudRowsRange === `${filters.startDate}|${filters.endDate}` ? cloudRows : EMPTY_ROWS;
   const basePerformance = cloudConnected ? visibleCloudRows : performanceData;
   const baseWeekly = cloudConnected ? visibleCloudRows : weeklyData;
-  const baseDaily = cloudConnected ? visibleCloudRows : [];
+  const baseDaily = cloudConnected ? visibleCloudRows : EMPTY_ROWS;
   // 「毛利修正」：勾选后把 FBA 国际运费加回毛利（该费用已含在头程，领星又扣了一次）
   const displayPerformanceData = useMemo(() => applyFbaFeeCorrection(basePerformance, addBackFbaFee), [basePerformance, addBackFbaFee]);
   const displayWeeklyData = useMemo(() => applyFbaFeeCorrection(baseWeekly, addBackFbaFee), [baseWeekly, addBackFbaFee]);
@@ -585,7 +592,6 @@ const App: React.FC = () => {
       const currentRows = filterData(activeData, periods.current, filters);
       const lastRows = filterData(activeData, periods.last, filters);
       const yearRows = filterData(activeData, periods.year, filters);
-
       // Aggregate
       const current = aggregateData(currentRows);
       // STRICT: Return null if no data, so comparison logic knows it's missing (not 0)
@@ -637,7 +643,6 @@ const App: React.FC = () => {
           pacingRatio,
       };
   }, [activeRawData, displayTargetData, inventoryData, filters, periodMode, dataEndDate]);
-
   const businessIssues = useMemo(() => {
       if (!processedData) return [];
       return generateBusinessIssues({
@@ -715,6 +720,7 @@ const App: React.FC = () => {
                     cloudConnected={cloudConnected}
                     cloudLoading={cloudLoading}
                     cloudCutoff={cloudCutoff}
+                    cloudLastSync={cloudLastSync}
                     onOpenCloudLogin={() => setShowCloudLogin(true)}
                     onOpenCloudAdmin={() => setShowCloudAdmin(true)}
                     addBackFbaFee={addBackFbaFee}

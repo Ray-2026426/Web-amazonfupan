@@ -64,9 +64,15 @@ async function save(body) {
         throw Object.assign(new Error('目标表有效行数须为 1–100000'), { status: 400 });
       }
       const id = randomUUID();
+      // 覆盖率摘要：前端解析目标表时算好一起传，避免后台再扫一遍几十万行
+      const summary = {
+        covered_shops: Number.isFinite(Number(body.covered_shops)) ? Number(body.covered_shops) : null,
+        covered_asins: Number.isFinite(Number(body.covered_asins)) ? Number(body.covered_asins) : null,
+        months: typeof body.months === 'string' ? body.months.slice(0, 200) : null,
+      };
       await writeTable('target_imports', 'POST', {
         id, source_filename: clean(body.source_filename, '文件名', 200), expected_rows: expectedRows,
-        status: 'staging', active: false,
+        status: 'staging', active: false, ...summary,
       });
       return { import_id: id };
     }
@@ -111,11 +117,13 @@ export default async function handler(req, res) {
       const mappingsResult = await fetchTable('field_mappings', { select: 'web_field,export_label,lingxing_field' }, 100)
         .then((rows) => ({ rows, ready: true }))
         .catch(() => ({ rows: [], ready: false }));
-      const [settings, runs, latest, targetImports] = await Promise.all([
+      const [settings, runs, latest, targetImports, syncRequests] = await Promise.all([
         fetchTable('sync_settings', { select: '*', id: 'eq.1' }, 1),
         fetchTable('sync_runs', { select: '*', order: 'started_at.desc' }, 10),
         fetchTable('fact_daily', { select: 'date', order: 'date.desc' }, 1),
-        fetchTable('target_imports', { select: 'id,source_filename,expected_rows,activated_at', active: 'eq.true' }, 1),
+        fetchTable('target_imports', { select: '*', active: 'eq.true' }, 1),
+        // 补数队列：还没建表时忽略，不影响面板其它部分
+        fetchTable('sync_requests', { select: 'id,dates,status,created_at,processed_at,note', order: 'created_at.desc' }, 15).catch(() => []),
       ]);
       const fieldMappings = mappingsResult.ready
         ? mappingsResult.rows
@@ -125,7 +133,7 @@ export default async function handler(req, res) {
         select: 'date,sid,asin,shop_name,product_name,sales_amount,gross_profit,ad_spend',
         date: `eq.${sampleDate}`, order: 'sales_amount.desc',
       }, 100) : [];
-      return res.status(200).json({ settings: settings[0] || null, fieldMappings, fieldMappingReady: mappingsResult.ready, runs, sampleDate, data, targetImport: targetImports[0] || null });
+      return res.status(200).json({ settings: settings[0] || null, fieldMappings, fieldMappingReady: mappingsResult.ready, runs, syncRequests, sampleDate, data, targetImport: targetImports[0] || null });
     }
     if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;

@@ -279,7 +279,7 @@ const WeeklyMetricCard = ({
     );
 };
 
-export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
+const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({
     current,
     target,
     periodMode = 'month',
@@ -506,3 +506,6 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         </div>
     );
 };
+
+/** 只在 props 变化时重渲染：父级其它状态（弹窗、侧栏等）变化时不再重算整块 KPI */
+export const DashboardOverview = React.memo(DashboardOverviewInner);
