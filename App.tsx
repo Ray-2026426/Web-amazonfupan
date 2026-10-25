@@ -169,9 +169,14 @@ const App: React.FC = () => {
   const [periodMode, setPeriodMode] = useState<PeriodMode>(readStoredPeriodMode);
   const isWeeklyMode = periodMode === 'week';
   const isDailyMode = periodMode === 'day';
-  /** 毛利修正：FBA 国际运费已含在头程，领星算毛利时又扣了一次，勾选后加回来 */
+  /** 毛利修正：FBA 国际运费已含在头程，领星算毛利时又扣了一次，勾选后加回来（默认开启） */
   const [addBackFbaFee, setAddBackFbaFee] = useState(() => {
-    try { return localStorage.getItem('amazon-dashboard-fba-fee-adjust') === '1'; } catch { return false; }
+    try {
+      const stored = localStorage.getItem('amazon-dashboard-fba-fee-adjust');
+      return stored === null ? true : stored === '1';
+    } catch {
+      return true;
+    }
   });
   useEffect(() => {
     try { localStorage.setItem('amazon-dashboard-fba-fee-adjust', addBackFbaFee ? '1' : '0'); } catch { /* 忽略 */ }
@@ -697,22 +702,15 @@ const App: React.FC = () => {
                 <WorldClock />
                 <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block"></div>
 
-                <AppSettingsButton />
-
-                <button
-                    type="button"
-                    role="switch"
-                    aria-checked={addBackFbaFee}
-                    onClick={() => setAddBackFbaFee(value => !value)}
-                    title="FBA 国际运费已经算进头程费用里，领星计算毛利时又扣了一次。开启后把它的绝对值加回毛利，修正重复扣除。"
-                    className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition ${addBackFbaFee ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600'}`}
-                >
-                    <span className={`h-2 w-2 rounded-full ${addBackFbaFee ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                    毛利修正
-                </button>
-
-                {CLOUD_ENABLED && <button type="button" onClick={() => setShowCloudLogin(true)} className={`rounded-xl border px-3 py-2 text-xs font-bold ${cloudConnected ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-sky-200 bg-white text-sky-700'}`}>{cloudLoading ? '云端加载中…' : cloudConnected ? '云端数据已连接' : '连接云端数据'}</button>}
-                {CLOUD_ENABLED && <button type="button" onClick={() => setShowCloudAdmin(true)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">数据管理</button>}
+                <AppSettingsButton
+                    cloudEnabled={CLOUD_ENABLED}
+                    cloudConnected={cloudConnected}
+                    cloudLoading={cloudLoading}
+                    onOpenCloudLogin={() => setShowCloudLogin(true)}
+                    onOpenCloudAdmin={() => setShowCloudAdmin(true)}
+                    addBackFbaFee={addBackFbaFee}
+                    onToggleFbaFee={setAddBackFbaFee}
+                />
 
                 <button 
                     onClick={() => setShowUploadModal(true)}

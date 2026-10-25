@@ -12,7 +12,17 @@ import {
 } from './appSettings';
 import { useEscClose } from './useEscClose';
 
-export const AppSettingsButton: React.FC = () => {
+export const AppSettingsButton: React.FC<{
+    /** 云端数据源相关：原来是顶栏的一排按钮，现在收进设置面板 */
+    cloudEnabled?: boolean;
+    cloudConnected?: boolean;
+    cloudLoading?: boolean;
+    onOpenCloudLogin?: () => void;
+    onOpenCloudAdmin?: () => void;
+    /** 毛利修正：把 FBA 国际运费加回毛利 */
+    addBackFbaFee?: boolean;
+    onToggleFbaFee?: (next: boolean) => void;
+}> = ({ cloudEnabled = false, cloudConnected = false, cloudLoading = false, onOpenCloudLogin, onOpenCloudAdmin, addBackFbaFee = true, onToggleFbaFee }) => {
     const [open, setOpen] = useState(false);
     const [settings, setSettings] = useState<AppSettings>(() => loadAppSettings());
     const panelRef = useRef<HTMLDivElement>(null);
@@ -42,7 +52,7 @@ export const AppSettingsButton: React.FC = () => {
     return (
         <div ref={panelRef} className="relative">
             {open && (
-                <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+                <div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
                     <div className="mb-3 flex items-center justify-between">
                         <span className="text-xs font-bold text-slate-700">总控设置</span>
                         <button
@@ -109,6 +119,54 @@ export const AppSettingsButton: React.FC = () => {
                             <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
                                 {(['compact', 'comfortable'] as const).map(density => <button key={density} type="button" onClick={() => setTableDensity(density)} className={`flex-1 rounded-md py-1.5 text-[11px] font-semibold ${settings.tableDensity === density ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500'}`}>{density === 'compact' ? '紧凑' : '舒适'}</button>)}
                             </div>
+                        </div>
+
+                        {cloudEnabled && (
+                            <div className="border-t border-slate-100 pt-3">
+                                <div className="mb-1.5 flex items-center justify-between">
+                                    <span className="text-[11px] font-semibold text-slate-500">数据源</span>
+                                    <span className={`text-[10px] font-semibold ${cloudConnected ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                        {cloudLoading ? '云端加载中…' : cloudConnected ? '已连接' : '未连接'}
+                                    </span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setOpen(false); onOpenCloudLogin?.(); }}
+                                        className="rounded-lg border border-slate-200 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:border-sky-300 hover:text-sky-700"
+                                    >
+                                        {cloudConnected ? '切换云端' : '连接云端'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setOpen(false); onOpenCloudAdmin?.(); }}
+                                        className="rounded-lg border border-slate-200 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:border-sky-300 hover:text-sky-700"
+                                    >
+                                        数据管理
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="border-t border-slate-100 pt-3">
+                            <div className="mb-1.5 text-[11px] font-semibold text-slate-500">计算口径</div>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={addBackFbaFee}
+                                onClick={() => onToggleFbaFee?.(!addBackFbaFee)}
+                                className="flex w-full items-start justify-between gap-2 text-left"
+                            >
+                                <span className="min-w-0">
+                                    <span className="block text-[11px] font-semibold text-slate-700">毛利修正</span>
+                                    <span className="mt-0.5 block text-[10px] leading-snug text-slate-400">
+                                        把 FBA 国际运费加回毛利（该费用已含在头程，领星又扣了一次）
+                                    </span>
+                                </span>
+                                <span className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition ${addBackFbaFee ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                    <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${addBackFbaFee ? 'left-[18px]' : 'left-0.5'}`} />
+                                </span>
+                            </button>
                         </div>
                     </div>
                 </div>
