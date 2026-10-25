@@ -50,6 +50,8 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
   const [exportMode, setExportMode] = useState<'day' | 'range'>('range');
+  /** 日明细 / 按月汇总 */
+  const [exportGranularity, setExportGranularity] = useState<'day' | 'month'>('day');
   const [draft, setDraft] = useState<Record<string, { export_label: string; lingxing_field: string }>>({});
   const [query, setQuery] = useState('');
   // 数据质量
@@ -183,11 +185,12 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
     return chunks;
   };
 
-  const fetchRangeRows = async (from: string, to: string) => {
+  const fetchRangeRows = async (from: string, to: string, granularity: 'day' | 'month') => {
     const rows: Record<string, unknown>[] = [];
     let offset = 0;
     for (let page = 0; page < 501; page++) {
-      const response = await fetch(`/api/export?from=${from}&to=${to}&offset=${offset}`, {
+      const suffix = granularity === 'month' ? '&granularity=month' : '';
+      const response = await fetch(`/api/export?from=${from}&to=${to}&offset=${offset}${suffix}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const result = await response.json().catch(() => ({}));
@@ -201,28 +204,36 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
 
   const downloadDaily = async (format: 'csv' | 'xlsx') => {
     const from = exportFrom;
-    const to = exportMode === 'day' ? exportFrom : exportTo;
+    const to = exportGranularity === 'month' ? (exportTo || exportFrom) : exportMode === 'day' ? exportFrom : exportTo;
     if (!from || !to || from > to) {
       setMessage('请先选择有效的下载日期');
       return;
     }
     const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000 + 1;
-    if (format === 'xlsx' && days > 92) {
+    const months = (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + (Number(to.slice(5, 7)) - Number(from.slice(5, 7))) + 1;
+    if (exportGranularity === 'month' && months > 60) {
+      setMessage('按月汇总单次最多 60 个月');
+      return;
+    }
+    if (format === 'xlsx' && exportGranularity === 'day' && days > 92) {
       setMessage('Excel 单次最多 92 天（约 8 万行）；更长的区间请用 CSV');
       return;
     }
     setBusy(true);
     setMessage('');
-    setProgress('正在准备每日明细…');
+    setProgress(exportGranularity === 'month' ? '正在准备月度汇总…' : '正在准备每日明细…');
     try {
-      const chunks = buildChunks(from, to);
-      const fileBase = days === 1 ? `亚马逊每日业绩_${from}` : `亚马逊每日业绩_${from}_${to}`;
+      const chunks = exportGranularity === 'month' ? [{ from, to }] : buildChunks(from, to);
+      const fileBase = exportGranularity === 'month'
+        ? `亚马逊月度汇总_${from.slice(0, 7)}_${to.slice(0, 7)}`
+        : days === 1 ? `亚马逊每日业绩_${from}` : `亚马逊每日业绩_${from}_${to}`;
+      const scope = exportGranularity === 'month' ? `${months} 个月` : `${days} 天`;
 
       if (format === 'csv') {
         const parts: BlobPart[] = ['\uFEFF', dailyCsvHeader(exportLabels)];
         let count = 0;
         for (let i = 0; i < chunks.length; i++) {
-          const rows = await fetchRangeRows(chunks[i].from, chunks[i].to);
+          const rows = await fetchRangeRows(chunks[i].from, chunks[i].to, exportGranularity);
           parts.push(dailyCsvRows(rows));
           count += rows.length;
           setProgress(`已读取 ${count} 行（第 ${i + 1}/${chunks.length} 段）…`);
@@ -233,20 +244,20 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
         anchor.download = `${fileBase}.csv`;
         anchor.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-        setMessage(`已下载 ${count} 行每日明细（共 ${days} 天）。`);
+        setMessage(`已下载 ${count} 行（${scope}）。`);
       } else {
         const all: Record<string, unknown>[] = [];
         for (let i = 0; i < chunks.length; i++) {
-          const rows = await fetchRangeRows(chunks[i].from, chunks[i].to);
+          const rows = await fetchRangeRows(chunks[i].from, chunks[i].to, exportGranularity);
           all.push(...rows);
           setProgress(`已读取 ${all.length} 行（第 ${i + 1}/${chunks.length} 段）…`);
         }
         const XLSX = await import('xlsx');
         const worksheet = XLSX.utils.aoa_to_sheet(dailyExportMatrix(all, exportLabels));
         const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, '每日明细');
+        XLSX.utils.book_append_sheet(workbook, worksheet, exportGranularity === 'month' ? '月度汇总' : '每日明细');
         XLSX.writeFile(workbook, `${fileBase}.xlsx`);
-        setMessage(`已下载 ${all.length} 行每日明细（共 ${days} 天）。`);
+        setMessage(`已下载 ${all.length} 行（${scope}）。`);
       }
     } catch (error) {
       setMessage(String(error instanceof Error ? error.message : error));
@@ -756,12 +767,32 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                 </section>
 
                 <section className={cardClass}>
-                  <h3 className={sectionTitle}>下载每日明细</h3>
-                  <p className={sectionHint}>列名与《项目业绩》表一致；列名可在「字段映射」里改。CSV 支持任意长度区间，Excel 单次最多 92 天。</p>
-                  <div className="mt-4 inline-flex rounded-xl bg-slate-100 p-0.5 text-xs">
-                    {([['day', '单日'], ['range', '时间段']] as const).map(([mode, label]) => (
-                      <button key={mode} type="button" onClick={() => setExportMode(mode)} className={`rounded-lg px-3 py-1.5 font-medium transition ${exportMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>
-                    ))}
+                  <h3 className={sectionTitle}>下载明细</h3>
+                  <p className={sectionHint}>
+                    列名与《项目业绩》表一致，可在「字段映射」里改。
+                    <span className="text-slate-600">日明细</span>按天一行，CSV 支持任意长度区间、Excel 最多 92 天；
+                    <span className="text-slate-600">按月汇总</span>直接输出与参考表同构的月表，单次最多 60 个月。
+                  </p>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <div className="inline-flex rounded-xl bg-slate-100 p-0.5 text-xs">
+                      {([['day', '日明细'], ['month', '按月汇总']] as const).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => { setExportGranularity(value); if (value === 'month') setExportMode('range'); }}
+                          className={`rounded-lg px-3 py-1.5 font-medium transition ${exportGranularity === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {exportGranularity === 'day' && (
+                      <div className="inline-flex rounded-xl bg-slate-100 p-0.5 text-xs">
+                        {([['day', '单日'], ['range', '时间段']] as const).map(([mode, label]) => (
+                          <button key={mode} type="button" onClick={() => setExportMode(mode)} className={`rounded-lg px-3 py-1.5 font-medium transition ${exportMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <input className={`${inputClass} w-auto`} type="date" value={exportFrom} onChange={event => setExportFrom(event.target.value)} aria-label={exportMode === 'day' ? '下载日期' : '下载起始日期'} />

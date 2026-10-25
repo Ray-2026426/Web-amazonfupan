@@ -82,7 +82,8 @@ select
     sum(natural_clicks) as natural_clicks,
     (array_agg(review_count order by date desc))[1] as review_count,
     (array_agg(fba_sellable_qty order by date desc))[1] as fba_sellable_qty,
-    (array_agg(rating order by date desc))[1] as rating
+    (array_agg(rating order by date desc))[1] as rating,
+    sum(order_quantity) as order_quantity
 from fact_daily
 group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
 

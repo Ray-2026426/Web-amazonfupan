@@ -299,3 +299,46 @@ test('daily export and target reads require separate passwords and paginate by d
     }
   }
 });
+
+test('按月汇总导出走 v_fact_month，并把 period 映射成 date', async () => {
+  const oldFetch = globalThis.fetch;
+  const oldAdmin = process.env.DASHBOARD_ADMIN_TOKEN;
+  const oldUrl = process.env.SUPABASE_URL;
+  const oldKey = process.env.SUPABASE_SECRET_KEY;
+  const calls = [];
+  process.env.DASHBOARD_ADMIN_TOKEN = 'separate-admin-token-long-enough';
+  process.env.SUPABASE_URL = 'https://example.supabase.co';
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_test-only';
+  globalThis.fetch = async (url) => {
+    const target = new URL(url);
+    calls.push(target);
+    return { ok: true, json: async () => [{ period: '2026-09', sid: '7', asin: 'A', sales_amount: 100 }] };
+  };
+  const response = () => ({ code: 200, body: null, setHeader() { return this; }, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
+  try {
+    const monthly = response();
+    await exportHandler({
+      method: 'GET',
+      headers: { authorization: 'Bearer separate-admin-token-long-enough' },
+      url: '/api/export?from=2026-01-01&to=2026-09-30&granularity=month&offset=0',
+    }, monthly);
+    assert.equal(monthly.code, 200);
+    // 月汇总行的 date 用 period，前端才能派生「年份 / 月份」
+    assert.equal(monthly.body.rows[0].date, '2026-09');
+    assert.equal(calls[0].pathname, '/rest/v1/v_fact_month');
+    assert.deepEqual(calls[0].searchParams.getAll('period'), ['gte.2026-01', 'lte.2026-09']);
+
+    const tooLong = response();
+    await exportHandler({
+      method: 'GET',
+      headers: { authorization: 'Bearer separate-admin-token-long-enough' },
+      url: '/api/export?from=2020-01-01&to=2026-09-30&granularity=month',
+    }, tooLong);
+    assert.equal(tooLong.code, 400);
+  } finally {
+    globalThis.fetch = oldFetch;
+    for (const [name, value] of [['DASHBOARD_ADMIN_TOKEN', oldAdmin], ['SUPABASE_URL', oldUrl], ['SUPABASE_SECRET_KEY', oldKey]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
+});

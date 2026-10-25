@@ -81,3 +81,36 @@ group by date;
 
 revoke all on table v_fact_daily_coverage from anon, authenticated;
 grant select on table v_fact_daily_coverage to service_role;
+
+-- 7) 月汇总视图补上「订单量」，供「按月汇总」导出使用
+create or replace view v_fact_month as
+select
+    to_char(date, 'YYYY-MM') as period,
+    sid, asin, country, shop_name, brand, manager, sub_category, parent_asin, product_name, currency,
+    sum(sales_quantity) as sales_quantity,
+    sum(sales_amount) as sales_amount,
+    sum(gross_profit) as gross_profit,
+    sum(sessions) as sessions,
+    sum(first_mile_cost) as first_mile_cost,
+    sum(procurement_cost) as procurement_cost,
+    sum(storage_fee) as storage_fee,
+    sum(fba_fee) as fba_fee,
+    sum(refund_cost) as refund_cost,
+    sum(platform_commission) as platform_commission,
+    sum(ad_spend) as ad_spend,
+    sum(ad_sales) as ad_sales,
+    sum(ad_orders) as ad_orders,
+    sum(sp_spend) as sp_spend, sum(sp_sales) as sp_sales,
+    sum(sd_spend) as sd_spend, sum(sd_sales) as sd_sales,
+    sum(sb_spend) as sb_spend, sum(sb_sales) as sb_sales,
+    sum(sbv_spend) as sbv_spend, sum(sbv_sales) as sbv_sales,
+    sum(impressions) as impressions,
+    sum(clicks) as clicks,
+    sum(natural_orders) as natural_orders,
+    sum(natural_clicks) as natural_clicks,
+    (array_agg(review_count order by date desc))[1] as review_count,
+    (array_agg(fba_sellable_qty order by date desc))[1] as fba_sellable_qty,
+    (array_agg(rating order by date desc))[1] as rating,
+    sum(order_quantity) as order_quantity
+from fact_daily
+group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
