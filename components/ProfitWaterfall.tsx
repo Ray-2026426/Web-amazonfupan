@@ -9,6 +9,8 @@ interface ProfitWaterfallProps {
     last: AggregatedData | null;
     currentRows: DataRow[];
     lastRows: DataRow[];
+    /** 点归因表里的 ASIN 聚焦到该实体 */
+    onFocusAsin?: (asin: string) => void;
 }
 
 type Step = { label: string; value: number; base: number; height: number; kind: 'total' | 'cost' | 'other' };
@@ -37,7 +39,7 @@ function grossProfitByAsin(rows: DataRow[]): Map<string, { name: string; shop: s
     return map;
 }
 
-export const ProfitWaterfall: React.FC<ProfitWaterfallProps> = ({ current, last, currentRows, lastRows }) => {
+export const ProfitWaterfall: React.FC<ProfitWaterfallProps> = ({ current, last, currentRows, lastRows, onFocusAsin }) => {
     const steps = useMemo<Step[]>(() => {
         const sales = Number(current.sales_amount) || 0;
         const out: Step[] = [];
@@ -172,7 +174,14 @@ export const ProfitWaterfall: React.FC<ProfitWaterfallProps> = ({ current, last,
                                 {attribution.map(row => (
                                     <tr key={row.key} className="hover:bg-slate-50/70">
                                         <td className="px-3 py-2">
-                                            <div className="font-mono text-[11px] text-slate-700">{row.key.split('|')[1]}</div>
+                                            <button
+                                                type="button"
+                                                onClick={() => onFocusAsin?.(row.key.split('|')[1])}
+                                                className="font-mono text-[11px] text-slate-700 transition hover:text-sky-600 hover:underline"
+                                                title="点击聚焦这个 ASIN"
+                                            >
+                                                {row.key.split('|')[1]}
+                                            </button>
                                             <div className="truncate text-[11px] text-slate-400">{row.name}{row.shop ? ` · ${row.shop}` : ''}</div>
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-700">{money(row.now)}</td>

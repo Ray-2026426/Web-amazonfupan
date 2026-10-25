@@ -7,6 +7,8 @@ import { DataTable } from './DataTable';
 
 interface StockHealthProps {
     rows: DataRow[];
+    /** 点 ASIN 时聚焦到该实体（全站过滤 + 面包屑） */
+    onFocusAsin?: (asin: string) => void;
 }
 
 type Bucket = 'risk' | 'warn' | 'ok' | 'over';
@@ -35,7 +37,7 @@ const BUCKETS: Record<Bucket, { label: string; chip: string; dot: string; hint: 
     over: { label: '积压', chip: 'bg-slate-100 text-slate-600 ring-slate-200', dot: 'bg-slate-400', hint: '90 天以上' },
 };
 
-export const StockHealth: React.FC<StockHealthProps> = ({ rows }) => {
+export const StockHealth: React.FC<StockHealthProps> = ({ rows, onFocusAsin }) => {
     const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
     const { list, counts, maxDate } = useMemo(() => {
         if (rows.length === 0) return { list: [] as StockRow[], counts: { risk: 0, warn: 0, ok: 0, over: 0 }, maxDate: '' };
@@ -136,7 +138,14 @@ export const StockHealth: React.FC<StockHealthProps> = ({ rows }) => {
                                         return imageUrl ? <ProductImageThumb url={imageUrl} onEnlarge={setLightboxUrl} /> : null;
                                     })()}
                                     <div className="min-w-0">
-                                        <div className="font-mono text-[11px] text-slate-700">{row.asin}</div>
+                                        <button
+                                            type="button"
+                                            onClick={() => onFocusAsin?.(row.asin)}
+                                            className="font-mono text-[11px] text-slate-700 transition hover:text-sky-600 hover:underline"
+                                            title="点击聚焦这个 ASIN"
+                                        >
+                                            {row.asin}
+                                        </button>
                                         <div className="truncate text-[11px] text-slate-400">{row.name}{row.shop ? ` · ${row.shop}` : ''}</div>
                                     </div>
                                 </div>

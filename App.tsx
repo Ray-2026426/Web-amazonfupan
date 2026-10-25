@@ -28,6 +28,8 @@ import { LoadingBar } from './components/LoadingBar';
 import { lazyWithRetry } from './components/lazyWithRetry';
 import { CommandPalette, type CommandAction } from './components/CommandPalette';
 import { getImageUploadState, resetImageUpload, subscribeImageUpload } from './components/imageUploadTask';
+import { LoadingSkeleton } from './components/LoadingSkeleton';
+import { buildViewLink, readViewFromUrl, syncViewToUrl } from './components/viewUrl';
 import { InventoryTable } from './components/InventoryTable';
 import { DataUploadModal, type DataUploadResult } from './components/DataUploadModal';
 import { resetTrendChartMetricsSelection } from './components/trendSelection';
@@ -170,12 +172,23 @@ const App: React.FC = () => {
   }, [productImageData]);
 
   // UI States
-  const [filters, setFilters] = useState<FilterState>(initialFilters);
+  /** 地址栏里带了视图参数就用它（可分享链接 / 刷新还原），否则用默认值 */
+  const [filters, setFilters] = useState<FilterState>(() => {
+      const view = readViewFromUrl();
+      return {
+          ...initialFilters,
+          ...view.filters,
+          ...(view.from ? { startDate: view.from } : {}),
+          ...(view.to ? { endDate: view.to } : {}),
+      };
+  });
   const [dataStartDate, setDataStartDate] = useState(DEFAULT_DATA_START);
   const [dataEndDate, setDataEndDate] = useState('');
   const [lastImportedAt, setLastImportedAt] = useState<number | undefined>();
   /** 时间粒度：日 / 周 / 月。周度的既有语义保留为 isWeeklyMode，减少无谓改动 */
-  const [periodMode, setPeriodMode] = useState<PeriodMode>(readStoredPeriodMode);
+  const [periodMode, setPeriodMode] = useState<PeriodMode>(() => readViewFromUrl().mode || readStoredPeriodMode());
+  /** 聚焦路径：点 ASIN / 店铺等实体后，全站按它过滤，顶部面包屑逐级退出 */
+  const [focusPath, setFocusPath] = useState<{ field: keyof FilterState; value: string; label: string }[]>([]);
   const isWeeklyMode = periodMode === 'week';
   const isDailyMode = periodMode === 'day';
   /** 毛利修正：FBA 国际运费已含在头程，领星算毛利时又扣了一次，勾选后加回来（默认开启） */
@@ -243,6 +256,89 @@ const App: React.FC = () => {
     snappedToLatest.current = true;
     setFilters(prev => (prev.startDate === latest && prev.endDate === latest ? prev : { ...prev, startDate: latest, endDate: latest }));
   }, [cloudCutoff, dataEndDate, periodMode]);
+
+  /** 视图 → 地址栏：筛选/区间/粒度变化后同步（防抖，避免连点压一堆历史记录） */
+  useEffect(() => {
+    if (isRestoringData) return;
+    const timer = window.setTimeout(() => syncViewToUrl(periodMode, filters), 250);
+    return () => window.clearTimeout(timer);
+  }, [periodMode, filters, isRestoringData]);
+
+  /** 浏览器前进/后退 → 还原当时视图 */
+  useEffect(() => {
+    const onPop = () => {
+      const view = readViewFromUrl();
+      if (view.mode) setPeriodMode(view.mode);
+      setFilters(prev => ({
+        ...prev,
+        ...view.filters,
+        ...(view.from ? { startDate: view.from } : {}),
+        ...(view.to ? { endDate: view.to } : {}),
+      }));
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  /** 聚焦某个实体（ASIN / 店铺 / 负责人…）：写入对应筛选 + 记到面包屑 */
+  const focusEntity = (field: keyof FilterState, value: string, label?: string) => {
+    if (!value || value === '-' || value.startsWith('共 ')) return;
+    setFocusPath(prev => [...prev.filter(item => item.field !== field), { field, value, label: label || value }]);
+    setFilters(prev => ({ ...prev, [field]: [value] } as FilterState));
+  };
+
+  const blurEntity = (field: keyof FilterState) => {
+    setFocusPath(prev => prev.filter(item => item.field !== field));
+    setFilters(prev => ({ ...prev, [field]: [] } as FilterState));
+  };
+
+  const clearAllFocus = () => {
+    const fields = focusPath.map(item => item.field);
+    setFocusPath([]);
+    if (!fields.length) return;
+    setFilters(prev => {
+      const next = { ...prev } as FilterState;
+      for (const field of fields) (next as unknown as Record<string, string[]>)[field as string] = [];
+      return next;
+    });
+  };
+
+  /** 键盘：? 快捷键表 · g d/w/m 切粒度 · Esc 退出聚焦 */
+  useEffect(() => {
+    let pendingG = false;
+    let timer = 0;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === '?') {
+        event.preventDefault();
+        setShortcutsOpen(value => !value);
+        return;
+      }
+      if (event.key === '/') {
+        event.preventDefault();
+        setCommandOpen(true);
+        return;
+      }
+      if (event.key === 'Escape') {
+        clearAllFocus();
+        return;
+      }
+      if (event.key === 'g') {
+        pendingG = true;
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => { pendingG = false; }, 1200);
+        return;
+      }
+      if (pendingG && (event.key === 'd' || event.key === 'w' || event.key === 'm')) {
+        pendingG = false;
+        setPeriodMode(event.key === 'd' ? 'day' : event.key === 'w' ? 'week' : 'month');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusPath]);
   const [cloudRefreshTick, setCloudRefreshTick] = useState(0);
   /** 命令面板（⌘K）：键盘完成切粒度、跳区间、开数据管理、下钻等操作 */
   const [commandOpen, setCommandOpen] = useState(false);
@@ -251,6 +347,7 @@ const App: React.FC = () => {
   /** 图片上传是后台任务：面板关掉也要能看到进度 */
   const [uploadTask, setUploadTask] = useState(getImageUploadState());
   useEffect(() => subscribeImageUpload(setUploadTask), []);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Modal States
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailType, setDetailType] = useState<'PL' | 'Traffic' | 'Inventory'>('PL');
@@ -754,6 +851,9 @@ const App: React.FC = () => {
           { id: 'detail-inventory', label: '打开库存明细', group: '下钻', run: () => handleOpenDetailByType('Inventory') },
           { id: 'fee', label: addBackFbaFee ? '关闭毛利修正' : '开启毛利修正', group: '口径', keywords: ['运费', '国际运费'], run: () => setAddBackFbaFee(value => !value) },
           { id: 'sidebar', label: '显示 / 隐藏筛选侧栏', group: '界面', run: toggleSidebar },
+          { id: 'copy-link', label: '复制当前视图链接', group: '分享', keywords: ['share', 'url', '发给同事'], run: () => { void navigator.clipboard?.writeText(buildViewLink(periodMode, filters)); } },
+          { id: 'clear-focus', label: '清除聚焦', group: '视图', run: clearAllFocus },
+          { id: 'shortcuts', label: '查看快捷键', group: '帮助', keywords: ['keyboard', '帮助'], run: () => setShortcutsOpen(true) },
       ];
   })();
 
@@ -853,6 +953,30 @@ const App: React.FC = () => {
         {showCloudAdmin && <Suspense fallback={null}><CloudAdminPanel initialTab={adminInitialTab} onClose={() => { setShowCloudAdmin(false); setAdminInitialTab(undefined); }} onTargetsUpdated={() => setCloudRefreshTick(value => value + 1)} /></Suspense>}
         <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} actions={commandActions} />
 
+        {shortcutsOpen && (
+            <div className="fixed inset-0 z-[220] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" onClick={() => setShortcutsOpen(false)} role="dialog" aria-modal="true">
+                <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
+                    <h3 className="text-sm font-semibold text-slate-800">快捷键</h3>
+                    <div className="mt-3 space-y-2 text-xs text-slate-600">
+                        {[
+                            ['⌘K / Ctrl+K', '打开命令面板'],
+                            ['/', '搜索功能或命令'],
+                            ['g 然后 d / w / m', '切换日 / 周 / 月'],
+                            ['Esc', '退出聚焦 / 关闭弹层'],
+                            ['↑ ↓ / Enter', '命令面板里选择与执行'],
+                        ].map(([key, desc]) => (
+                            <div key={key} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-1.5">
+                                <span className="font-mono text-[11px] text-slate-700">{key}</span>
+                                <span className="text-slate-500">{desc}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <p className="mt-3 text-[11px] text-slate-400">点表格里的 ASIN / 店铺会自动聚焦，顶部出现面包屑，Esc 退出。</p>
+                    <button type="button" onClick={() => setShortcutsOpen(false)} className="mt-4 w-full rounded-lg bg-slate-900 py-2 text-xs font-semibold text-white">知道了</button>
+                </div>
+            </div>
+        )}
+
         {/* 后台上传浮层：关掉数据管理面板也不会中断，随时能点回来 */}
         {uploadTask.status !== 'idle' && (
             <div className="fixed bottom-4 right-4 z-[215] flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 shadow-xl backdrop-blur">
@@ -892,6 +1016,26 @@ const App: React.FC = () => {
         <main className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">
             {CLOUD_ENABLED && cloudStatus && <div role="status" className="mx-auto mb-3 max-w-[1680px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">{cloudStatus}</div>}
             {persistenceError && <div role="alert" className="mx-auto mb-3 flex max-w-[1680px] items-center justify-between rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"><span>{persistenceError}</span><button type="button" onClick={() => setPersistenceError('')} className="ml-3 font-bold">关闭</button></div>}
+
+            {/* 聚焦面包屑：点表格里的 ASIN / 店铺后出现，逐级退出 */}
+            {focusPath.length > 0 && (
+                <div className="mx-auto mb-3 flex max-w-[1680px] flex-wrap items-center gap-1.5 rounded-xl border border-sky-100 bg-sky-50/70 px-3 py-1.5 text-[11px] text-sky-900">
+                    <span className="font-semibold">聚焦</span>
+                    {focusPath.map(item => (
+                        <button
+                            key={`${item.field}-${item.value}`}
+                            type="button"
+                            onClick={() => blurEntity(item.field)}
+                            className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 ring-1 ring-sky-100 transition hover:ring-sky-300"
+                        >
+                            {item.label}
+                            <X className="h-3 w-3" />
+                        </button>
+                    ))}
+                    <button type="button" onClick={clearAllFocus} className="ml-1 text-sky-600 transition hover:text-sky-800">全部清除</button>
+                    <span className="ml-auto hidden text-[10px] text-sky-400 sm:inline">Esc 退出聚焦</span>
+                </div>
+            )}
             {isRestoringData ? (
                 <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/80 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
                     <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
@@ -955,6 +1099,7 @@ const App: React.FC = () => {
                                 last={processedData.last}
                                 currentRows={processedData.currentRows}
                                 lastRows={processedData.lastRows}
+                                onFocusAsin={asin => focusEntity('childAsins', asin)}
                             />
                         </Suspense>
                     )}
@@ -981,16 +1126,14 @@ const App: React.FC = () => {
                     )}
 
                     {/* 4.5 库存健康：可售天数 = 可售库存 ÷ 近 28 天日均销量 */}
-                    {processedData && <Suspense fallback={null}><StockHealth rows={activeRawData} /></Suspense>}
+                    {processedData && <Suspense fallback={null}><StockHealth rows={activeRawData} onFocusAsin={asin => focusEntity('childAsins', asin)} /></Suspense>}
 
                     {!processedData && (
                         // 云端第一次拉数（或切换区间后还没拿到新数据）时只显示加载态，
                         // 不要甩「暂无数据 + 导入数据」，那会让人以为数据丢了
                         (cloudLoading || (CLOUD_ENABLED && Boolean(cloudToken) && !cloudConnected && !cloudStatus)) && !activeRawData.length ? (
-                            <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-                                <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
-                                <p className="text-lg font-semibold text-slate-700">{cloudConnected ? '正在读取云端数据…' : '正在连接云端数据…'}</p>
-                                <LoadingBar className="mt-6" />
+                            <div>
+                                <LoadingSkeleton />
                             </div>
                         ) : (
                             <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
