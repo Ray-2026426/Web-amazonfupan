@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_FIELD_PATHS, mergeOrderProfit, resolveField, toDataRow, validateSnapshot } from './mapper.mjs';
+import { DEFAULT_FIELD_PATHS, hasMeaningfulCost, mergeOrderProfit, resolveField, toCostOnlyRow, toDataRow, validateSnapshot } from './mapper.mjs';
 import { authorized, isValidDate, rowsForRange, splitRange } from '../../serverless/supabase.js';
 import adminHandler from '../../api/admin.js';
 import exportHandler from '../../api/export.js';
@@ -58,6 +58,47 @@ test('数值字段也走映射：pp 取产品表现，op 取订单利润并取�
     fieldMap: { sales_amount: 'op.purchase_costs' },
   });
   assert.equal(swapped.sales_amount, 8);
+});
+
+test('只有成本、当天无销量的 ASIN 会补成零销量行，且成本取绝对值', () => {
+  const cost = {
+    gross_profit: -12.5, refund_amount: 3, logistics_costs: -4,
+    fulfillment_fee: 0, fba_storage_fee: 1.5, purchase_costs: 0, selling_fee: 0,
+  };
+  const row = toCostOnlyRow({
+    shop: { id: 7, name: '店铺', country: '美国' }, asin: 'B000000007', cost, date: '2026-10-03',
+    meta: { product_name: '品名A' },
+  });
+  assert.equal(row.sales_amount, 0);
+  assert.equal(row.sales_quantity, 0);
+  assert.equal(row.gross_profit, -12.5);
+  assert.equal(row.refund_cost, 3);
+  assert.equal(row.first_mile_cost, 4);
+  assert.equal(row.storage_fee, 1.5);
+  assert.equal(row.product_name, '品名A');
+  assert.equal(row.id, '7|B000000007|2026-10-03');
+});
+
+test('全零成本的 ASIN 不补行；补行后日毛利合计与订单利润一致', () => {
+  assert.equal(hasMeaningfulCost({ gross_profit: 0, refund_amount: 0, logistics_costs: 0, fulfillment_fee: 0, fba_storage_fee: 0, purchase_costs: 0, selling_fee: 0 }), false);
+  assert.equal(hasMeaningfulCost({ gross_profit: 0.01 }), true);
+
+  const opRows = [
+    { sids: [1], price_list: [{ asin: 'A', local_name: '甲' }], gross_profit: 10 },
+    { sids: [1], price_list: [{ asin: 'B', local_name: '乙' }], gross_profit: -4 },
+  ];
+  const costMap = mergeOrderProfit(opRows);
+  const used = new Set(['1|A']); // A 当天有销量，B 只有成本
+  let total = 0;
+  for (const [key, cost] of costMap) {
+    if (used.has(key)) {
+      total += cost.gross_profit;
+    } else {
+      const asin = key.split('|')[1];
+      total += toCostOnlyRow({ shop: { id: 1 }, asin, cost, date: '2026-10-03' }).gross_profit;
+    }
+  }
+  assert.equal(total, 6);
 });
 
 test('云端字段映射改变下一次同步的取值', () => {

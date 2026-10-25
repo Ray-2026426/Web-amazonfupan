@@ -21,9 +21,11 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from '../lingxing-client.mjs';
 import {
     aggregateRows,
+    hasMeaningfulCost,
     isActiveRow,
     mergeOrderProfit,
     num,
+    toCostOnlyRow,
     toDataRow,
     validateSnapshot,
 } from './mapper.mjs';
@@ -342,6 +344,34 @@ async function main() {
             done += 1;
             if (done % 20 === 0) log(`  ${date} 进度 ${done}/${usedShops.length}，累计 ${allRows.length} 行`);
         }
+        // 2.5) 补「只有成本、当天无销量」的 ASIN
+        // 产品表现里没有这些行（没销量就没记录），丢掉会让日毛利偏高（实测 1~18%）。
+        // 补成「有成本、无销量」的行后，日合计才能和领星订单利润对上。
+        const usedKeys = new Set();
+        for (let index = rowsBefore; index < allRows.length; index += 1) {
+            usedKeys.add(`${allRows[index].sid}|${allRows[index].asin}`);
+        }
+        const shopById = new Map(usedShops.map((shop) => [String(shop.id), shop]));
+        const opMeta = new Map();
+        for (const row of op.list || []) {
+            const price = (row.price_list || [])[0] || {};
+            const sid = String((row.sids || [])[0] ?? price.sid ?? '');
+            if (!sid || !price.asin) continue;
+            const key = `${sid}|${price.asin}`;
+            if (!opMeta.has(key)) opMeta.set(key, { product_name: price.local_name || '' });
+        }
+        let costOnlyAdded = 0;
+        for (const [key, cost] of costMap) {
+            if (usedKeys.has(key) || !hasMeaningfulCost(cost)) continue;
+            const [sid, asin] = key.split('|');
+            if (!sid || !asin) continue;
+            const shop = shopById.get(sid);
+            if (!shop) continue;
+            allRows.push(toCostOnlyRow({ shop, asin, cost, date, meta: opMeta.get(key) }));
+            costOnlyAdded += 1;
+        }
+        if (costOnlyAdded) log(`${date} 补入 ${costOnlyAdded} 行「只有成本、无销量」的 ASIN`);
+
         log(`${date} 完成，累计 ${allRows.length} 行`);
 
         // 当日对账：与领星自己的合计比较（而不是看「负毛利行占比」，那个会误报）

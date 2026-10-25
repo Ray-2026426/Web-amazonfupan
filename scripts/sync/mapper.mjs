@@ -237,6 +237,67 @@ export function toDataRow({ shop, row, cost, date, fieldMap }) {
     return data;
 }
 
+/**
+ * 「只有成本、当天没有销量」的 ASIN。
+ *
+ * 为什么需要：领星「订单利润」里，仓储费/头程/退款这类一次性成本会砸在某一天的某些 ASIN 上，
+ * 而「产品表现」当天没有这些 ASIN 的行（没销量就没记录）。只按产品表现建行会把这些成本丢掉，
+ * 导致日毛利偏高（实测 1~18%）。这里把它们补成「有成本、无销量」的行，日合计才能和领星对齐。
+ */
+export function toCostOnlyRow({ shop, asin, cost, date, meta }) {
+    const c = cost || EMPTY_COST;
+    const sid = String(shop?.id ?? '');
+    return {
+        id: `${sid}|${asin}|${date}`,
+        date,
+        sid,
+        asin,
+        country: shop?.country || '',
+        shop_name: shop?.name || '',
+        brand: '',
+        manager: meta?.manager || '',
+        sub_category: '',
+        parent_asin: '',
+        child_asin: asin,
+        product_name: meta?.product_name || '',
+
+        sales_quantity: 0,
+        order_quantity: 0,
+        sales_amount: 0,
+        gross_profit: num(c.gross_profit),
+        fba_sellable_qty: 0,
+        sessions: 0,
+
+        first_mile_cost: abs(c.logistics_costs),
+        procurement_cost: abs(c.purchase_costs),
+        storage_fee: abs(c.fba_storage_fee),
+        fba_fee: abs(c.fulfillment_fee),
+        refund_cost: abs(c.refund_amount),
+        platform_commission: abs(c.selling_fee),
+
+        ad_spend: 0, ad_sales: 0, ad_orders: 0,
+        sp_spend: 0, sp_sales: 0, sd_spend: 0, sd_sales: 0,
+        sb_spend: 0, sb_sales: 0, sbv_spend: 0, sbv_sales: 0,
+
+        impressions: 0, clicks: 0, natural_orders: 0, natural_clicks: 0,
+        rating: 0, review_count: 0,
+    };
+}
+
+/** 成本行是否值得入库：全零成本的行不加，避免刷出大量空行 */
+export function hasMeaningfulCost(cost) {
+    if (!cost) return false;
+    const total =
+        Math.abs(num(cost.gross_profit)) +
+        Math.abs(num(cost.logistics_costs)) +
+        Math.abs(num(cost.purchase_costs)) +
+        Math.abs(num(cost.fba_storage_fee)) +
+        Math.abs(num(cost.fulfillment_fee)) +
+        Math.abs(num(cost.refund_amount)) +
+        Math.abs(num(cost.selling_fee));
+    return total > 0.005;
+}
+
 /** 订单利润行（msku 粒度）→ key `${sid}|${asin}` → 累加成本 */
 export function mergeOrderProfit(opRows, { firstMileField = 'logistics_costs' } = {}) {
     const map = new Map();
