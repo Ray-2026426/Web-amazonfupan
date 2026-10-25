@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { parseProductImageData, parseTargetData } from '../dataLoader';
+import { getImageUploadState, startImageUpload, subscribeImageUpload } from './imageUploadTask';
+import { parseTargetData } from '../dataLoader';
 import { enrichTargetData } from '../utils';
 import { dailyCsvHeader, dailyCsvRows, dailyExportMatrix, type ExportLabels } from '../dailyExport';
 import { FIELD_GROUPS, FIELD_MAPPINGS } from '../shared/field-mapping.mjs';
@@ -40,18 +41,29 @@ type CoverageDay = { date: string; rows: number; sales_amount: number; gross_pro
 type DayStatus = 'ok' | 'empty' | 'missing' | 'anomaly';
 type CalendarCell = { date: string; day: number; status: DayStatus; info?: CoverageDay } | null;
 
-export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?: () => void }> = ({ onClose, onTargetsUpdated }) => {
+export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?: () => void; initialTab?: Tab }> = ({ onClose, onTargetsUpdated, initialTab }) => {
   useEscClose(true, onClose);
   const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_KEY) || '');
   const [password, setPassword] = useState('');
   const [data, setData] = useState<AdminData | null>(null);
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>(initialTab || 'overview');
+  useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
   const [date, setDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [targetFile, setTargetFile] = useState<File | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [progress, setProgress] = useState('');
+  /** 图片上传是模块级任务：关掉面板也会继续，这里只是订阅它的状态 */
+  const [uploadState, setUploadState] = useState(getImageUploadState());
+  useEffect(() => subscribeImageUpload(setUploadState), []);
+  const uploadBusy = uploadState.status === 'parsing' || uploadState.status === 'uploading' || uploadState.status === 'activating';
+  useEffect(() => {
+    if (uploadState.status !== 'done') return;
+    void (async () => {
+      try { setData(await request('GET') as AdminData); } catch { /* 忽略：面板下次打开会重新拉 */ }
+    })();
+  }, [uploadState.status]);
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
   const [exportMode, setExportMode] = useState<'day' | 'range'>('range');
@@ -186,42 +198,12 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
     }
   };
 
-  /** 商品图片表：上传一次常驻云端，看板每次打开自动读取（不用重复上传） */
-  const uploadImages = async () => {
+  /** 商品图片表：交给后台任务跑，关掉面板也会继续 */
+  const uploadImages = () => {
     if (!imageFile) return;
-    setBusy(true);
-    setMessage('');
-    setProgress('正在解析图片表…');
-    try {
-      const parsed = await parseProductImageData(imageFile);
-      const rows = (parsed.data || []).filter(row => row.image_url && /^https?:\/\//i.test(String(row.image_url).trim()));
-      if (!rows.length) throw new Error('图片表里没有有效的图片链接（需要 sku / 品名 / 图片URL 三列之一有值）');
-      const started = await request('POST', { action: 'images_start', source_filename: imageFile.name, expected_rows: rows.length }) as { import_id: string };
-      const size = 400;
-      for (let offset = 0; offset < rows.length; offset += size) {
-        await request('POST', {
-          action: 'images_batch',
-          import_id: started.import_id,
-          rows: rows.slice(offset, offset + size).map(row => ({
-            sku: row.sku || '',
-            product_name: row.product_name || '',
-            image_url: row.image_url,
-          })),
-        });
-        setProgress(`已上传 ${Math.min(offset + size, rows.length)} / ${rows.length} 行`);
-      }
-      await request('POST', { action: 'images_activate', import_id: started.import_id });
-      const refreshed = await request('GET') as AdminData;
-      setData(refreshed);
-      setImageFile(null);
-      setProgress('');
-      setMessage(`商品图片已保存到云端：${rows.length} 行。以后打开看板会自动加载，不用再上传。`);
-    } catch (error) {
-      setProgress('');
-      setMessage(String(error instanceof Error ? error.message : error));
-    } finally {
-      setBusy(false);
-    }
+    void startImageUpload(imageFile, request).then(started => {
+      if (started) setImageFile(null);
+    });
   };
 
   /** 服务端单次最多 31 天，按 31 天窗口切片后逐段拉取 */
@@ -479,11 +461,12 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
     return `relative h-9 rounded-lg text-[11px] font-medium ring-1 transition ${tone} ${active ? 'ring-2 ring-slate-900' : ''}`;
   };
 
-  const cardClass = 'rounded-2xl border border-slate-200/70 bg-white p-5';  const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100';
-  const primaryClass = 'inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40';
-  const ghostClass = 'inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-40';
-  const sectionTitle = 'text-sm font-semibold text-slate-900';
-  const sectionHint = 'mt-1 text-xs leading-relaxed text-slate-500';
+  const cardClass = 'rounded-2xl border border-slate-100 bg-white p-4';
+  const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100';
+  const primaryClass = 'inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40';
+  const ghostClass = 'inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-40';
+  const sectionTitle = 'text-[13px] font-semibold text-slate-800';
+  const sectionHint = 'mt-1 text-[11px] leading-relaxed text-slate-400';
 
   const statusPill = (status: string) => (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${status === 'ok' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200/70' : 'bg-rose-50 text-rose-700 ring-rose-200/70'}`}>
@@ -496,21 +479,19 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   return (
     <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/50 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="云端数据管理">
       <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-slate-50 shadow-2xl ring-1 ring-slate-900/5">
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200/70 bg-white px-6 py-5">
-          <div>
-            <h2 className="text-base font-semibold tracking-tight text-slate-900">云端数据</h2>
-            <p className="mt-1 text-xs text-slate-500">同步设置、字段映射、目标表与明细下载</p>
-          </div>
-          <div className="flex items-center gap-2">
+        <header className="flex items-center justify-between gap-4 border-b border-slate-100 bg-white px-5 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-sm font-semibold tracking-tight text-slate-900">云端数据</h2>
             {latestRun && (
-              <span className="hidden items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600 sm:inline-flex">
-                最近同步 {new Date(latestRun.started_at).toLocaleString('zh-CN')}
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] text-slate-500 ring-1 ring-slate-100">
+                <span className={`h-1.5 w-1.5 rounded-full ${latestRun.status === 'ok' ? 'bg-emerald-500' : latestRun.status === 'failed' ? 'bg-rose-500' : 'bg-sky-500'}`} />
+                {new Date(latestRun.started_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
               </span>
             )}
-            <button type="button" onClick={onClose} className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="关闭">
-              <X className="h-4 w-4" />
-            </button>
           </div>
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="关闭">
+            <X className="h-4 w-4" />
+          </button>
         </header>
 
         {!token ? (
@@ -548,7 +529,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                 <div className="grid gap-4 sm:grid-cols-2">
                   <section className={cardClass}>
                     <h3 className={sectionTitle}>自动同步</h3>
-                    <p className={sectionHint}>每天定时把领星数据写进云端；回补天数越大，越能自动补上失败的日期。</p>
+                    
                     <div className="mt-4 space-y-4">
                       <label className="flex items-center justify-between gap-3 text-sm text-slate-700">
                         <span>启用每日自动同步</span>
@@ -580,7 +561,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
 
                   <section className={cardClass}>
                     <h3 className={sectionTitle}>数据现状</h3>
-                    <p className={sectionHint}>云端日明细的最新日期与最近一次运行结果。</p>
+                    
                     <dl className="mt-4 space-y-3 text-sm">
                       <div className="flex items-center justify-between"><dt className="text-slate-500">最新数据日</dt><dd className="font-mono text-slate-900">{data.sampleDate || '—'}</dd></div>
                       <div className="flex items-center justify-between"><dt className="text-slate-500">最近状态</dt><dd>{latestRun ? statusPill(latestRun.status) : '—'}</dd></div>
@@ -616,12 +597,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className={sectionTitle}>数据质量</h3>
-                    <p className={sectionHint}>
-                      按天看云端日明细：<span className="text-emerald-700">绿色</span>正常、
-                      <span className="text-rose-700">红色</span>数字异常（与领星差异大 / 亏损 / 突然掉量）、
-                      <span className="text-amber-700">黄色</span>有明细但销售额为 0、
-                      <span className="text-slate-500">灰色</span>完全没数据。点日期选中，再一键补数。
-                    </p>
+                    
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="inline-flex rounded-xl bg-slate-100 p-0.5 text-xs">
@@ -704,11 +680,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className={sectionTitle}>字段映射（37 个字段）</h3>
-                    <p className={sectionHint}>
-                      左边是下载表格里的列名，中间是看板实际展示的字段，右边是领星返回的取值路径。
-                      <span className="font-mono text-slate-600">pp.</span> 取自产品表现，<span className="font-mono text-slate-600">op.</span> 取自订单利润。
-                      改右边跟随领星字段变化，改左边自定义下载列名；保存后对下一次同步 / 下载生效。
-                    </p>
+                    
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="relative">
@@ -832,7 +804,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <h3 className={sectionTitle}>补数任务</h3>
-                    <p className={sectionHint}>点「补这一天 / 补齐缺失」后，任务会排在这里。没有配置 GitHub 令牌时最多等 10 分钟，由定时任务接手。</p>
+                    
                   </div>
                   <button className={ghostClass} disabled={busy} onClick={() => void load(date || data.sampleDate || '')}>刷新</button>
                 </div>
@@ -893,7 +865,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                 </section>
                 <section className={cardClass}>
                   <h3 className={sectionTitle}>上传或替换</h3>
-                  <p className={sectionHint}>支持“年份 × 月份”横向目标模板；零目标行不会存入云端。完整上传成功后才会替换当前版本。</p>
+                  
                   <input className={`${inputClass} mt-4 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-700`} type="file" accept=".xlsx,.xls,.csv" onChange={event => setTargetFile(event.target.files?.[0] || null)} />
                   <button className={`${primaryClass} mt-3`} disabled={busy || !targetFile} onClick={() => void uploadTargets()}>
                     <Upload className="h-3.5 w-3.5" />上传并启用
@@ -912,40 +884,47 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                 </section>
                 <section className={cardClass}>
                   <h3 className={sectionTitle}>上传或替换</h3>
-                  <p className={sectionHint}>
-                    表头需要包含 <code className="font-mono text-slate-700">sku</code>（也可用 ASIN）、<code className="font-mono text-slate-700">品名</code>、
-                    <code className="font-mono text-slate-700">图片URL</code> 三列中的至少一列 + 图片链接列；匹配时 sku/ASIN 优先，其次按品名。
-                    上传成功后整体替换旧版本，图片显示以下钻时选「品名 / 子ASIN / 父ASIN」维度为准。
-                  </p>
+                  
                   <input className={`${inputClass} mt-4 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-700`} type="file" accept=".xlsx,.xls,.csv" onChange={event => setImageFile(event.target.files?.[0] || null)} />
-                  <button className={`${primaryClass} mt-3`} disabled={busy || !imageFile} onClick={() => void uploadImages()}>
-                    <Upload className="h-3.5 w-3.5" />上传并启用
-                  </button>
-                  <button
-                    className={`${ghostClass} ml-2 mt-3`}
-                    disabled={busy || !data.imageImport}
-                    title="同步补全 SKU↔ASIN 对照后，把图片表里还没翻译的行再匹配一次，不用重新上传"
-                    onClick={async () => {
-                      setBusy(true); setMessage('');
-                      try {
-                        await request('POST', { action: 'images_relink' });
-                        setData(await request('GET') as AdminData);
-                        setMessage('已按最新 SKU↔ASIN 对照重新匹配，刷新看板即可看到图片。');
-                      } catch (error) {
-                        setMessage(String(error instanceof Error ? error.message : error));
-                      } finally { setBusy(false); }
-                    }}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />重新匹配 ASIN
-                  </button>
-                  {progress && <p className={`${sectionHint} mt-2`}>{progress}</p>}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button className={primaryClass} disabled={uploadBusy || !imageFile} onClick={uploadImages}>
+                      <Upload className="h-3.5 w-3.5" />{uploadBusy ? '后台上传中…' : '上传并启用'}
+                    </button>
+                    <button
+                      className={ghostClass}
+                      disabled={busy || !data.imageImport}
+                      onClick={async () => {
+                        setBusy(true); setMessage('');
+                        try {
+                          await request('POST', { action: 'images_relink' });
+                          setData(await request('GET') as AdminData);
+                          setMessage('已重新匹配 ASIN');
+                        } catch (error) {
+                          setMessage(String(error instanceof Error ? error.message : error));
+                        } finally { setBusy(false); }
+                      }}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />重新匹配 ASIN
+                    </button>
+                  </div>
+                  {uploadState.status !== 'idle' && (
+                    <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
+                      <span className={`h-1.5 w-1.5 rounded-full ${uploadState.status === 'error' ? 'bg-rose-500' : uploadState.status === 'done' ? 'bg-emerald-500' : 'bg-sky-500 animate-pulse'}`} />
+                      <span>{uploadState.status === 'parsing' ? `解析中… ${uploadState.fileName}` : uploadState.status === 'uploading' ? `上传 ${uploadState.done} / ${uploadState.total}` : uploadState.status === 'activating' ? '正在启用…' : uploadState.status === 'done' ? `完成：${uploadState.message}` : `失败：${uploadState.message}`}</span>
+                      {uploadState.status === 'uploading' && (
+                        <span className="ml-auto h-1 w-24 overflow-hidden rounded-full bg-slate-100">
+                          <span className="block h-full rounded-full bg-sky-500 transition-all" style={{ width: `${uploadState.total ? (uploadState.done / uploadState.total) * 100 : 0}%` }} />
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </section>
               </div>}
 
               {tab === 'data' && <div className="space-y-4">
                 <section className={cardClass}>
                   <h3 className={sectionTitle}>抽查明细</h3>
-                  <p className={sectionHint}>看某一天销售额最高的前 100 条，用来核对数字是否合理。</p>
+                  
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <input className={`${inputClass} w-auto`} type="date" value={date || data.sampleDate || ''} onChange={event => setDate(event.target.value)} />
                     <button className={primaryClass} disabled={busy} onClick={() => void load(date || data.sampleDate || '')}>查询</button>
@@ -974,11 +953,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
 
                 <section className={cardClass}>
                   <h3 className={sectionTitle}>下载明细</h3>
-                  <p className={sectionHint}>
-                    列名与《项目业绩》表一致，可在「字段映射」里改。
-                    <span className="text-slate-600">日明细</span>按天一行，CSV 支持任意长度区间、Excel 最多 92 天；
-                    <span className="text-slate-600">按月汇总</span>直接输出与参考表同构的月表，单次最多 60 个月。
-                  </p>
+                  
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     <div className="inline-flex rounded-xl bg-slate-100 p-0.5 text-xs">
                       {([['day', '日明细'], ['month', '按月汇总']] as const).map(([value, label]) => (

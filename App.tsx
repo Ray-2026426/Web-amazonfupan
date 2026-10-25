@@ -27,6 +27,7 @@ import { PLTable, TrafficTable } from './components/TableRenderers';
 import { LoadingBar } from './components/LoadingBar';
 import { lazyWithRetry } from './components/lazyWithRetry';
 import { CommandPalette, type CommandAction } from './components/CommandPalette';
+import { getImageUploadState, resetImageUpload, subscribeImageUpload } from './components/imageUploadTask';
 import { InventoryTable } from './components/InventoryTable';
 import { DataUploadModal, type DataUploadResult } from './components/DataUploadModal';
 import { resetTrendChartMetricsSelection } from './components/trendSelection';
@@ -230,6 +231,11 @@ const App: React.FC = () => {
   const [cloudRefreshTick, setCloudRefreshTick] = useState(0);
   /** 命令面板（⌘K）：键盘完成切粒度、跳区间、开数据管理、下钻等操作 */
   const [commandOpen, setCommandOpen] = useState(false);
+  /** 云端管理面板打开时定位到哪个 tab（图片上传浮层点进来时用） */
+  const [adminInitialTab, setAdminInitialTab] = useState<'images' | undefined>(undefined);
+  /** 图片上传是后台任务：面板关掉也要能看到进度 */
+  const [uploadTask, setUploadTask] = useState(getImageUploadState());
+  useEffect(() => subscribeImageUpload(setUploadTask), []);
   // Modal States
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailType, setDetailType] = useState<'PL' | 'Traffic' | 'Inventory'>('PL');
@@ -829,8 +835,43 @@ const App: React.FC = () => {
                 </button>
             </div>
         </header>
-        {showCloudAdmin && <Suspense fallback={null}><CloudAdminPanel onClose={() => setShowCloudAdmin(false)} onTargetsUpdated={() => setCloudRefreshTick(value => value + 1)} /></Suspense>}
+        {showCloudAdmin && <Suspense fallback={null}><CloudAdminPanel initialTab={adminInitialTab} onClose={() => { setShowCloudAdmin(false); setAdminInitialTab(undefined); }} onTargetsUpdated={() => setCloudRefreshTick(value => value + 1)} /></Suspense>}
         <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} actions={commandActions} />
+
+        {/* 后台上传浮层：关掉数据管理面板也不会中断，随时能点回来 */}
+        {uploadTask.status !== 'idle' && (
+            <div className="fixed bottom-4 right-4 z-[215] flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 shadow-xl backdrop-blur">
+                <span className={`h-2 w-2 rounded-full ${
+                    uploadTask.status === 'error' ? 'bg-rose-500'
+                        : uploadTask.status === 'done' ? 'bg-emerald-500'
+                            : 'bg-sky-500 animate-pulse'
+                }`} />
+                <button
+                    type="button"
+                    onClick={() => { setAdminInitialTab('images'); setShowCloudAdmin(true); }}
+                    className="text-left text-[11px] leading-tight text-slate-600 hover:text-sky-700"
+                >
+                    <span className="block font-semibold">
+                        {uploadTask.status === 'parsing' && '图片表解析中…'}
+                        {uploadTask.status === 'uploading' && `图片表上传 ${uploadTask.total ? Math.round((uploadTask.done / uploadTask.total) * 100) : 0}%`}
+                        {uploadTask.status === 'activating' && '正在启用图片表…'}
+                        {uploadTask.status === 'done' && `图片表已保存 ${uploadTask.message.replace('已保存 ', '')}`}
+                        {uploadTask.status === 'error' && '图片表上传失败'}
+                    </span>
+                    <span className="block text-[10px] text-slate-400">
+                        {uploadTask.status === 'uploading' ? `${uploadTask.done} / ${uploadTask.total} 行 · 可关闭窗口` : uploadTask.status === 'error' ? uploadTask.message : '后台进行中，可关闭窗口'}
+                    </span>
+                </button>
+                <button
+                    type="button"
+                    onClick={() => resetImageUpload()}
+                    aria-label="关闭提示"
+                    className="ml-1 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                >
+                    <X className="h-3.5 w-3.5" />
+                </button>
+            </div>
+        )}
 
         {/* Scrollable Content */}
         <main className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">
