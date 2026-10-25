@@ -761,8 +761,7 @@ const App: React.FC = () => {
             {isRestoringData ? (
                 <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/80 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
                     <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
-                    <p className="text-lg font-semibold text-slate-700">正在恢复数据...</p>
-                    <p className="mt-1 text-sm text-slate-500">从本地缓存读取中</p>
+                    <p className="text-lg font-semibold text-slate-700">正在恢复本地缓存…</p>
                     <LoadingBar className="mt-5" />
                 </div>
             ) : (
@@ -856,8 +855,7 @@ const App: React.FC = () => {
                         (cloudLoading || (CLOUD_ENABLED && Boolean(cloudToken) && !cloudConnected && !cloudStatus)) && !activeRawData.length ? (
                             <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
                                 <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
-                                <p className="text-lg font-semibold text-slate-700">正在加载数据…</p>
-                                <p className="mt-1 text-sm text-slate-500">{cloudConnected ? '正在从云端读取业绩数据' : '正在连接云端数据'}</p>
+                                <p className="text-lg font-semibold text-slate-700">{cloudConnected ? '正在读取云端数据…' : '正在连接云端数据…'}</p>
                                 <LoadingBar className="mt-6" />
                             </div>
                         ) : (
