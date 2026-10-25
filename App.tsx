@@ -25,6 +25,7 @@ import { SidebarFilters } from './components/SidebarFilters';
 import { DashboardOverview } from './components/DashboardOverview';
 import { PLTable, TrafficTable } from './components/TableRenderers';
 import { LoadingBar } from './components/LoadingBar';
+import { CommandPalette, type CommandAction } from './components/CommandPalette';
 import { InventoryTable } from './components/InventoryTable';
 import { DataUploadModal, type DataUploadResult } from './components/DataUploadModal';
 import { resetTrendChartMetricsSelection } from './components/trendSelection';
@@ -42,7 +43,7 @@ const ProfitWaterfall = lazy(() => import('./components/ProfitWaterfall').then(m
 const StockHealth = lazy(() => import('./components/StockHealth').then(m => ({ default: m.StockHealth })));
 import { BusinessCommandCenter } from './components/BusinessCommandCenter';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
-import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles } from 'lucide-react';
+import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles, Search } from 'lucide-react';
 import { saveToDB, loadFromDB, replaceImportedData } from './db';
 import { DEFAULT_BUSINESS_RULES, generateBusinessIssues, updateActionForIssue } from './utils/businessRules';
 import { CLOUD_ENABLED, clearCloudToken, fetchCloudFreshness, fetchCloudRows, fetchCloudTargets, getCloudToken, saveCloudToken } from './cloudData';
@@ -226,6 +227,8 @@ const App: React.FC = () => {
   /** 最近一次成功同步的时间，同样收在设置面板 */
   const [cloudLastSync, setCloudLastSync] = useState('');
   const [cloudRefreshTick, setCloudRefreshTick] = useState(0);
+  /** 命令面板（⌘K）：键盘完成切粒度、跳区间、开数据管理、下钻等操作 */
+  const [commandOpen, setCommandOpen] = useState(false);
   // Modal States
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailType, setDetailType] = useState<'PL' | 'Traffic' | 'Inventory'>('PL');
@@ -689,6 +692,49 @@ const App: React.FC = () => {
       });
   }, [processedData, periodMode]);
 
+  useEffect(() => {
+      const onKey = (event: KeyboardEvent) => {
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+              event.preventDefault();
+              setCommandOpen(value => !value);
+          }
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  /** 命令面板动作：全部复用现有 handler，保证和按钮行为一致 */
+  const commandActions: CommandAction[] = (() => {
+      const today = new Date();
+      const shift = (days: number) => {
+          const date = new Date(today);
+          date.setDate(date.getDate() + days);
+          return formatDate(date);
+      };
+      const thisMonthStart = formatDate(new Date(today.getFullYear(), today.getMonth(), 1));
+      const thisMonthEnd = formatDate(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+      const lastMonthStart = formatDate(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+      const lastMonthEnd = formatDate(new Date(today.getFullYear(), today.getMonth(), 0));
+      return [
+          { id: 'mode-day', label: '切到日度视图', group: '视图', keywords: ['day', '每天', '按天'], run: () => setPeriodMode('day') },
+          { id: 'mode-week', label: '切到周度视图', group: '视图', keywords: ['week', '按周'], run: () => setPeriodMode('week') },
+          { id: 'mode-month', label: '切到月度视图', group: '视图', keywords: ['month', '按月'], run: () => setPeriodMode('month') },
+          { id: 'range-this-month', label: '本月', group: '区间', run: () => { setPeriodMode('month'); setFilters(prev => ({ ...prev, startDate: thisMonthStart, endDate: thisMonthEnd })); } },
+          { id: 'range-last-month', label: '上月', group: '区间', run: () => { setPeriodMode('month'); setFilters(prev => ({ ...prev, startDate: lastMonthStart, endDate: lastMonthEnd })); } },
+          { id: 'range-last-7', label: '近 7 天', group: '区间', run: () => { setPeriodMode('day'); setFilters(prev => ({ ...prev, startDate: shift(-6), endDate: shift(0) })); } },
+          { id: 'range-last-30', label: '近 30 天', group: '区间', run: () => { setPeriodMode('day'); setFilters(prev => ({ ...prev, startDate: shift(-29), endDate: shift(0) })); } },
+          { id: 'admin', label: '打开数据管理', group: '数据', keywords: ['补数', '质量', '目标表', '图片'], run: () => setShowCloudAdmin(true) },
+          { id: 'connect', label: '连接 / 切换云端数据', group: '数据', run: () => setShowCloudLogin(true) },
+          { id: 'refresh', label: '重新拉取云端数据', group: '数据', keywords: ['刷新', '同步'], run: () => setCloudRefreshTick(value => value + 1) },
+          { id: 'upload', label: '导入 / 更新数据源', group: '数据', keywords: ['上传', 'excel'], run: () => setShowUploadModal(true) },
+          { id: 'detail-pl', label: '打开利润表明细', group: '下钻', run: () => handleOpenDetailByType('PL') },
+          { id: 'detail-traffic', label: '打开流量广告明细', group: '下钻', run: () => handleOpenDetailByType('Traffic') },
+          { id: 'detail-inventory', label: '打开库存明细', group: '下钻', run: () => handleOpenDetailByType('Inventory') },
+          { id: 'fee', label: addBackFbaFee ? '关闭毛利修正' : '开启毛利修正', group: '口径', keywords: ['运费', '国际运费'], run: () => setAddBackFbaFee(value => !value) },
+          { id: 'sidebar', label: '显示 / 隐藏筛选侧栏', group: '界面', run: toggleSidebar },
+      ];
+  })();
+
   return (
     <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#e0f2fe_0%,#eff6ff_22%,#f8fafc_52%,#f8fafc_100%)] font-sans text-slate-900">
       {sidebarOpen && <button type="button" aria-label="关闭筛选侧栏" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-slate-950/50 xl:hidden" />}
@@ -760,6 +806,17 @@ const App: React.FC = () => {
                     onToggleFbaFee={setAddBackFbaFee}
                 />
 
+                <button
+                    type="button"
+                    onClick={() => setCommandOpen(true)}
+                    title="搜索功能或输入命令（⌘K / Ctrl+K）"
+                    className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 transition hover:border-sky-300 hover:text-sky-700 sm:flex"
+                >
+                    <Search className="h-3.5 w-3.5" />
+                    搜索命令
+                    <span className="rounded border border-slate-200 px-1 py-0.5 text-[10px] text-slate-400">⌘K</span>
+                </button>
+
                 <button 
                     onClick={() => setShowUploadModal(true)}
                     disabled={restoreFailed}
@@ -772,6 +829,7 @@ const App: React.FC = () => {
             </div>
         </header>
         {showCloudAdmin && <Suspense fallback={null}><CloudAdminPanel onClose={() => setShowCloudAdmin(false)} onTargetsUpdated={() => setCloudRefreshTick(value => value + 1)} /></Suspense>}
+        <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} actions={commandActions} />
 
         {/* Scrollable Content */}
         <main className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">

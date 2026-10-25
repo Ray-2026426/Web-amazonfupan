@@ -151,3 +151,18 @@ tbody > tr {
   0% { transform: translateX(-110%); }
   100% { transform: translateX(260%); }
 }
+
+/* ------------------------------------------------------------------ *
+ * 表格统一质感：斑马纹 + 等宽数字 + 行悬停。
+ * 用低透明度灰蓝叠加，亮色/暗色主题下都不会突兀。
+ * ------------------------------------------------------------------ */
+table tbody tr:nth-child(even) > td {
+  background-color: rgba(148, 163, 184, 0.055);
+}
+table tbody tr:hover > td {
+  background-color: rgba(56, 189, 248, 0.10);
+}
+table td,
+table th {
+  font-variant-numeric: tabular-nums;
+}

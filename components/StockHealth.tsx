@@ -3,6 +3,7 @@ import { AlertTriangle, Boxes, PackageCheck, PackageX } from 'lucide-react';
 import type { DataRow } from '../types';
 import { amazonImageUrl, formatNumber } from '../utils';
 import { ImageLightbox, ProductImageThumb } from './ProductImageThumb';
+import { DataTable } from './DataTable';
 
 interface StockHealthProps {
     rows: DataRow[];
@@ -119,51 +120,74 @@ export const StockHealth: React.FC<StockHealthProps> = ({ rows }) => {
                 </div>
             )}
 
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-100">
-                <table className="min-w-full text-xs">
-                    <thead className="bg-slate-50 text-slate-500">
-                        <tr>
-                            <th className="px-3 py-2 text-left font-medium">ASIN / 品名</th>
-                            <th className="px-3 py-2 text-right font-medium">可售库存</th>
-                            <th className="px-3 py-2 text-right font-medium">日均销量</th>
-                            <th className="px-3 py-2 text-right font-medium">可售天数</th>
-                            <th className="px-3 py-2 text-right font-medium">预计卖完</th>
-                            <th className="px-3 py-2 text-right font-medium">状态</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {visible.map(row => (
-                            <tr key={row.key} className="hover:bg-slate-50/70">
-                                <td className="px-3 py-2">
-                                    <div className="flex items-center gap-2">
-                                        {(() => {
-                                            const imageUrl = amazonImageUrl(row.asin);
-                                            return imageUrl ? <ProductImageThumb url={imageUrl} onEnlarge={setLightboxUrl} /> : null;
-                                        })()}
-                                        <div className="min-w-0">
-                                            <div className="font-mono text-[11px] text-slate-700">{row.asin}</div>
-                                            <div className="truncate text-[11px] text-slate-400">{row.name}{row.shop ? ` · ${row.shop}` : ''}</div>
-                                        </div>
+            <div className="mt-4">
+                <DataTable<StockRow>
+                    rows={visible}
+                    rowKey={row => row.key}
+                    columns={[
+                        {
+                            key: 'asin',
+                            title: 'ASIN / 品名',
+                            width: '34%',
+                            render: row => (
+                                <div className="flex items-center gap-2">
+                                    {(() => {
+                                        const imageUrl = amazonImageUrl(row.asin);
+                                        return imageUrl ? <ProductImageThumb url={imageUrl} onEnlarge={setLightboxUrl} /> : null;
+                                    })()}
+                                    <div className="min-w-0">
+                                        <div className="font-mono text-[11px] text-slate-700">{row.asin}</div>
+                                        <div className="truncate text-[11px] text-slate-400">{row.name}{row.shop ? ` · ${row.shop}` : ''}</div>
                                     </div>
-                                </td>
-                                <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-700">{formatNumber(row.stock)}</td>
-                                <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-600">{row.avgDaily}</td>
-                                <td className={`px-3 py-2 text-right font-mono tabular-nums font-semibold ${
-                                    row.bucket === 'risk' ? 'text-rose-600' : row.bucket === 'warn' ? 'text-amber-600' : row.bucket === 'ok' ? 'text-emerald-600' : 'text-slate-500'
+                                </div>
+                            ),
+                        },
+                        {
+                            key: 'stock',
+                            title: '可售库存',
+                            align: 'right',
+                            bar: row => row.stock,
+                            render: row => <span className="text-slate-700">{formatNumber(row.stock)}</span>,
+                        },
+                        {
+                            key: 'avg',
+                            title: '日均销量',
+                            align: 'right',
+                            render: row => <span className="text-slate-600">{row.avgDaily}</span>,
+                        },
+                        {
+                            key: 'days',
+                            title: '可售天数',
+                            align: 'right',
+                            render: row => (
+                                <span className={`font-semibold ${
+                                    row.bucket === 'risk' ? 'text-rose-600'
+                                        : row.bucket === 'warn' ? 'text-amber-600'
+                                            : row.bucket === 'ok' ? 'text-emerald-600' : 'text-slate-500'
                                 }`}>
                                     {Number.isFinite(row.days) ? `${Math.round(row.days)} 天` : '无销量'}
-                                </td>
-                                <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-500">{row.sellOutDate || '—'}</td>
-                                <td className="px-3 py-2 text-right">
-                                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${BUCKETS[row.bucket].chip}`}>
-                                        {row.bucket === 'risk' ? <PackageX className="h-3 w-3" /> : row.bucket === 'over' ? <Boxes className="h-3 w-3" /> : <PackageCheck className="h-3 w-3" />}
-                                        {BUCKETS[row.bucket].label}
-                                    </span>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                                </span>
+                            ),
+                        },
+                        {
+                            key: 'sellOut',
+                            title: '预计卖完',
+                            align: 'right',
+                            render: row => <span className="text-slate-500">{row.sellOutDate || '—'}</span>,
+                        },
+                        {
+                            key: 'status',
+                            title: '状态',
+                            align: 'right',
+                            render: row => (
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${BUCKETS[row.bucket].chip}`}>
+                                    {row.bucket === 'risk' ? <PackageX className="h-3 w-3" /> : row.bucket === 'over' ? <Boxes className="h-3 w-3" /> : <PackageCheck className="h-3 w-3" />}
+                                    {BUCKETS[row.bucket].label}
+                                </span>
+                            ),
+                        },
+                    ]}
+                />
             </div>
 
             <p className="mt-2 text-[10px] text-slate-400">

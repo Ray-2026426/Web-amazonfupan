@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { AggregatedData, DataRow, FilterState, TargetRow, PeriodMode } from '../types';
 import {
     formatNumber,
@@ -279,8 +279,35 @@ const WeeklyMetricCard = ({
     );
 };
 
-const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({
-    current,
+/** 迷你趋势线：纯 SVG，无图表库依赖，首屏不额外拉分包 */
+const Sparkline: React.FC<{ values: number[] }> = ({ values }) => {
+    if (values.length < 2) {
+        return <div className="flex h-full items-center justify-end text-[10px] text-slate-400">数据不足，无法画趋势</div>;
+    }
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const span = max - min || 1;
+    const points = values.map((value, index) => {
+        const x = (index / (values.length - 1)) * 100;
+        const y = 26 - ((value - min) / span) * 22;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+    });
+    const area = `0,30 ${points.join(' ')} 100,30`;
+    return (
+        <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="h-full w-full" aria-hidden="true">
+            <polygon points={area} fill="url(#spark-fill)" />
+            <polyline points={points.join(' ')} fill="none" stroke="#0ea5e9" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+            <defs>
+                <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.22" />
+                    <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0" />
+                </linearGradient>
+            </defs>
+        </svg>
+    );
+};
+
+const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
     target,
     periodMode = 'month',
     rawData = [],
@@ -291,6 +318,8 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({
     const isWeeklyMode = periodMode === 'week';
     const isDailyMode = periodMode === 'day';
     const [expandedMetric, setExpandedMetric] = useState<MetricCardKey | null>(null);
+    /** 首屏主指标：销售额 / 毛利额 二选一，其余指标放在右侧紧凑行 */
+    const [mainMetric, setMainMetric] = useState<'sales_amount' | 'gross_profit'>('sales_amount');
     /** 趋势面板的期数范围：默认近 12 期，日度默认近 30 天 */
     const [trendRange, setTrendRange] = useState<number>(isDailyMode ? 30 : 12);
     /** 切粒度时把期数重置成该粒度合理的默认值，避免「近12天」这种别扭组合 */
@@ -301,6 +330,24 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({
     const handleCardClick = (key: MetricCardKey) => {
         setExpandedMetric(prev => (prev === key ? null : key));
     };
+
+    /** 主指标近 30 天的日序列（云端日明细；本地月报只有月粒度，画不出趋势就留空） */
+    const sparkValues = useMemo(() => {
+        if (!rawData.length) return [];
+        const byDate = new Map<string, number>();
+        for (const row of rawData) {
+            const value = mainMetric === 'sales_amount' ? Number(row.sales_amount) || 0 : Number(row.gross_profit) || 0;
+            byDate.set(row.date, (byDate.get(row.date) || 0) + value);
+        }
+        return [...byDate.entries()]
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .slice(-30)
+            .map(([, value]) => value);
+    }, [rawData, mainMetric]);
+
+    const mainValue = mainMetric === 'sales_amount' ? current.sales_amount : current.gross_profit;
+    const mainTarget = mainMetric === 'sales_amount' ? target.sales_amount : target.gross_profit;
+    const mainAchievement = mainTarget > 0 ? (mainValue / mainTarget) * 100 : NaN;
 
     const hasChartData = rawData.length > 0 && filters;
 
@@ -442,65 +489,92 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({
 
     return (
         <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-                <ProgressMetricCard
-                    label="毛利额达成"
-                    metricKey="gross_profit"
-                    value={current.gross_profit}
-                    max={target.gross_profit}
-                    formatter={formatMoneyNoDecimals}
-                    icon={<Goal className="h-5 w-5" />}
-                    isActive={expandedMetric === 'gross_profit'}
-                    onClick={() => handleCardClick('gross_profit')}
-                    pacingRatio={pacingRatio}
-                    featured
-                />
-                <ProgressMetricCard
-                    label="销量达成"
-                    metricKey="sales_quantity"
-                    value={current.sales_quantity}
-                    max={target.sales_quantity}
-                    formatter={formatNumber}
-                    icon={<BarChart3 className="h-5 w-5" />}
-                    isActive={expandedMetric === 'sales_quantity'}
-                    onClick={() => handleCardClick('sales_quantity')}
-                    pacingRatio={pacingRatio}
-                />
-                <ProgressMetricCard
-                    label="销售额达成"
-                    metricKey="sales_amount"
-                    value={current.sales_amount}
-                    max={target.sales_amount}
-                    formatter={formatMoneyNoDecimals}
-                    icon={<BadgeDollarSign className="h-5 w-5" />}
-                    isActive={expandedMetric === 'sales_amount'}
-                    onClick={() => handleCardClick('sales_amount')}
-                    pacingRatio={pacingRatio}
-                />
-                <ProgressMetricCard
-                    label="毛利率达成"
-                    metricKey="gross_margin"
-                    value={current.gross_margin}
-                    max={target.gross_margin}
-                    formatter={formatPercent}
-                    icon={<Activity className="h-5 w-5" />}
-                    isRateMetric
-                    isActive={expandedMetric === 'gross_margin'}
-                    onClick={() => handleCardClick('gross_margin')}
-                    pacingRatio={pacingRatio}
-                />
-                <ProgressMetricCard
-                    label="广告预算消耗"
-                    metricKey="ad_spend"
-                    value={current.ad_spend}
-                    max={target.ad_spend}
-                    formatter={formatMoneyNoDecimals}
-                    icon={<Megaphone className="h-5 w-5" />}
-                    inverseColor={true}
-                    isActive={expandedMetric === 'ad_spend'}
-                    onClick={() => handleCardClick('ad_spend')}
-                    pacingRatio={pacingRatio}
-                />
+            <div className="grid gap-4 lg:grid-cols-3">
+                {/* 主指标：大数字 + 迷你趋势 + 目标进度 */}
+                <section className={`lg:col-span-2 rounded-2xl border bg-white p-5 transition ${expandedMetric === mainMetric ? 'border-sky-300 ring-2 ring-sky-100' : 'border-slate-200'}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1">
+                            {([['sales_amount', '销售额'], ['gross_profit', '毛利额']] as const).map(([key, label]) => (
+                                <button
+                                    key={key}
+                                    type="button"
+                                    onClick={() => setMainMetric(key)}
+                                    className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${mainMetric === key ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => handleCardClick(mainMetric)}
+                            className="text-[11px] font-medium text-slate-400 transition hover:text-sky-600"
+                        >
+                            {expandedMetric === mainMetric ? '收起趋势' : '看趋势 ›'}
+                        </button>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+                        <div>
+                            <div className="text-3xl font-bold tracking-tight text-slate-900">
+                                {mainMetric === 'sales_amount' ? formatMoneyNoDecimals(current.sales_amount) : formatMoneyNoDecimals(current.gross_profit)}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                                目标 {mainMetric === 'sales_amount' ? formatMoneyNoDecimals(target.sales_amount) : formatMoneyNoDecimals(target.gross_profit)}
+                                <span className="mx-1.5 text-slate-300">·</span>
+                                达成 <span className={mainAchievement >= 100 ? 'font-semibold text-emerald-600' : 'font-semibold text-slate-700'}>
+                                    {Number.isFinite(mainAchievement) ? `${mainAchievement.toFixed(1)}%` : '—'}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="h-14 w-full max-w-[280px] shrink-0">
+                            <Sparkline values={sparkValues} />
+                        </div>
+                    </div>
+
+                    <div className="mt-4">
+                        <div className="relative h-2 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                                className={`h-full rounded-full transition-all ${mainAchievement >= 100 ? 'bg-emerald-500' : 'bg-sky-500'}`}
+                                style={{ width: `${Math.min(Math.max(mainAchievement || 0, 0), 100)}%` }}
+                            />
+                        </div>
+                        <div className="mt-1 flex justify-between text-[10px] text-slate-400">
+                            <span>0</span>
+                            <span>序时 {Number.isFinite(pacingRatio) ? `${Math.round(pacingRatio * 100)}%` : '—'}</span>
+                            <span>100%</span>
+                        </div>
+                    </div>
+                </section>
+
+                {/* 次级指标：行式，比卡片省一半高度 */}
+                <div className="space-y-3">
+                    {[
+                        { key: 'gross_margin' as MetricCardKey, label: '毛利率', value: formatPercent(current.gross_margin), targetText: target.gross_margin ? `目标 ${formatPercent(target.gross_margin)}` : '无目标', ratio: target.gross_margin ? current.gross_margin / target.gross_margin : NaN },
+                        { key: 'sales_quantity' as MetricCardKey, label: '销量', value: formatNumber(current.sales_quantity), targetText: `目标 ${formatNumber(target.sales_quantity)}`, ratio: target.sales_quantity ? current.sales_quantity / target.sales_quantity : NaN },
+                        { key: 'ad_spend' as MetricCardKey, label: '广告占比', value: formatPercent(current.sales_amount > 0 ? current.ad_spend / current.sales_amount : 0), targetText: `花费 ${formatMoneyNoDecimals(current.ad_spend)}`, ratio: target.ad_spend ? current.ad_spend / target.ad_spend : NaN },
+                    ].map(item => (
+                        <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => handleCardClick(item.key)}
+                            className={`flex w-full items-center justify-between gap-3 rounded-2xl border bg-white px-4 py-3 text-left transition hover:border-sky-300 ${expandedMetric === item.key ? 'border-sky-300 ring-2 ring-sky-100' : 'border-slate-200'}`}
+                        >
+                            <div className="min-w-0">
+                                <div className="text-[11px] text-slate-500">{item.label}</div>
+                                <div className="text-base font-semibold text-slate-900">{item.value}</div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                                <div className="text-[10px] text-slate-400">{item.targetText}</div>
+                                {Number.isFinite(item.ratio) && (
+                                    <div className="mt-1 h-1 w-16 overflow-hidden rounded-full bg-slate-100">
+                                        <div className={`h-full rounded-full ${item.ratio >= 1 ? 'bg-emerald-500' : 'bg-sky-400'}`} style={{ width: `${Math.min(Math.max(item.ratio * 100, 0), 100)}%` }} />
+                                    </div>
+                                )}
+                            </div>
+                        </button>
+                    ))}
+                </div>
             </div>
             {renderTrendPanel()}
         </div>
