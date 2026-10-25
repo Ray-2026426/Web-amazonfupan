@@ -42,6 +42,10 @@ on:
         description: '自动重试次数（内部使用，默认 0）'
         required: false
         default: '0'
+      next:
+        description: '后续段（内部使用）：from:to:patch 用逗号分隔，例如 2025-10-01:2025-10-31:false,2025-11-01:2025-11-30:false'
+        required: false
+        default: ''
 
 concurrency:
   group: lingxing-backfill
@@ -149,6 +153,7 @@ jobs:
           CHUNK_FROM: ${{ matrix.chunk.from }}
           CHUNK_TO: ${{ matrix.chunk.to }}
           INPUT_PATCH: ${{ github.event.inputs.patch }}
+          INPUT_NEXT: ${{ github.event.inputs.next }}
         run: |
           set -euo pipefail
           if [ "${RETRY:-0}" -ge 2 ]; then
@@ -156,8 +161,8 @@ jobs:
             exit 0
           fi
           next=$((RETRY + 1))
-          body=$(printf '{"ref":"main","inputs":{"from":"%s","to":"%s","chunk_days":"30","max_parallel":"1","patch":"%s","retry":"%s"}}' \
-            "$CHUNK_FROM" "$CHUNK_TO" "${INPUT_PATCH:-false}" "$next")
+          body=$(printf '{"ref":"main","inputs":{"from":"%s","to":"%s","chunk_days":"30","max_parallel":"1","patch":"%s","retry":"%s","next":"%s"}}' \
+            "$CHUNK_FROM" "$CHUNK_TO" "${INPUT_PATCH:-false}" "$next" "${INPUT_NEXT:-}")
           curl -sS -f -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
@@ -165,3 +170,41 @@ jobs:
             -d "$body" \
             "https://api.github.com/repos/$REPO/actions/workflows/backfill-history.yml/dispatches"
           echo "已提交第 $next 次重试：$CHUNK_FROM ~ $CHUNK_TO"
+
+  # 串行接续：本段全部成功后，把 next 里的第一段派发成下一次运行。
+  # 这样多段任务（比如 2025 全年）不用一次派发多个 run —— 并发组只保留一个待运行任务，
+  # 一次派多个会把前一个顶掉。
+  chain:
+    needs: [backfill]
+    if: success()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 自动接续下一段
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NEXT: ${{ github.event.inputs.next }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXT:-}" ]; then
+            echo "没有后续段，任务链结束"
+            exit 0
+          fi
+          first="${NEXT%%,*}"
+          rest=""
+          if [ "$first" != "$NEXT" ]; then rest="${NEXT#*,}"; fi
+          from="${first%%:*}"
+          mid="${first#*:}"
+          to="${mid%%:*}"
+          patch="${mid#*:}"
+          if [ "$patch" = "$mid" ]; then patch="false"; fi
+          body=$(printf '{"ref":"main","inputs":{"from":"%s","to":"%s","chunk_days":"14","max_parallel":"1","patch":"%s","retry":"0","next":"%s"}}' \
+            "$from" "$to" "$patch" "$rest")
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -d "$body" \
+            "https://api.github.com/repos/$REPO/actions/workflows/backfill-history.yml/dispatches"
+          echo "已接续：$from ~ $to（patch=$patch），剩余段：${rest:-无}"
