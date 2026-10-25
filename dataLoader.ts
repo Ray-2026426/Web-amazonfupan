@@ -869,6 +869,75 @@ export const parseReviewData = async (file: File): Promise<ParsedDataResult<Revi
     return { data: validRows, debug };
 };
 
+/**
+ * 兼容解析：领星「导出产品」这类文件是用流式压缩写的 xlsx（zip 里带 data descriptor），
+ * 仓库里的 SheetJS 0.18 解压会报 `Bad uncompressed size`。这里用 exceljs 再读一遍。
+ * exceljs 体积较大，只在兜底路径动态加载，不影响首屏。
+ */
+const parseProductImagesWithExcelJs = async (file: File): Promise<{ rows: ProductImageRow[]; headers: string[] }> => {
+    const module: any = await import('exceljs');
+    const ExcelJS = module?.default ?? module;
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await file.arrayBuffer());
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return { rows: [], headers: [] };
+
+    const cellText = (value: any): string => {
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'object') {
+            if (Array.isArray(value.richText)) return value.richText.map((part: any) => part?.text || '').join('');
+            if (typeof value.text === 'string') return value.text;
+            if (typeof value.hyperlink === 'string') return value.hyperlink;
+            if ('result' in value) return String(value.result ?? '');
+            if (value instanceof Date) return value.toISOString().slice(0, 10);
+            return '';
+        }
+        return String(value);
+    };
+
+    const grid: string[][] = [];
+    sheet.eachRow({ includeEmpty: false }, (row: any) => {
+        const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+        grid.push(values.map(cellText));
+    });
+    if (!grid.length) return { rows: [], headers: [] };
+
+    const headers = grid[0].map(text => String(text || '').trim());
+    const colKeys = headers.map(text => (text ? mapHeaderToKey(text, PRODUCT_IMAGE_ALIASES) : null));
+    const skuCol = colKeys.indexOf('sku');
+    const nameCol = colKeys.indexOf('product_name');
+    let imageCol = colKeys.indexOf('image_url');
+
+    // 没识别出图片列时，找 URL 命中最多的那一列
+    if (imageCol < 0) {
+        let bestCol = -1;
+        let bestHits = 0;
+        for (let c = 0; c < headers.length; c += 1) {
+            let hits = 0;
+            for (let r = 1; r < Math.min(grid.length, 40); r += 1) {
+                if (extractImageUrl(grid[r]?.[c])) hits += 1;
+            }
+            if (hits > bestHits) {
+                bestHits = hits;
+                bestCol = c;
+            }
+        }
+        if (bestCol >= 0 && bestHits > 0) imageCol = bestCol;
+    }
+    if (imageCol < 0) return { rows: [], headers };
+
+    const rows: ProductImageRow[] = [];
+    for (let r = 1; r < grid.length; r += 1) {
+        const imageUrl = extractImageUrl(grid[r]?.[imageCol]);
+        if (!imageUrl) continue;
+        const sku = skuCol >= 0 ? String(grid[r]?.[skuCol] || '').trim() : '';
+        const productName = nameCol >= 0 ? String(grid[r]?.[nameCol] || '').trim() : '';
+        if (!sku && !productName) continue;
+        rows.push({ sku, product_name: productName, image_url: imageUrl });
+    }
+    return { rows, headers };
+};
+
 export const parseProductImageData = async (file: File): Promise<ParsedDataResult<ProductImageRow>> => {
     const debug: DataSourceDebugInfo = {
         filename: file.name,
@@ -1021,8 +1090,23 @@ export const parseProductImageData = async (file: File): Promise<ParsedDataResul
 
         return { data: validRows, debug };
     } catch (e) {
-        debug.errors.push(`解析商品图片表失败：${e instanceof Error ? e.message : String(e)}`);
-        return { data: [], debug };
+        // 兜底：SheetJS 打不开「流式压缩」的 xlsx，换 exceljs 再解析一次
+        try {
+            const fallback = await parseProductImagesWithExcelJs(file);
+            if (fallback.rows.length) {
+                debug.totalRows = fallback.rows.length;
+                debug.validRows = fallback.rows.length;
+                debug.mappedColumns['__fallback__'] = `兼容模式解析（exceljs）：${fallback.rows.length} 行`;
+                debug.errors.push('该文件用了特殊的 xlsx 压缩方式，已自动切到兼容模式解析，结果正常。');
+                return { data: fallback.rows, debug };
+            }
+            debug.errors.push('解析失败，且兼容模式也没有读到图片链接：请确认「图片链接」列有 https 地址。');
+            return { data: [], debug };
+        } catch (fallbackError) {
+            debug.errors.push(`解析商品图片表失败：${e instanceof Error ? e.message : String(e)}`);
+            debug.errors.push(`兼容模式也失败：${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+            return { data: [], debug };
+        }
     }
 };
 
