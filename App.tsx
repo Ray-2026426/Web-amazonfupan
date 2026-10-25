@@ -46,6 +46,8 @@ const CloudAdminPanel = lazyWithRetry(() => import('./components/CloudAdminPanel
 const ProfitWaterfall = lazyWithRetry(() => import('./components/ProfitWaterfall').then(m => ({ default: m.ProfitWaterfall })));
 const StockHealth = lazyWithRetry(() => import('./components/StockHealth').then(m => ({ default: m.StockHealth })));
 import { BusinessCommandCenter } from './components/BusinessCommandCenter';
+import { AnomalyRadar } from './components/AnomalyRadar';
+import { buildRadarReport } from './utils/diagnosticRadar';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles, Search } from 'lucide-react';
 import { saveToDB, loadFromDB, replaceImportedData } from './db';
@@ -831,6 +833,21 @@ const App: React.FC = () => {
           pacingRatio,
       };
   }, [activeRawData, displayTargetData, inventoryData, filters, periodMode, dataEndDate]);
+
+  /** 经营异常雷达：核心指标毛利额 → 三维（销量/客单价/毛利率）→ 根因 → 动作 */
+  const radar = useMemo(() => {
+      if (!processedData) return null;
+      return buildRadarReport({
+          current: processedData.current,
+          last: processedData.last,
+          year: processedData.year,
+          target: processedData.target
+              ? { gross_profit: processedData.target.gross_profit, sales_amount: processedData.target.sales_amount }
+              : null,
+          currentRows: processedData.currentRows,
+          lastRows: processedData.lastRows,
+      });
+  }, [processedData]);
   const businessIssues = useMemo(() => {
       if (!processedData) return [];
       return generateBusinessIssues({
@@ -1096,18 +1113,8 @@ const App: React.FC = () => {
                         /></section>
                     )}
 
-                    {processedData && (
-                        <section id="issues"><BusinessCommandCenter
-                            issues={businessIssues}
-                            rules={DEFAULT_BUSINESS_RULES}
-                            actions={businessActions}
-                            onCreateAction={handleCreateAction}
-                            onUpdateAction={handleUpdateAction}
-                            onOpenDetail={handleOpenDetailByType}
-                            onOpenRefundAnalysis={() => handleOpenRefundAnalysis()}
-                            onOpenReviewAnalysis={() => setReviewModalOpen(true)}
-                            onOpenKeywordAnalysis={() => setKeywordModalOpen(true)}
-                        /></section>
+                    {processedData && radar && (
+                        <section id="issues"><AnomalyRadar report={radar} /></section>
                     )}
 
                     {/* 2. PL Table */}
