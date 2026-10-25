@@ -3,7 +3,7 @@
  * 一次性探测：领星 MCP 里跟「产品管理」相关的工具，以及产品图片 URL 的字段名。
  * 只在 Actions 里跑（需要 LINGXING_MCP_KEY），输出打印到日志供人看。
  */
-import { createClient, fetchCatalog } from '../lingxing-client.mjs';
+import { createClient, fetchCatalog } from './lingxing-client.mjs';
 
 const client = createClient({ intervalMs: 1500, verbose: true });
 
