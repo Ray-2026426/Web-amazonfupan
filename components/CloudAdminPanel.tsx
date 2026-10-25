@@ -921,6 +921,23 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                   <button className={`${primaryClass} mt-3`} disabled={busy || !imageFile} onClick={() => void uploadImages()}>
                     <Upload className="h-3.5 w-3.5" />上传并启用
                   </button>
+                  <button
+                    className={`${ghostClass} ml-2 mt-3`}
+                    disabled={busy || !data.imageImport}
+                    title="同步补全 SKU↔ASIN 对照后，把图片表里还没翻译的行再匹配一次，不用重新上传"
+                    onClick={async () => {
+                      setBusy(true); setMessage('');
+                      try {
+                        await request('POST', { action: 'images_relink' });
+                        setData(await request('GET') as AdminData);
+                        setMessage('已按最新 SKU↔ASIN 对照重新匹配，刷新看板即可看到图片。');
+                      } catch (error) {
+                        setMessage(String(error instanceof Error ? error.message : error));
+                      } finally { setBusy(false); }
+                    }}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />重新匹配 ASIN
+                  </button>
                   {progress && <p className={`${sectionHint} mt-2`}>{progress}</p>}
                 </section>
               </div>}

@@ -306,6 +306,30 @@ export function hasMeaningfulCost(cost) {
     return total > 0.005;
 }
 
+/**
+ * 订单利润行 → MSKU ↔ ASIN 对照。
+ * 领星不同接口里 MSKU 的字段名不一致（msku / local_sku / seller_sku，或挂在 price_list[0] 上），
+ * 这里按优先级兜一遍，能拿到一对是一对；拿不到就跳过，不影响成本归并。
+ */
+export function extractProductLinks(opRows) {
+    const map = new Map();
+    for (const r of opRows || []) {
+        const pl = (r.price_list || [])[0] || {};
+        const asin = pl.asin || r.asin;
+        const msku = r.msku || r.local_sku || r.local_sku_name || pl.msku || pl.local_sku || pl.seller_sku || pl.sku;
+        if (!asin || !msku) continue;
+        const key = `${msku}|${asin}`;
+        if (map.has(key)) continue;
+        map.set(key, {
+            msku: String(msku),
+            asin: String(asin),
+            local_name: (pl.local_name || r.local_name || pl.item_name || '').slice(0, 300) || null,
+            sid: String((r.sids || [])[0] ?? pl.sid ?? '') || null,
+        });
+    }
+    return map;
+}
+
 /** 订单利润行（msku 粒度）→ key `${sid}|${asin}` → 累加成本 */
 export function mergeOrderProfit(opRows, { firstMileField = 'logistics_costs' } = {}) {
     const map = new Map();

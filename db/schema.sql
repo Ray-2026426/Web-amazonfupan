@@ -398,6 +398,22 @@ create table if not exists product_images (
     updated_at timestamptz not null default now()
 );
 create index if not exists idx_product_images_import on product_images (import_id);
+-- 图片表按「本地 SKU」导出也能用：上传时用 product_links 把 SKU 翻译成 ASIN
+alter table product_images add column if not exists asin text;
+
+-- MSKU ↔ ASIN 对照：每次同步订单利润时累积写入，供图片表翻译用
+create table if not exists product_links (
+    msku text not null,
+    asin text not null,
+    local_name text,
+    sid text,
+    updated_at timestamptz not null default now(),
+    primary key (msku, asin)
+);
+create index if not exists idx_product_links_asin on product_links (asin);
+alter table product_links enable row level security;
+revoke all on table product_links from anon, authenticated;
+grant select, insert, update, delete on table product_links to service_role;
 
 alter table product_images enable row level security;
 alter table product_image_imports enable row level security;
@@ -420,6 +436,14 @@ begin
     if expected is null then raise exception 'image import not found or already activated'; end if;
     select count(*) into actual from product_images where import_id = p_id;
     if actual <> expected then raise exception 'image import incomplete: % of % rows', actual, expected; end if;
+    -- 按本地 SKU 自动翻译成 ASIN（用户导出的产品表通常只有 SKU，没有 ASIN）
+    update product_images img
+       set asin = l.asin
+      from product_links l
+     where img.import_id = p_id
+       and img.asin is null
+       and img.sku is not null
+       and lower(btrim(img.sku)) = lower(btrim(l.msku));
     update product_image_imports set active = false, status = 'archived' where active;
     update product_image_imports set active = true, status = 'active', rows_count = actual, activated_at = now() where id = p_id;
     delete from product_images where import_id <> p_id;
@@ -428,3 +452,26 @@ end;
 $$;
 revoke all on function public.activate_image_import(uuid) from public, anon, authenticated;
 grant execute on function public.activate_image_import(uuid) to service_role;
+
+-- 已上传的图片表事后重新匹配 ASIN（同步补全 product_links 后点一下即可，不用重传）
+create or replace function public.relink_image_asins()
+returns integer
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+    n integer;
+begin
+    update product_images img
+       set asin = l.asin
+      from product_links l
+     where img.asin is null
+       and img.sku is not null
+       and lower(btrim(img.sku)) = lower(btrim(l.msku));
+    get diagnostics n = row_count;
+    return n;
+end;
+$$;
+revoke all on function public.relink_image_asins() from public, anon, authenticated;
+grant execute on function public.relink_image_asins() to service_role;

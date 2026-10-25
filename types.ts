@@ -212,6 +212,8 @@ export interface ProductImageRow {
   sku: string;
   product_name: string;
   image_url: string;
+  /** 图片表只有本地 SKU 时，由 product_links 对照翻译出来的 ASIN */
+  asin?: string;
 }
 
 export interface FilterState {

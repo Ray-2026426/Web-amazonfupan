@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from '../lingxing-client.mjs';
 import {
     aggregateRows,
+    extractProductLinks,
     hasMeaningfulCost,
     isActiveRow,
     mergeOrderProfit,
@@ -262,6 +263,21 @@ async function saveDailyChecks(list) {
 }
 
 /**
+ * MSKU ↔ ASIN 对照落库。
+ * 用途：用户的商品图片表是按本地 SKU 导出的，看板的行是按 ASIN 组织的，
+ * 存下这张对照表就能在上传图片时自动把 SKU 翻译成 ASIN。
+ */
+async function saveProductLinks(linkMap) {
+    if (!SUPABASE_URL || !SUPABASE_KEY || !linkMap || !linkMap.size) return;
+    const rows = [...linkMap.values()].map((item) => ({ ...item, updated_at: new Date().toISOString() }));
+    for (let i = 0; i < rows.length; i += 500) {
+        await postgrest('product_links', rows.slice(i, i + 500), 'msku,asin')
+            .catch((error) => log(`⚠ 写入 SKU↔ASIN 对照失败：${String(error.message || error)}`));
+    }
+    log(`已写入 ${rows.length} 条 SKU↔ASIN 对照（product_links）`);
+}
+
+/**
  * 补丁模式（--cost-only）：
  * 只重拉「订单利润」，把两件事补进已有数据，不动产品表现（省 80% 时间）：
  *   1. 回填 fba_international_fee（FBA 国际运费），供看板「毛利修正」开关使用
@@ -295,6 +311,7 @@ async function runPatch({ dates, usedShops, startedAt, range }) {
     let skippedDays = 0;
     const failures = [];
     const checks = [];
+    const links = new Map();
 
     for (const date of dates) {
         try {
@@ -318,6 +335,7 @@ async function runPatch({ dates, usedShops, startedAt, range }) {
                 service_type: 1,
             });
             const costMap = mergeOrderProfit(op.list);
+            for (const [key, value] of extractProductLinks(op.list)) links.set(key, value);
             const present = new Set(existing.map((row) => `${row.sid}|${row.asin}`));
 
             const rows = existing.map((row) => {
@@ -356,6 +374,7 @@ async function runPatch({ dates, usedShops, startedAt, range }) {
     }
 
     await saveDailyChecks(checks).catch((error) => log(`⚠ 对账结果写入失败：${String(error.message || error)}`));
+    await saveProductLinks(links);
 
     await postgrest('sync_runs', [{
         started_at: startedAt,
@@ -408,6 +427,8 @@ async function main() {
     let rawPPRows = 0;
     let failedShopCalls = 0;
     const costByDate = new Map();
+    /** MSKU ↔ ASIN 对照（供商品图片表按本地 SKU 匹配） */
+    const productLinks = new Map();
     /** 每天拿「我算的毛利合计」和「领星自己返回的 total_sum」对账 */
     const reconciliations = [];
 
@@ -432,6 +453,7 @@ async function main() {
             });
         }
         const costMap = mergeOrderProfit(op.list);
+        for (const [key, value] of extractProductLinks(op.list)) productLinks.set(key, value);
         costByDate.set(date, costMap);
         const expectedGrossProfit = op.total_sum ? num(op.total_sum.gross_profit) : null;
         const expectedAmount = op.total_sum ? num(op.total_sum.amount) : null;
@@ -671,6 +693,7 @@ async function main() {
         });
         // 每日对账结果单独落库，数据质量页据此标出「与领星差异过大」的日期
         await saveDailyChecks(reconciliations).catch((error) => log(`⚠ 对账结果写入失败：${String(error.message || error)}`));
+        await saveProductLinks(productLinks);
     }
 
     return { snapshot: mergedSnapshot, report };

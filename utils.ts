@@ -21,6 +21,8 @@ export const buildProductImageLookup = (rows: ProductImageRow[]): ProductImageLo
         const url = row.image_url?.trim();
         if (!url) continue;
         if (row.sku) bySku.set(normImageKey(row.sku), url);
+        // 本地 SKU 与看板的 ASIN 不是一套编号：有 asin 时同时按 ASIN 建索引
+        if (row.asin) bySku.set(normImageKey(row.asin), url);
         if (row.product_name) byProductName.set(normImageKey(row.product_name), url);
     }
     return { bySku, byProductName };

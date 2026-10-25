@@ -138,6 +138,11 @@ async function save(body) {
       await writeTable('rpc/activate_image_import', 'POST', { p_id: id });
       return { activated: true };
     }
+    case 'images_relink': {
+      // 同步补齐 SKU↔ASIN 对照后，把已上传图片表里还没翻译的行再匹配一次
+      await writeTable('rpc/relink_image_asins', 'POST', {});
+      return { relinked: true };
+    }
     default:
       throw Object.assign(new Error('未知管理操作'), { status: 400 });
   }

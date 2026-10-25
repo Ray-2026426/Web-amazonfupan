@@ -1,10 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_FIELD_PATHS, hasMeaningfulCost, mergeOrderProfit, resolveField, toCostOnlyRow, toDataRow, validateSnapshot } from './mapper.mjs';
+import { DEFAULT_FIELD_PATHS, extractProductLinks, hasMeaningfulCost, mergeOrderProfit, resolveField, toCostOnlyRow, toDataRow, validateSnapshot } from './mapper.mjs';
 import { authorized, isValidDate, rowsForRange, splitRange } from '../../serverless/supabase.js';
 import adminHandler from '../../api/admin.js';
 import exportHandler from '../../api/export.js';
 import targetsHandler from '../../api/targets.js';
+
+test('订单利润行能提取 MSKU ↔ ASIN 对照（图片表按 SKU 导出时靠它翻译）', () => {
+  const links = extractProductLinks([
+    { sids: [1], msku: 'CF-PCQ-Yellow-1pcs', price_list: [{ asin: 'B0AAA', local_name: 'Chopper' }] },
+    { sids: [1], price_list: [{ asin: 'B0BBB', msku: 'SN-Bag' }] },
+    { sids: [1], price_list: [{ asin: 'B0CCC' }] },
+  ]);
+  assert.equal(links.size, 2);
+  assert.equal(links.get('CF-PCQ-Yellow-1pcs|B0AAA').asin, 'B0AAA');
+  assert.equal(links.get('CF-PCQ-Yellow-1pcs|B0AAA').sid, '1');
+  assert.equal(links.get('SN-Bag|B0BBB').local_name, null);
+});
 
 test('默认字段映射：品名取 price_list 里销量最大的 local_name，二级分类取第 2 段', () => {
   const row = toDataRow({

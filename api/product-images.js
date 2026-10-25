@@ -7,9 +7,13 @@ import { respond, fetchTable } from '../serverless/supabase.js';
 export default function handler(req, res) {
   return respond(req, res, async () => {
     const rows = await fetchTable('product_images', {
+      select: 'sku,product_name,image_url,asin',
+      order: 'id.asc',
+    }, 20000).catch(async () => fetchTable('product_images', {
+      // 老库还没加 asin 列时退回基础字段
       select: 'sku,product_name,image_url',
       order: 'id.asc',
-    }, 20000);
+    }, 20000));
     return res.status(200).json({ count: rows.length, rows });
   });
 }
