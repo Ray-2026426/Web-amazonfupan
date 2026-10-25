@@ -53,10 +53,21 @@ html.dark [class*="radial-gradient"] {
     background-color: #0d1117 !important;
 }
 
-/* ---------- 滚动条（与暗底协调） ---------- */
-html.dark .custom-scroll::-webkit-scrollbar-track { background: #0d1117; }
-html.dark .custom-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-html.dark .custom-scroll::-webkit-scrollbar-thumb:hover { background: #484f58; }
+/* ---------- 滚动条（全局细窄，暗色下更明显） ---------- */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: rgba(100, 116, 139, 0.45);
+    border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.75); }
+html.dark .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+html.dark .custom-scroll::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.35); border-radius: 999px; }
+html.dark .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.6); }
 
 /* ---------- 表单控件 ----------
  * 保证文字与占位符在深色底上可见；color-scheme: dark 已让原生控件（日期选择器、

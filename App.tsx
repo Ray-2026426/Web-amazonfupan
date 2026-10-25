@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useDeferredValue, Suspense, lazy } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useDeferredValue, Suspense } from 'react';
 import { ActionItem, BusinessIssue, DataRow, TargetRow, FilterState, InventoryRow, RefundRow, ReviewRow, SearchTermRow, ProductImageRow, FilterSnapshot, DataCoverage, AppMeta, PeriodMode } from './types';
 import { 
   calculatePeriodDates, 
@@ -53,14 +53,14 @@ import { CLOUD_ENABLED, clearCloudToken, fetchCloudFreshness, fetchCloudRows, fe
 const DEFAULT_DATA_START = '2025-01-01';
 /** 稳定的空数组：避免每次渲染都造新引用，导致下游 useMemo 全部失效重算 */
 const EMPTY_ROWS: DataRow[] = [];
-/** 记住上次的粒度，刷新后不用重新点一次 */
+/** 记住上次的粒度，刷新后不用重新点一次；第一次进来默认日度（看最新一天） */
 const PERIOD_MODE_KEY = 'amazon-dashboard-period-mode';
 const readStoredPeriodMode = (): PeriodMode => {
   try {
     const value = localStorage.getItem(PERIOD_MODE_KEY);
-    return value === 'day' || value === 'week' || value === 'month' ? value : 'month';
+    return value === 'day' || value === 'week' || value === 'month' ? value : 'day';
   } catch {
-    return 'month';
+    return 'day';
   }
 };
 const SAMPLE_HEADERS = '日期,ASIN,国家,店铺,负责人,销售额,销量,毛利润,广告花费,广告销售额,Sessions';
@@ -205,6 +205,7 @@ const App: React.FC = () => {
     query.addEventListener('change', onChange);
     return () => query.removeEventListener('change', onChange);
   }, []);
+
   const sidebarVisible = isDesktop ? !sidebarCollapsed : sidebarOpen;
   const toggleSidebar = () => {
     if (isDesktop) setSidebarCollapsed(value => !value);
@@ -228,6 +229,20 @@ const App: React.FC = () => {
   const [cloudCutoff, setCloudCutoff] = useState('');
   /** 最近一次成功同步的时间，同样收在设置面板 */
   const [cloudLastSync, setCloudLastSync] = useState('');
+
+  /**
+   * 首次进入（日度模式）直接定位到「最新有数据的那一天」：
+   * 比如 25 号打开，默认选中 24 号，而不是当月 1 号。
+   * 每次页面加载只生效一次，之后用户自己选的区间不会被覆盖。
+   */
+  const snappedToLatest = useRef(false);
+  useEffect(() => {
+    if (snappedToLatest.current || periodMode !== 'day') return;
+    const latest = cloudCutoff || dataEndDate;
+    if (!latest) return;
+    snappedToLatest.current = true;
+    setFilters(prev => (prev.startDate === latest && prev.endDate === latest ? prev : { ...prev, startDate: latest, endDate: latest }));
+  }, [cloudCutoff, dataEndDate, periodMode]);
   const [cloudRefreshTick, setCloudRefreshTick] = useState(0);
   /** 命令面板（⌘K）：键盘完成切粒度、跳区间、开数据管理、下钻等操作 */
   const [commandOpen, setCommandOpen] = useState(false);

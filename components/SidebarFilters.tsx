@@ -552,9 +552,6 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.2em] uppercase ${isDailyMode ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200' : isWeeklyMode ? 'border-violet-400/20 bg-violet-400/10 text-violet-200' : 'border-sky-400/20 bg-sky-400/10 text-sky-200'}`}>
-                        {isDailyMode ? 'Daily' : isWeeklyMode ? 'Weekly' : 'Monthly'}
-                    </span>
                     {hasActiveFilters && (
                         <button onClick={clearAllFilters} className="text-xs text-slate-400 hover:text-rose-300 flex items-center gap-1 transition-colors">
                             <XCircle className="w-3.5 h-3.5" />重置筛选
