@@ -784,9 +784,22 @@ const App: React.FC = () => {
       const year = yearRows.length > 0 ? aggregateData(yearRows) : null;
 
       // Targets：月度取全月目标；周度/日度按天拆成「区间分摊月目标」。序时仅月度展示用。
-      const pacingRatio = periodMode === 'month'
-          ? getPacingRatio(periods.current.start, periods.current.end, dataEndDate)
-          : 1;
+      /**
+       * 序时进度 = 区间内「已过去的天数」占比。
+       * 之前只在月度算，日/周直接返回 1，导致永远显示 100%——这才是「序时一直 100%」的原因。
+       */
+      const pacingRatio = (() => {
+          const start = periods.current.start instanceof Date ? formatDate(periods.current.start) : String(periods.current.start);
+          const end = periods.current.end instanceof Date ? formatDate(periods.current.end) : String(periods.current.end);
+          const dayMs = 86400000;
+          const startMs = Date.parse(`${start}T00:00:00Z`);
+          const endMs = Date.parse(`${end}T00:00:00Z`);
+          if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return 1;
+          const totalDays = Math.round((endMs - startMs) / dayMs) + 1;
+          const cutoffMs = dataEndDate ? Date.parse(`${dataEndDate}T00:00:00Z`) : endMs;
+          const coveredDays = Math.round((Math.min(endMs, Number.isFinite(cutoffMs) ? cutoffMs : endMs) - startMs) / dayMs) + 1;
+          return Math.min(Math.max(coveredDays / totalDays, 0), 1);
+      })();
       const target = periodMode === 'month'
           ? getTargetForSelection(displayTargetData, periods.current.start, periods.current.end, filters, 1)
           : periodMode === 'week'

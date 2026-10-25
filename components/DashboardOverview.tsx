@@ -8,7 +8,7 @@ import {
     formatTargetGapPctPoints,
     periodUnitLabel,
 } from '../utils';
-import { Activity, BadgeDollarSign, BarChart3, Goal, Megaphone, TrendingUp, X } from 'lucide-react';
+import { Activity, BadgeDollarSign, BarChart3, ChevronDown, Goal, Megaphone, TrendingUp, X } from 'lucide-react';
 const MiniTrendChart = lazy(() => import('./MiniTrendChart').then(m => ({default: m.MiniTrendChart})));
 import { METRICS } from '../utils/metrics';
 
@@ -318,8 +318,8 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
     const isWeeklyMode = periodMode === 'week';
     const isDailyMode = periodMode === 'day';
     const [expandedMetric, setExpandedMetric] = useState<MetricCardKey | null>(null);
-    /** 首屏主指标：销售额 / 毛利额 二选一，其余指标放在右侧紧凑行 */
-    const [mainMetric, setMainMetric] = useState<'sales_amount' | 'gross_profit'>('sales_amount');
+    /** 首屏主指标：默认毛利额（更关心利润），可切到销售额 */
+    const [mainMetric, setMainMetric] = useState<'sales_amount' | 'gross_profit'>('gross_profit');
     /** 趋势面板的期数范围：默认近 12 期，日度默认近 30 天 */
     const [trendRange, setTrendRange] = useState<number>(isDailyMode ? 30 : 12);
     /** 切粒度时把期数重置成该粒度合理的默认值，避免「近12天」这种别扭组合 */
@@ -490,28 +490,39 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
     return (
         <div className="space-y-4">
             <div className="grid gap-4 lg:grid-cols-3">
-                {/* 主指标：大数字 + 迷你趋势 + 目标进度 */}
-                <section className={`lg:col-span-2 rounded-2xl border bg-white p-5 transition ${expandedMetric === mainMetric ? 'border-sky-300 ring-2 ring-sky-100' : 'border-slate-200'}`}>
+                {/* 主指标：整块可点，点一次展开趋势、再点收起 */}
+                <section
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => handleCardClick(mainMetric)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            handleCardClick(mainMetric);
+                        }
+                    }}
+                    className={`lg:col-span-2 cursor-pointer rounded-2xl border bg-white p-5 transition hover:border-sky-300 ${expandedMetric === mainMetric ? 'border-sky-300 ring-2 ring-sky-100' : 'border-slate-200'}`}
+                >
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1">
-                            {([['sales_amount', '销售额'], ['gross_profit', '毛利额']] as const).map(([key, label]) => (
+                        <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1" onClick={event => event.stopPropagation()}>
+                            {([['gross_profit', '毛利额'], ['sales_amount', '销售额']] as const).map(([key, label]) => (
                                 <button
                                     key={key}
                                     type="button"
-                                    onClick={() => setMainMetric(key)}
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        setMainMetric(key);
+                                    }}
                                     className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${mainMetric === key ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                                 >
                                     {label}
                                 </button>
                             ))}
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => handleCardClick(mainMetric)}
-                            className="text-[11px] font-medium text-slate-400 transition hover:text-sky-600"
-                        >
-                            {expandedMetric === mainMetric ? '收起趋势' : '看趋势 ›'}
-                        </button>
+                        <span className="flex items-center gap-1 text-[11px] font-medium text-slate-400">
+                            {expandedMetric === mainMetric ? '收起趋势' : '展开趋势'}
+                            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expandedMetric === mainMetric ? 'rotate-180' : ''}`} />
+                        </span>
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
@@ -541,7 +552,7 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
                         </div>
                         <div className="mt-1 flex justify-between text-[10px] text-slate-400">
                             <span>0</span>
-                            <span>序时 {Number.isFinite(pacingRatio) ? `${Math.round(pacingRatio * 100)}%` : '—'}</span>
+                            <span>{pacingRatio >= 0.999 ? '区间已完成' : `序时 ${Math.round(pacingRatio * 100)}%`}</span>
                             <span>100%</span>
                         </div>
                     </div>
