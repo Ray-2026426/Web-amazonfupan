@@ -99,6 +99,13 @@ export const ProductImageThumb = memo(function ProductImageThumb({
                         decoding="async"
                         referrerPolicy="no-referrer"
                         onError={() => setFailed(true)}
+                        onLoad={(event) => {
+                            // 亚马逊对没有主图的 ASIN 会返回 43 字节的 1×1 透明 GIF（HTTP 200、不报错），
+                            // 不识别的话就是「一片空白」：当成加载失败处理，显示占位图标。
+                            if (event.currentTarget.naturalWidth <= 2 || event.currentTarget.naturalHeight <= 2) {
+                                setFailed(true);
+                            }
+                        }}
                     />
                 </button>
             ) : (
