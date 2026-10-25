@@ -650,6 +650,10 @@ const App: React.FC = () => {
         setFilters={setFilters} 
         warnings={processedData?.warnings}
         periodMode={periodMode}
+        onRangeChange={(startDate, endDate, mode) => {
+            setPeriodMode(mode);
+            setFilters(prev => ({ ...prev, startDate, endDate }));
+        }}
         onLoadSnapshot={handleLoadSnapshot}
       />
       </div>
