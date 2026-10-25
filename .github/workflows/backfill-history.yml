@@ -30,6 +30,10 @@ on:
         description: '每块天数（默认 14，建议 7~21）'
         required: false
         default: '14'
+      patch:
+        description: '补丁模式：只回填 FBA 国际运费 + 成本行，不重拉产品表现（true / false）'
+        required: false
+        default: 'false'
       max_parallel:
         description: '同时运行的任务数（默认 1，避免领星 429）'
         required: false
@@ -112,13 +116,16 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           CHUNK_FROM: ${{ matrix.chunk.from }}
           CHUNK_TO: ${{ matrix.chunk.to }}
+          INPUT_PATCH: ${{ github.event.inputs.patch }}
         run: |
           set -uo pipefail
-          echo "同步 $CHUNK_FROM ~ $CHUNK_TO"
+          EXTRA=""
+          if [ "${INPUT_PATCH:-false}" = "true" ]; then EXTRA="--cost-only"; fi
+          echo "同步 $CHUNK_FROM ~ $CHUNK_TO${EXTRA:+（补丁模式）}"
           # 领星偶发 429 / 网络抖动会让整块失败；整块是幂等的（按天原子替换），
           # 所以这里自动重试一次，仍失败才真的判失败。
           attempt=1
-          until node scripts/sync/run.mjs --from "$CHUNK_FROM" --to "$CHUNK_TO" --upload; do
+          until node scripts/sync/run.mjs --from "$CHUNK_FROM" --to "$CHUNK_TO" $EXTRA --upload; do
             if [ "$attempt" -ge 2 ]; then
               echo "::error title=回补失败::$CHUNK_FROM ~ $CHUNK_TO 连续 2 次失败"
               exit 1

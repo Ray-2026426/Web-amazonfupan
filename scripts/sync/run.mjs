@@ -45,6 +45,8 @@ const CURRENCY = arg('currency', process.env.LINGXING_CURRENCY || 'USD');
 const OUT_DIR = path.resolve(arg('out', path.join(ROOT, 'data', 'snapshot')));
 const FIXTURES = has('fixtures');
 const DRY_RUN = has('dry-run');
+/** 补丁模式：只拉订单利润，回填 FBA 国际运费 + 补成本行，不动产品表现 */
+const PATCH = has('cost-only');
 const UPLOAD = has('upload') || !!process.env.SUPABASE_URL;
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || '';
@@ -234,6 +236,119 @@ async function uploadToSupabase({ dailyRows, currency, startedAt, range, dates, 
 }
 
 /* --------------------------- 主流程 --------------------------- */
+/**
+ * 补丁模式（--cost-only）：
+ * 只重拉「订单利润」，把两件事补进已有数据，不动产品表现（省 80% 时间）：
+ *   1. 回填 fba_international_fee（FBA 国际运费），供看板「毛利修正」开关使用
+ *   2. 补上「只有成本、当天无销量」的 ASIN 行，修正毛利偏高
+ * 逐日「读出当天整行 → 改完 → 原子替换」，失败只影响当天。
+ */
+async function readFactDaily(date) {
+    const rows = [];
+    for (let offset = 0; offset < 20000; offset += 1000) {
+        const url = `${SUPABASE_URL}/rest/v1/fact_daily?select=*&date=eq.${date}&currency=eq.${CURRENCY}&limit=1000&offset=${offset}`;
+        const res = await fetch(url, {
+            headers: {
+                apikey: SUPABASE_KEY,
+                ...(SUPABASE_KEY.startsWith('eyJ') ? { Authorization: `Bearer ${SUPABASE_KEY}` } : {}),
+            },
+        });
+        if (!res.ok) throw new Error(`读取 ${date} 失败：HTTP ${res.status}`);
+        const page = await res.json();
+        rows.push(...page);
+        if (page.length < 1000) break;
+    }
+    return rows;
+}
+
+async function runPatch({ dates, usedShops, startedAt, range }) {
+    if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error('补丁模式需要 SUPABASE_URL / SUPABASE_SECRET_KEY');
+    const shopById = new Map(usedShops.map((shop) => [String(shop.id), shop]));
+    let patchedDays = 0;
+    let patchedRows = 0;
+    let addedCostRows = 0;
+    let skippedDays = 0;
+    const failures = [];
+
+    for (const date of dates) {
+        try {
+            const existing = await readFactDaily(date);
+            if (!existing.length) {
+                skippedDays += 1;
+                log(`${date} 云端还没有数据，跳过（先用回补任务把这天补上）`);
+                continue;
+            }
+            const op = await fetchPaged('query_order_profit_list', {
+                start_date: date,
+                end_date: date,
+                currency_type: CURRENCY,
+                summary_field: 'msku',
+                turn_on_summary: '1',
+                sort_type: 'desc',
+                source_service: 'mcp',
+                external_service_mark: 1,
+                date_summary_type: 1,
+                search_type: 2,
+                service_type: 1,
+            });
+            const costMap = mergeOrderProfit(op.list);
+            const present = new Set(existing.map((row) => `${row.sid}|${row.asin}`));
+
+            const rows = existing.map((row) => {
+                const cost = costMap.get(`${row.sid}|${row.asin}`);
+                return { ...row, fba_international_fee: cost ? abs(cost.fba_international_inbound_fee) : 0 };
+            });
+            let added = 0;
+            for (const [key, cost] of costMap) {
+                if (present.has(key) || !hasMeaningfulCost(cost)) continue;
+                const [sid, asin] = key.split('|');
+                const shop = shopById.get(sid);
+                if (!shop || !asin) continue;
+                rows.push(toCostOnlyRow({ shop, asin, cost, date }));
+                added += 1;
+            }
+
+            const expected = op.total_sum ? num(op.total_sum.gross_profit) : null;
+            const actual = rows.reduce((sum, row) => sum + num(row.gross_profit), 0);
+            await postgrest('rpc/replace_fact_daily', {
+                p_date: date,
+                p_currency: CURRENCY,
+                p_rows: rows.map((row) => pickRow(row, { date, sid: row.sid, asin: row.asin, currency: CURRENCY })),
+            });
+            patchedDays += 1;
+            patchedRows += rows.length;
+            addedCostRows += added;
+            log(
+                `${date} 补丁完成 ${existing.length} → ${rows.length} 行（新增成本行 ${added}），毛利 ${actual.toFixed(2)}` +
+                    `${expected === null ? '' : ` vs 领星 ${expected.toFixed(2)}`}`
+            );
+        } catch (error) {
+            failures.push(`${date}: ${error.message.slice(0, 120)}`);
+            log(`✗ ${date} 补丁失败：${error.message.slice(0, 160)}`);
+        }
+    }
+
+    await postgrest('sync_runs', [{
+        started_at: startedAt,
+        finished_at: new Date().toISOString(),
+        range_from: range.from,
+        range_to: range.to,
+        status: failures.length ? 'failed' : 'ok',
+        rows_daily: patchedRows,
+        rows_period: 0,
+        cost_match_rate: null,
+        mcp_calls: calls,
+        duration_ms: Date.now() - Date.parse(startedAt),
+        warnings: [
+            `补丁模式：${patchedDays} 天已修正，新增成本行 ${addedCostRows}，跳过 ${skippedDays} 天`,
+            ...failures.slice(0, 50),
+        ],
+    }]);
+
+    log(`补丁汇总：${patchedDays} 天修正、${patchedRows} 行、新增成本行 ${addedCostRows}、跳过 ${skippedDays} 天、失败 ${failures.length} 天`);
+    if (failures.length) throw new Error(`${failures.length} 天补丁失败：${failures.slice(0, 5).join('；')}`);
+}
+
 async function main() {
     const startedAt = new Date().toISOString();
     const controls = FIXTURES ? { settings: { enabled: true, lookback_days: 3 }, fieldMappings: new Map() } : await loadControls();
@@ -244,14 +359,19 @@ async function main() {
     }
     const range = explicitRange ? { from: arg('from'), to: arg('to') } : defaultRange(CLI_DAYS || controls.settings.lookback_days || 3);
     const dates = datesBetween(range.from, range.to);
-    if (!dates.length || dates.length > 90) throw new Error('同步日期范围必须是 1–90 天');
+    if (!dates.length || dates.length > (PATCH ? 400 : 90)) throw new Error(`同步日期范围必须是 1–${PATCH ? 400 : 90} 天`);
     runContext = { startedAt, range };
-    log(`范围 ${range.from} ~ ${range.to}（${dates.length} 天），币种 ${CURRENCY}${FIXTURES ? '，离线模式' : ''}`);
+    log(`范围 ${range.from} ~ ${range.to}（${dates.length} 天），币种 ${CURRENCY}${FIXTURES ? '，离线模式' : ''}${PATCH ? '，补丁模式（只回填运费与成本行）' : ''}`);
 
     const shops = FIXTURES ? fixtureShops() : (await getClient().call('get_my_sids', null)).list || [];
     const activeShops = shops.filter((s) => !s.is_concept);
     const usedShops = SHOP_LIMIT > 0 ? activeShops.slice(0, SHOP_LIMIT) : activeShops;
     log(`店铺 ${usedShops.length} 个（总计 ${shops.length}，概念店铺已排除 ${shops.length - activeShops.length}）`);
+
+    if (PATCH) {
+        await runPatch({ dates, usedShops, startedAt, range });
+        return;
+    }
 
     const allRows = [];
     let rawPPRows = 0;
