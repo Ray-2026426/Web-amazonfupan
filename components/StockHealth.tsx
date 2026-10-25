@@ -1,7 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Boxes, PackageCheck, PackageX } from 'lucide-react';
 import type { DataRow } from '../types';
-import { formatNumber } from '../utils';
+import { amazonImageUrl, formatNumber } from '../utils';
+import { ImageLightbox, ProductImageThumb } from './ProductImageThumb';
 
 interface StockHealthProps {
     rows: DataRow[];
@@ -34,6 +35,7 @@ const BUCKETS: Record<Bucket, { label: string; chip: string; dot: string; hint: 
 };
 
 export const StockHealth: React.FC<StockHealthProps> = ({ rows }) => {
+    const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
     const { list, counts, maxDate } = useMemo(() => {
         if (rows.length === 0) return { list: [] as StockRow[], counts: { risk: 0, warn: 0, ok: 0, over: 0 }, maxDate: '' };
 
@@ -133,8 +135,16 @@ export const StockHealth: React.FC<StockHealthProps> = ({ rows }) => {
                         {visible.map(row => (
                             <tr key={row.key} className="hover:bg-slate-50/70">
                                 <td className="px-3 py-2">
-                                    <div className="font-mono text-[11px] text-slate-700">{row.asin}</div>
-                                    <div className="truncate text-[11px] text-slate-400">{row.name}{row.shop ? ` · ${row.shop}` : ''}</div>
+                                    <div className="flex items-center gap-2">
+                                        {(() => {
+                                            const imageUrl = amazonImageUrl(row.asin);
+                                            return imageUrl ? <ProductImageThumb url={imageUrl} onEnlarge={setLightboxUrl} /> : null;
+                                        })()}
+                                        <div className="min-w-0">
+                                            <div className="font-mono text-[11px] text-slate-700">{row.asin}</div>
+                                            <div className="truncate text-[11px] text-slate-400">{row.name}{row.shop ? ` · ${row.shop}` : ''}</div>
+                                        </div>
+                                    </div>
                                 </td>
                                 <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-700">{formatNumber(row.stock)}</td>
                                 <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-600">{row.avgDaily}</td>
@@ -160,6 +170,7 @@ export const StockHealth: React.FC<StockHealthProps> = ({ rows }) => {
                 共 {list.length} 个 ASIN，按可售天数从少到多排序{list.length > visible.length ? `，仅展示前 ${visible.length} 个` : ''}。
                 库存取区间最后一天的可售快照；新上架、无销量但仍有库存的 ASIN 会归入「积压」。
             </p>
+            <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
         </section>
     );
 };

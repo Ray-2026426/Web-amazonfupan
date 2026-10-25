@@ -26,27 +26,40 @@ export const buildProductImageLookup = (rows: ProductImageRow[]): ProductImageLo
     return { bySku, byProductName };
 };
 
-/** 按 SKU/ASIN 优先，再按品名匹配图片 */
+/**
+ * 亚马逊图床：只要有 ASIN 就能拼出主图，不需要上传任何图片表。
+ * 实测 https://m.media-amazon.com/images/P/{ASIN}.01._SL160_.jpg 直接 200（image/jpeg）。
+ * 少数变体/下架 ASIN 会 404，前端用 onError 兜底成占位块。
+ */
+export const amazonImageUrl = (asin: string | undefined | null, size: 60 | 160 | 500 = 160): string | null => {
+    const code = String(asin || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{10}$/.test(code)) return null;
+    return `https://m.media-amazon.com/images/P/${code}.01._SL${size}_.jpg`;
+};
+
+/** 按 SKU/ASIN 优先，再按品名匹配图片；都没有时用 ASIN 拼亚马逊图床 */
 export const resolveProductImage = (
     lookup: ProductImageLookup | null | undefined,
     opts: { sku?: string; asin?: string; productName?: string }
 ): string | null => {
-    if (!lookup) return null;
-    const skuKeys = [opts.sku, opts.asin].filter(Boolean) as string[];
-    for (const k of skuKeys) {
-        const hit = lookup.bySku.get(normImageKey(k));
-        if (hit) return hit;
-    }
-    if (opts.productName) {
-        const pn = normImageKey(opts.productName);
-        if (pn && pn !== 'unknown' && pn !== '-') {
-            const byName = lookup.byProductName.get(pn);
-            if (byName) return byName;
-            const bySkuAsName = lookup.bySku.get(pn);
-            if (bySkuAsName) return bySkuAsName;
+    if (lookup) {
+        const skuKeys = [opts.sku, opts.asin].filter(Boolean) as string[];
+        for (const k of skuKeys) {
+            const hit = lookup.bySku.get(normImageKey(k));
+            if (hit) return hit;
+        }
+        if (opts.productName) {
+            const pn = normImageKey(opts.productName);
+            if (pn && pn !== 'unknown' && pn !== '-') {
+                const byName = lookup.byProductName.get(pn);
+                if (byName) return byName;
+                const bySkuAsName = lookup.bySku.get(pn);
+                if (bySkuAsName) return bySkuAsName;
+            }
         }
     }
-    return null;
+    // 兜底：亚马逊图床（上传的对照表优先，其次按 ASIN 推断）
+    return amazonImageUrl(opts.asin) || amazonImageUrl(opts.sku);
 };
 
 /** 从子表一行维度里解析图片（品名 / 子ASIN / 父ASIN 依次尝试） */

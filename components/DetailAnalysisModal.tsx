@@ -435,7 +435,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
     const isDailyMode = periodMode === 'day';
 
     const resolveDimImage = (dimKey: string, dimensions: Record<string, string>, displayVal: string): string | null => {
-        if (!productImageLookup || !displayVal || displayVal.startsWith('共 ')) return null;
+        if (!displayVal || displayVal.startsWith('共 ')) return null;
         if (dimKey === 'product_name') {
             return resolveProductImage(productImageLookup, {
                 productName: displayVal,
@@ -468,7 +468,7 @@ export const DetailAnalysisModal: React.FC<DetailAnalysisModalProps> = ({
         dimensions: Record<string, string>,
         displayVal: string
     ): React.ReactNode => {
-        if (!thumbDimKey || dimKey !== thumbDimKey || !productImageLookup) return null;
+        if (!thumbDimKey || dimKey !== thumbDimKey) return null;
         const url = resolveDimImage(dimKey, dimensions, displayVal);
         if (!url) return null;
         return <ProductImageThumb url={url} onEnlarge={setLightboxUrl} />;

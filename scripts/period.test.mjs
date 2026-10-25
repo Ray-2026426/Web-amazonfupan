@@ -167,3 +167,18 @@ test('目标分摊与展示都取整', () => {
   assert.equal(utils.formatNumber(32.258064516), '32');
   assert.equal(utils.formatNumber(10), '10');
 });
+
+test('没有上传图片表时，按 ASIN 兜底亚马逊图床', () => {
+  // 合法 ASIN → 直接拼出主图
+  assert.equal(utils.amazonImageUrl('B08N5WRWNW'), 'https://m.media-amazon.com/images/P/B08N5WRWNW.01._SL160_.jpg');
+  // 非 10 位字母数字 → 不生成，避免请求垃圾地址
+  assert.equal(utils.amazonImageUrl('B0SAMPLE'), null);
+  assert.equal(utils.amazonImageUrl(''), null);
+  // lookup 为空时走兜底；有上传数据时上传优先
+  assert.equal(
+    utils.resolveProductImage(null, { asin: 'B07FZ8S74R' }),
+    'https://m.media-amazon.com/images/P/B07FZ8S74R.01._SL160_.jpg',
+  );
+  const lookup = { bySku: new Map([['b07fz8s74r', 'https://my-cdn/x.jpg']]), byProductName: new Map() };
+  assert.equal(utils.resolveProductImage(lookup, { asin: 'B07FZ8S74R' }), 'https://my-cdn/x.jpg');
+});
