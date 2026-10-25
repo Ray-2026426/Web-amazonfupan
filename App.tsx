@@ -188,6 +188,25 @@ const App: React.FC = () => {
     try { localStorage.setItem('amazon-dashboard-fba-fee-adjust', addBackFbaFee ? '1' : '0'); } catch { /* 忽略 */ }
   }, [addBackFbaFee]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /** 桌面端（≥1280px）独立记录是否折叠，和移动端抽屉互不影响 */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('amazon-dashboard-sidebar-collapsed') === '1'; } catch { return false; }
+  });
+  const [isDesktop, setIsDesktop] = useState(() => (typeof window === 'undefined' ? true : window.matchMedia('(min-width: 1280px)').matches));
+  useEffect(() => {
+    try { localStorage.setItem('amazon-dashboard-sidebar-collapsed', sidebarCollapsed ? '1' : '0'); } catch { /* 忽略 */ }
+  }, [sidebarCollapsed]);
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 1280px)');
+    const onChange = (event: MediaQueryListEvent) => setIsDesktop(event.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  const sidebarVisible = isDesktop ? !sidebarCollapsed : sidebarOpen;
+  const toggleSidebar = () => {
+    if (isDesktop) setSidebarCollapsed(value => !value);
+    else setSidebarOpen(value => !value);
+  };
   const [chatLoaded, setChatLoaded] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isRestoringData, setIsRestoringData] = useState(true);
@@ -673,7 +692,7 @@ const App: React.FC = () => {
   return (
     <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#e0f2fe_0%,#eff6ff_22%,#f8fafc_52%,#f8fafc_100%)] font-sans text-slate-900">
       {sidebarOpen && <button type="button" aria-label="关闭筛选侧栏" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-slate-950/50 xl:hidden" />}
-      <div className={`fixed inset-y-0 left-0 z-40 transition-transform xl:relative xl:z-20 xl:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className={`fixed inset-y-0 left-0 z-40 transition-transform xl:relative xl:z-20 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} ${sidebarCollapsed ? 'xl:hidden' : 'xl:translate-x-0'}`}>
       <SidebarFilters 
         data={activeRawData}
         inventoryData={inventoryData}
@@ -694,7 +713,7 @@ const App: React.FC = () => {
         {/* Top Bar */}
         <header className="relative z-10 mx-3 mt-3 flex flex-shrink-0 flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/70 bg-white/85 px-4 py-3 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
             <div className="flex items-center gap-5">
-                <button type="button" aria-label={sidebarOpen ? '关闭筛选侧栏' : '打开筛选侧栏'} onClick={() => setSidebarOpen(v => !v)} className="rounded-xl border border-slate-200 p-2 text-slate-700 xl:hidden">{sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}</button>
+                <button type="button" aria-label={sidebarVisible ? '隐藏筛选侧栏' : '显示筛选侧栏'} title={sidebarVisible ? '隐藏筛选侧栏' : '显示筛选侧栏'} onClick={toggleSidebar} className="rounded-xl border border-slate-200 p-2 text-slate-700 transition hover:border-sky-300 hover:text-sky-700">{sidebarVisible ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}</button>
                 <div className="flex items-center gap-3">
                     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0f172a_0%,#2563eb_100%)] text-white shadow-lg shadow-sky-500/20">
                         <LayoutDashboard className="w-5 h-5" />
