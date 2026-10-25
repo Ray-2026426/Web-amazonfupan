@@ -356,6 +356,16 @@ const App: React.FC = () => {
               setCloudStatus(issues.join(' · '));
               setDataEndDate(freshness.latest_date);
               setLastImportedAt(freshness.latestRun?.finished_at ? Date.parse(freshness.latestRun.finished_at) : undefined);
+              // 商品图片表存在云端：连上就自动加载，本地已有时不重复拉
+              if (productImageData.length === 0) {
+                  fetch('/api/product-images', { headers: { Authorization: `Bearer ${cloudToken}` } })
+                      .then(response => (response.ok ? response.json() : null))
+                      .then(payload => {
+                          const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+                          if (rows.length) setProductImageData(rows);
+                      })
+                      .catch(() => { /* 图片表没建也不影响主流程 */ });
+              }
           } catch (error) {
               if (controller.signal.aborted) return;
               const message = String(error instanceof Error ? error.message : error);

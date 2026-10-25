@@ -374,3 +374,57 @@ end;
 $$;
 revoke all on function public.activate_target_import(uuid) from public, anon, authenticated;
 grant execute on function public.activate_target_import(uuid) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 商品图片表：上传一次常驻云端，看板每次打开自动读取（不再依赖本地导入）
+-- ---------------------------------------------------------------------------
+create table if not exists product_image_imports (
+    id uuid primary key,
+    source_filename text,
+    expected_rows integer not null,
+    rows_count integer,
+    status text not null check (status in ('staging', 'active', 'archived')) default 'staging',
+    active boolean not null default false,
+    activated_at timestamptz
+);
+create unique index if not exists idx_image_import_one_active on product_image_imports (active) where active;
+
+create table if not exists product_images (
+    id bigserial primary key,
+    import_id uuid not null,
+    sku text,
+    product_name text,
+    image_url text not null,
+    updated_at timestamptz not null default now()
+);
+create index if not exists idx_product_images_import on product_images (import_id);
+
+alter table product_images enable row level security;
+alter table product_image_imports enable row level security;
+revoke all on table product_images, product_image_imports from anon, authenticated;
+grant select, insert, update, delete on table product_images, product_image_imports to service_role;
+grant usage, select on sequence product_images_id_seq to service_role;
+
+-- 激活：行数校验 → 旧批次标归档 → 清理旧图片 → 新批次生效
+create or replace function public.activate_image_import(p_id uuid)
+returns integer
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+    expected integer;
+    actual integer;
+begin
+    select expected_rows into expected from product_image_imports where id = p_id and status = 'staging' for update;
+    if expected is null then raise exception 'image import not found or already activated'; end if;
+    select count(*) into actual from product_images where import_id = p_id;
+    if actual <> expected then raise exception 'image import incomplete: % of % rows', actual, expected; end if;
+    update product_image_imports set active = false, status = 'archived' where active;
+    update product_image_imports set active = true, status = 'active', rows_count = actual, activated_at = now() where id = p_id;
+    delete from product_images where import_id <> p_id;
+    return actual;
+end;
+$$;
+revoke all on function public.activate_image_import(uuid) from public, anon, authenticated;
+grant execute on function public.activate_image_import(uuid) to service_role;

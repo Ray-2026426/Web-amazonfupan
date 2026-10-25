@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { parseTargetData } from '../dataLoader';
+import { parseProductImageData, parseTargetData } from '../dataLoader';
 import { enrichTargetData } from '../utils';
 import { dailyCsvHeader, dailyCsvRows, dailyExportMatrix, type ExportLabels } from '../dailyExport';
 import { FIELD_GROUPS, FIELD_MAPPINGS } from '../shared/field-mapping.mjs';
 import { useEscClose } from './useEscClose';
-import { AlertCircle, CheckCircle2, Database, Download, RefreshCw, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Upload, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Database, Download, Images, RefreshCw, RotateCcw, Save, Search, Settings2, ShieldCheck, Table2, Upload, X } from 'lucide-react';
 
 type FieldMapping = { web_field: string; export_label: string; lingxing_field: string };
 type Run = { id: number; started_at: string; range_from: string; range_to: string; status: string; rows_daily: number; error: string | null };
@@ -20,17 +20,19 @@ type AdminData = {
   sampleDate: string | null;
   data: Sample[];
   targetImport: { id: string; source_filename: string; expected_rows: number; activated_at: string; covered_shops?: number | null; covered_asins?: number | null; months?: string | null } | null;
+  imageImport?: { id: string; source_filename: string; expected_rows: number; rows_count?: number | null; activated_at: string } | null;
 };
 
 const TOKEN_KEY = 'amazon-dashboard-admin-token';
 
 /** 映射表字段较多，按分组展示，并支持关键字过滤 */
-type Tab = 'overview' | 'quality' | 'fields' | 'targets' | 'data';
+type Tab = 'overview' | 'quality' | 'fields' | 'targets' | 'images' | 'data';
 const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   { key: 'overview', label: '概览', icon: <Settings2 className="h-3.5 w-3.5" /> },
   { key: 'quality', label: '数据质量', icon: <ShieldCheck className="h-3.5 w-3.5" /> },
   { key: 'fields', label: '字段映射', icon: <Table2 className="h-3.5 w-3.5" /> },
   { key: 'targets', label: '目标表', icon: <Database className="h-3.5 w-3.5" /> },
+  { key: 'images', label: '商品图片', icon: <Images className="h-3.5 w-3.5" /> },
   { key: 'data', label: '数据下载', icon: <Download className="h-3.5 w-3.5" /> },
 ];
 
@@ -48,6 +50,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [targetFile, setTargetFile] = useState<File | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [progress, setProgress] = useState('');
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
@@ -175,6 +178,44 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
       setProgress('');
       setMessage(`目标表已保存：${rows.length} 行，覆盖 ${shopSet.size} 个店铺 / ${asinSet.size} 个 ASIN${monthLabel ? `（${monthLabel}）` : ''}。`);
       onTargetsUpdated?.();
+    } catch (error) {
+      setProgress('');
+      setMessage(String(error instanceof Error ? error.message : error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 商品图片表：上传一次常驻云端，看板每次打开自动读取（不用重复上传） */
+  const uploadImages = async () => {
+    if (!imageFile) return;
+    setBusy(true);
+    setMessage('');
+    setProgress('正在解析图片表…');
+    try {
+      const parsed = await parseProductImageData(imageFile);
+      const rows = (parsed.data || []).filter(row => row.image_url && /^https?:\/\//i.test(String(row.image_url).trim()));
+      if (!rows.length) throw new Error('图片表里没有有效的图片链接（需要 sku / 品名 / 图片URL 三列之一有值）');
+      const started = await request('POST', { action: 'images_start', source_filename: imageFile.name, expected_rows: rows.length }) as { import_id: string };
+      const size = 400;
+      for (let offset = 0; offset < rows.length; offset += size) {
+        await request('POST', {
+          action: 'images_batch',
+          import_id: started.import_id,
+          rows: rows.slice(offset, offset + size).map(row => ({
+            sku: row.sku || '',
+            product_name: row.product_name || '',
+            image_url: row.image_url,
+          })),
+        });
+        setProgress(`已上传 ${Math.min(offset + size, rows.length)} / ${rows.length} 行`);
+      }
+      await request('POST', { action: 'images_activate', import_id: started.import_id });
+      const refreshed = await request('GET') as AdminData;
+      setData(refreshed);
+      setImageFile(null);
+      setProgress('');
+      setMessage(`商品图片已保存到云端：${rows.length} 行。以后打开看板会自动加载，不用再上传。`);
     } catch (error) {
       setProgress('');
       setMessage(String(error instanceof Error ? error.message : error));
@@ -857,6 +898,30 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                   <button className={`${primaryClass} mt-3`} disabled={busy || !targetFile} onClick={() => void uploadTargets()}>
                     <Upload className="h-3.5 w-3.5" />上传并启用
                   </button>
+                </section>
+              </div>}
+
+              {tab === 'images' && <div className="space-y-4">
+                <section className={cardClass}>
+                  <h3 className={sectionTitle}>当前生效的图片表</h3>
+                  {data.imageImport ? (
+                    <p className={`${sectionHint} text-slate-700`}>
+                      {data.imageImport.source_filename} · {data.imageImport.rows_count ?? data.imageImport.expected_rows} 行 · {new Date(data.imageImport.activated_at).toLocaleString('zh-CN')} 上传
+                    </p>
+                  ) : <p className={sectionHint}>还没有上传过图片表。上传后所有设备打开看板都会自动带上图片，不需要再传。</p>}
+                </section>
+                <section className={cardClass}>
+                  <h3 className={sectionTitle}>上传或替换</h3>
+                  <p className={sectionHint}>
+                    表头需要包含 <code className="font-mono text-slate-700">sku</code>（也可用 ASIN）、<code className="font-mono text-slate-700">品名</code>、
+                    <code className="font-mono text-slate-700">图片URL</code> 三列中的至少一列 + 图片链接列；匹配时 sku/ASIN 优先，其次按品名。
+                    上传成功后整体替换旧版本，图片显示以下钻时选「品名 / 子ASIN / 父ASIN」维度为准。
+                  </p>
+                  <input className={`${inputClass} mt-4 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-700`} type="file" accept=".xlsx,.xls,.csv" onChange={event => setImageFile(event.target.files?.[0] || null)} />
+                  <button className={`${primaryClass} mt-3`} disabled={busy || !imageFile} onClick={() => void uploadImages()}>
+                    <Upload className="h-3.5 w-3.5" />上传并启用
+                  </button>
+                  {progress && <p className={`${sectionHint} mt-2`}>{progress}</p>}
                 </section>
               </div>}
 

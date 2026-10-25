@@ -99,6 +99,45 @@ async function save(body) {
       await writeTable('rpc/activate_target_import', 'POST', { p_id: id });
       return { activated: true };
     }
+    /* ---------- 商品图片表（云端常驻，上传一次即可） ---------- */
+    case 'images_start': {
+      const expectedRows = Number(body.expected_rows);
+      if (!Number.isInteger(expectedRows) || expectedRows < 1 || expectedRows > 100000) {
+        throw Object.assign(new Error('图片表有效行数须为 1–100000'), { status: 400 });
+      }
+      const id = randomUUID();
+      await writeTable('product_image_imports', 'POST', {
+        id,
+        source_filename: clean(body.source_filename, '文件名', 200),
+        expected_rows: expectedRows,
+        status: 'staging',
+        active: false,
+      });
+      return { import_id: id };
+    }
+    case 'images_batch': {
+      const id = String(body.import_id || '');
+      if (!uuidPattern.test(id) || !Array.isArray(body.rows) || body.rows.length < 1 || body.rows.length > 500) {
+        throw Object.assign(new Error('图片表上传批次无效'), { status: 400 });
+      }
+      const imports = await fetchTable('product_image_imports', { select: 'id,status', id: `eq.${id}` }, 1);
+      if (imports[0]?.status !== 'staging') throw Object.assign(new Error('图片表上传批次已失效'), { status: 400 });
+      const rows = body.rows.map((item) => {
+        const sku = String(item?.sku || '').trim().slice(0, 120);
+        const productName = String(item?.product_name || '').trim().slice(0, 300);
+        const imageUrl = String(item?.image_url || '').trim().slice(0, 2000);
+        if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) throw Object.assign(new Error('图片链接无效'), { status: 400 });
+        return { import_id: id, sku: sku || null, product_name: productName || null, image_url: imageUrl };
+      });
+      await writeTable('product_images', 'POST', rows);
+      return { uploaded: rows.length };
+    }
+    case 'images_activate': {
+      const id = String(body.import_id || '');
+      if (!uuidPattern.test(id)) throw Object.assign(new Error('图片表上传批次无效'), { status: 400 });
+      await writeTable('rpc/activate_image_import', 'POST', { p_id: id });
+      return { activated: true };
+    }
     default:
       throw Object.assign(new Error('未知管理操作'), { status: 400 });
   }
@@ -117,13 +156,14 @@ export default async function handler(req, res) {
       const mappingsResult = await fetchTable('field_mappings', { select: 'web_field,export_label,lingxing_field' }, 100)
         .then((rows) => ({ rows, ready: true }))
         .catch(() => ({ rows: [], ready: false }));
-      const [settings, runs, latest, targetImports, syncRequests] = await Promise.all([
+      const [settings, runs, latest, targetImports, syncRequests, imageImports] = await Promise.all([
         fetchTable('sync_settings', { select: '*', id: 'eq.1' }, 1),
         fetchTable('sync_runs', { select: '*', order: 'started_at.desc' }, 10),
         fetchTable('fact_daily', { select: 'date', order: 'date.desc' }, 1),
         fetchTable('target_imports', { select: '*', active: 'eq.true' }, 1),
         // 补数队列：还没建表时忽略，不影响面板其它部分
         fetchTable('sync_requests', { select: 'id,dates,status,created_at,processed_at,note', order: 'created_at.desc' }, 15).catch(() => []),
+        fetchTable('product_image_imports', { select: '*', active: 'eq.true' }, 1).catch(() => []),
       ]);
       const fieldMappings = mappingsResult.ready
         ? mappingsResult.rows
@@ -133,7 +173,7 @@ export default async function handler(req, res) {
         select: 'date,sid,asin,shop_name,product_name,sales_amount,gross_profit,ad_spend',
         date: `eq.${sampleDate}`, order: 'sales_amount.desc',
       }, 100) : [];
-      return res.status(200).json({ settings: settings[0] || null, fieldMappings, fieldMappingReady: mappingsResult.ready, runs, syncRequests, sampleDate, data, targetImport: targetImports[0] || null });
+      return res.status(200).json({ settings: settings[0] || null, fieldMappings, fieldMappingReady: mappingsResult.ready, runs, syncRequests, sampleDate, data, targetImport: targetImports[0] || null, imageImport: imageImports[0] || null });
     }
     if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
