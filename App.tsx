@@ -24,6 +24,7 @@ import {
 import { SidebarFilters } from './components/SidebarFilters';
 import { DashboardOverview } from './components/DashboardOverview';
 import { PLTable, TrafficTable } from './components/TableRenderers';
+import { LoadingBar } from './components/LoadingBar';
 import { InventoryTable } from './components/InventoryTable';
 import { DataUploadModal, type DataUploadResult } from './components/DataUploadModal';
 import { resetTrendChartMetricsSelection } from './components/trendSelection';
@@ -762,6 +763,7 @@ const App: React.FC = () => {
                     <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
                     <p className="text-lg font-semibold text-slate-700">正在恢复数据...</p>
                     <p className="mt-1 text-sm text-slate-500">从本地缓存读取中</p>
+                    <LoadingBar className="mt-5" />
                 </div>
             ) : (
                 <div className="max-w-[1680px] mx-auto space-y-6 pb-20">
@@ -856,6 +858,7 @@ const App: React.FC = () => {
                                 <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
                                 <p className="text-lg font-semibold text-slate-700">正在加载数据…</p>
                                 <p className="mt-1 text-sm text-slate-500">{cloudConnected ? '正在从云端读取业绩数据' : '正在连接云端数据'}</p>
+                                <LoadingBar className="mt-6" />
                             </div>
                         ) : (
                             <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">

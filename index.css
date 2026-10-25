@@ -130,3 +130,24 @@ tbody > tr {
   content-visibility: auto;
   contain-intrinsic-size: 40px;
 }
+
+/* ------------------------------------------------------------------ *
+ * 加载进度条（不确定时长）：光带从左到右循环滑动。
+ * 纯 CSS，不占 JS 线程；prefers-reduced-motion 下会自动降级为静态。
+ * ------------------------------------------------------------------ */
+.loading-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 42%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #7dd3fc 0%, #38bdf8 45%, #0284c7 100%);
+  box-shadow: 0 0 12px rgba(2, 132, 199, 0.35);
+  animation: loading-bar-slide 1.35s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: transform;
+}
+
+@keyframes loading-bar-slide {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(260%); }
+}
