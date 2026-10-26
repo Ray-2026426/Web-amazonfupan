@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import { formatNumber } from '../utils';
 
 export type DataTableColumn<T> = {
@@ -12,6 +13,8 @@ export type DataTableColumn<T> = {
     bar?: (row: T) => number | null;
     /** 迷你条颜色 */
     barClass?: string;
+    /** 可排序列：返回排序用的数值/字符串 */
+    sortValue?: (row: T) => number | string;
 };
 
 interface DataTableProps<T> {
@@ -24,10 +27,29 @@ interface DataTableProps<T> {
 }
 
 /**
- * 统一数据表：表头吸顶、首列粘性、数字右对齐等宽、可选迷你条形。
+ * 统一数据表：表头吸顶、首列粘性、数字右对齐等宽、可选迷你条形、点表头排序。
  * 目的：以后加表只写列配置，不再各自复制一套表头/边框/滚动样式。
  */
 export function DataTable<T>({ rows, columns, rowKey, emptyText = '暂无数据', maxHeight }: DataTableProps<T>) {
+    const [sortKey, setSortKey] = useState<string | null>(null);
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+    const sorted = useMemo(() => {
+        const column = columns.find(item => item.key === sortKey);
+        if (!column?.sortValue) return rows;
+        const copy = [...rows];
+        copy.sort((a, b) => {
+            const left = column.sortValue!(a);
+            const right = column.sortValue!(b);
+            if (typeof left === 'number' && typeof right === 'number') {
+                return sortDir === 'asc' ? left - right : right - left;
+            }
+            const text = String(left).localeCompare(String(right));
+            return sortDir === 'asc' ? text : -text;
+        });
+        return copy;
+    }, [rows, columns, sortKey, sortDir]);
+
     if (rows.length === 0) {
         return <p className="px-3 py-6 text-center text-xs text-slate-400">{emptyText}</p>;
     }
@@ -54,13 +76,32 @@ export function DataTable<T>({ rows, columns, rowKey, emptyText = '暂无数据'
                                 style={column.width ? { width: column.width } : undefined}
                                 className={`whitespace-nowrap px-3 py-2 text-[11px] font-medium ${column.align === 'right' ? 'text-right' : 'text-left'}`}
                             >
-                                {column.title}
+                                {column.sortValue ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (sortKey === column.key) {
+                                                setSortDir(prev => (prev === 'desc' ? 'asc' : 'desc'));
+                                            } else {
+                                                setSortKey(column.key);
+                                                setSortDir('desc');
+                                            }
+                                        }}
+                                        className={`inline-flex items-center gap-0.5 transition hover:text-slate-800 ${sortKey === column.key ? 'text-slate-800' : ''}`}
+                                        title="点击排序"
+                                    >
+                                        {column.title}
+                                        {sortKey === column.key
+                                            ? (sortDir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />)
+                                            : <ArrowDown className="h-3 w-3 opacity-20" />}
+                                    </button>
+                                ) : column.title}
                             </th>
                         ))}
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                    {rows.map((row, index) => (
+                    {sorted.map((row, index) => (
                         <tr key={rowKey(row, index)} className="transition-colors hover:bg-sky-50/60">
                             {columns.map(column => {
                                 const barValue = column.bar ? column.bar(row) : null;

@@ -280,23 +280,32 @@ const WeeklyMetricCard = ({
 };
 
 /** 迷你趋势线：纯 SVG，无图表库依赖，首屏不额外拉分包 */
-const Sparkline: React.FC<{ values: number[] }> = ({ values }) => {
+const Sparkline: React.FC<{ values: number[]; labels?: string[] }> = ({ values, labels }) => {
     if (values.length < 2) {
         return <div className="flex h-full items-center justify-end text-[10px] text-slate-400">数据不足，无法画趋势</div>;
     }
     const max = Math.max(...values);
     const min = Math.min(...values);
     const span = max - min || 1;
-    const points = values.map((value, index) => {
+    const coords = values.map((value, index) => {
         const x = (index / (values.length - 1)) * 100;
         const y = 26 - ((value - min) / span) * 22;
-        return `${x.toFixed(2)},${y.toFixed(2)}`;
+        return { x, y, value, index };
     });
+    const points = coords.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`);
     const area = `0,30 ${points.join(' ')} 100,30`;
+    // 异常点：负值画红点，便于一眼看到哪天/哪期为负
+    const anomalies = coords.filter(point => point.value < 0);
     return (
         <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="h-full w-full" aria-hidden="true">
             <polygon points={area} fill="url(#spark-fill)" />
             <polyline points={points.join(' ')} fill="none" stroke="#0ea5e9" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+            {anomalies.map(point => (
+                <g key={point.index}>
+                    <circle cx={point.x} cy={point.y} r="2.4" fill="#f43f5e" vectorEffect="non-scaling-stroke" />
+                    {labels?.[point.index] && <title>{`${labels[point.index]}：${point.value.toFixed(0)}`}</title>}
+                </g>
+            ))}
             <defs>
                 <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.22" />
@@ -332,18 +341,17 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
     };
 
     /** 主指标近 30 天的日序列（云端日明细；本地月报只有月粒度，画不出趋势就留空） */
-    const sparkValues = useMemo(() => {
-        if (!rawData.length) return [];
+    const sparkSeries = useMemo(() => {
+        if (!rawData.length) return { values: [] as number[], labels: [] as string[] };
         const byDate = new Map<string, number>();
         for (const row of rawData) {
             const value = mainMetric === 'sales_amount' ? Number(row.sales_amount) || 0 : Number(row.gross_profit) || 0;
             byDate.set(row.date, (byDate.get(row.date) || 0) + value);
         }
-        return [...byDate.entries()]
-            .sort((a, b) => a[0].localeCompare(b[0]))
-            .slice(-30)
-            .map(([, value]) => value);
+        const entries = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-30);
+        return { values: entries.map(([, value]) => value), labels: entries.map(([date]) => date) };
     }, [rawData, mainMetric]);
+    const sparkValues = sparkSeries.values;
 
     const mainValue = mainMetric === 'sales_amount' ? current.sales_amount : current.gross_profit;
     const mainTarget = mainMetric === 'sales_amount' ? target.sales_amount : target.gross_profit;
@@ -539,7 +547,7 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
                             </div>
                         </div>
                         <div className="h-14 w-full max-w-[280px] shrink-0">
-                            <Sparkline values={sparkValues} />
+                            <Sparkline values={sparkValues} labels={sparkSeries.labels} />
                         </div>
                     </div>
 

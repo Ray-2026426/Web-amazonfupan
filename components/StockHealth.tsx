@@ -156,18 +156,21 @@ export const StockHealth: React.FC<StockHealthProps> = ({ rows, onFocusAsin }) =
                             title: '可售库存',
                             align: 'right',
                             bar: row => row.stock,
+                            sortValue: row => row.stock,
                             render: row => <span className="text-slate-700">{formatNumber(row.stock)}</span>,
                         },
                         {
                             key: 'avg',
                             title: '日均销量',
                             align: 'right',
+                            sortValue: row => row.avgDaily,
                             render: row => <span className="text-slate-600">{row.avgDaily}</span>,
                         },
                         {
                             key: 'days',
                             title: '可售天数',
                             align: 'right',
+                            sortValue: row => (Number.isFinite(row.days) ? row.days : 99999),
                             render: row => (
                                 <span className={`font-semibold ${
                                     row.bucket === 'risk' ? 'text-rose-600'
