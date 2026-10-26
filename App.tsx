@@ -24,7 +24,7 @@ import {
 } from './utils';
 import { SidebarFilters } from './components/SidebarFilters';
 import { DashboardOverview } from './components/DashboardOverview';
-import { PLTable, TrafficTable } from './components/TableRenderers';
+import { MetricCompareTable, PL_METRICS, TRAFFIC_METRICS } from './components/MetricCompareTable';
 import { LoadingBar } from './components/LoadingBar';
 import { lazyWithRetry } from './components/lazyWithRetry';
 import { CommandPalette, type CommandAction } from './components/CommandPalette';
@@ -1178,16 +1178,17 @@ const App: React.FC = () => {
 
                     {/* 2. PL Table */}
                     {processedData && (
-                        <section id="pl"><PLTable 
-                            current={processedData.current}
-                            last={processedData.last}
-                            year={processedData.year}
-                            target={processedData.target}
-                            onOpenDetail={() => { setDetailType('PL'); setDetailModalOpen(true); }}
-                            onOpenCalculator={() => handleOpenCalculator()}
-                            onOpenRefundAnalysis={() => handleOpenRefundAnalysis()}
-                            onOpenReviewAnalysis={() => setReviewModalOpen(true)}
-                        /></section>
+                        <section id="pl">
+                            <MetricCompareTable
+                                title="利润表"
+                                rows={PL_METRICS}
+                                current={processedData.current}
+                                last={processedData.last}
+                                year={processedData.year}
+                                target={processedData.target}
+                                onOpenDetail={() => { setDetailType('PL'); setDetailModalOpen(true); }}
+                            />
+                        </section>
                     )}
 
                     {/* 2.5 毛利瀑布：销售额一路减到毛利，并拆出变化来自「量」还是「率」 */}
@@ -1217,14 +1218,17 @@ const App: React.FC = () => {
 
                     {/* 3. Traffic Table */}
                     {processedData && (
-                        <section id="traffic"><TrafficTable 
-                            current={processedData.current}
-                            last={processedData.last}
-                            year={processedData.year}
-                            target={processedData.target}
-                            onOpenDetail={() => { setDetailType('Traffic'); setDetailModalOpen(true); }}
-                            onOpenKeywordAnalysis={() => setKeywordModalOpen(true)}
-                        /></section>
+                        <section id="traffic">
+                            <MetricCompareTable
+                                title="流量与广告"
+                                rows={TRAFFIC_METRICS}
+                                current={processedData.current}
+                                last={processedData.last}
+                                year={processedData.year}
+                                target={processedData.target}
+                                onOpenDetail={() => { setDetailType('Traffic'); setDetailModalOpen(true); }}
+                            />
+                        </section>
                     )}
 
                     {/* 4. Inventory Table */}
