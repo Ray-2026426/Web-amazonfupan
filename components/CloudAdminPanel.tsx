@@ -38,7 +38,7 @@ const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
 ];
 
 type CoverageDay = { date: string; rows: number; sales_amount: number; gross_profit: number; updated_at: string; diff_ratio?: number | null };
-type DayStatus = 'ok' | 'empty' | 'missing' | 'anomaly';
+type DayStatus = 'ok' | 'empty' | 'missing' | 'anomaly' | 'watch';
 type CalendarCell = { date: string; day: number; status: DayStatus; info?: CoverageDay } | null;
 
 export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?: () => void; initialTab?: Tab }> = ({ onClose, onTargetsUpdated, initialTab }) => {
@@ -363,26 +363,31 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
     };
   }, [coverage]);
 
-  /** 异常判定：对账差异 >2%、亏损日、销售额或行数明显低于中位数 */
-  const anomalyReasons = (info: CoverageDay | undefined): string[] => {
-    if (!info) return [];
-    const reasons: string[] = [];
+  /**
+   * 异常判定分两类——这是之前最容易被误解的地方：
+   *   数据异常（红）：与领星对账差异 >2%、行数明显偏少 → 数据本身有问题，补数有意义
+   *   经营异常（紫）：亏损日、销售额骤降 → 数据是对的，属于业务问题，补数不会变
+   */
+  const anomalyReasons = (info: CoverageDay | undefined): { data: string[]; business: string[] } => {
+    if (!info) return { data: [], business: [] };
+    const data: string[] = [];
+    const business: string[] = [];
     const sales = Number(info.sales_amount);
     const profit = Number(info.gross_profit);
     const rows = Number(info.rows);
     if (info.diff_ratio !== null && info.diff_ratio !== undefined && Math.abs(Number(info.diff_ratio)) > 0.02) {
-      reasons.push(`与领星毛利差异 ${(Number(info.diff_ratio) * 100).toFixed(1)}%`);
-    }
-    if (sales > 0 && profit < 0 && profit / sales < -0.1) {
-      reasons.push(`当日亏损（毛利率 ${((profit / sales) * 100).toFixed(0)}%）`);
-    }
-    if (baseline.sales > 0 && sales > 0 && sales < baseline.sales * 0.4) {
-      reasons.push(`销售额仅为中位数的 ${((sales / baseline.sales) * 100).toFixed(0)}%`);
+      data.push(`与领星毛利差异 ${(Number(info.diff_ratio) * 100).toFixed(1)}%`);
     }
     if (baseline.rows > 0 && rows > 0 && rows < baseline.rows * 0.5) {
-      reasons.push(`行数仅为中位数的 ${((rows / baseline.rows) * 100).toFixed(0)}%`);
+      data.push(`行数仅为中位数的 ${((rows / baseline.rows) * 100).toFixed(0)}%`);
     }
-    return reasons;
+    if (sales > 0 && profit < 0 && profit / sales < -0.1) {
+      business.push(`当日亏损（毛利率 ${((profit / sales) * 100).toFixed(0)}%）`);
+    }
+    if (baseline.sales > 0 && sales > 0 && sales < baseline.sales * 0.4) {
+      business.push(`销售额仅为中位数的 ${((sales / baseline.sales) * 100).toFixed(0)}%`);
+    }
+    return { data, business };
   };
 
   const calendar = useMemo<{ key: string; label: string; cells: CalendarCell[] }[]>(() => {
@@ -400,13 +405,16 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
         const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         if (date < coverage.from || date > coverage.to) { cells.push(null); continue; }
         const info = coverageMap.get(date);
+        const reasons = anomalyReasons(info);
         const status: DayStatus = !info
           ? 'missing'
           : Number(info.sales_amount) === 0
             ? 'empty'
-            : anomalyReasons(info).length
+            : reasons.data.length
               ? 'anomaly'
-              : 'ok';
+              : reasons.business.length
+                ? 'watch'
+                : 'ok';
         cells.push({ date, day, status, info });
       }
       out.push({ key: `${year}-${month}`, label: `${year} 年 ${month + 1} 月`, cells });
@@ -419,6 +427,7 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
     let ok = 0;
     let empty = 0;
     let anomaly = 0;
+    let watch = 0;
     const missingDates: string[] = [];
     for (const month of calendar) {
       for (const cell of month.cells) {
@@ -426,10 +435,11 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
         if (cell.status === 'ok') ok += 1;
         else if (cell.status === 'empty') empty += 1;
         else if (cell.status === 'anomaly') anomaly += 1;
+        else if (cell.status === 'watch') watch += 1;
         else missingDates.push(cell.date);
       }
     }
-    return { ok, empty, anomaly, missing: missingDates.length, missingDates };
+    return { ok, empty, anomaly, watch, missing: missingDates.length, missingDates };
   }, [calendar]);
 
   const toggleDate = (date: string) => setSelected(prev => {
@@ -474,7 +484,9 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
         ? 'bg-amber-50 text-amber-700 ring-amber-100 hover:ring-amber-300'
         : status === 'anomaly'
           ? 'bg-rose-50 text-rose-700 ring-rose-100 hover:ring-rose-300'
-          : 'bg-slate-50 text-slate-400 ring-slate-200 hover:ring-slate-300';
+          : status === 'watch'
+            ? 'bg-violet-50 text-violet-700 ring-violet-100 hover:ring-violet-300'
+            : 'bg-slate-50 text-slate-400 ring-slate-200 hover:ring-slate-300';
     return `relative h-9 rounded-lg text-[11px] font-medium ring-1 transition ${tone} ${active ? 'ring-2 ring-slate-900' : ''}`;
   };
 
@@ -637,7 +649,8 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100"><CheckCircle2 className="h-3 w-3" />正常 {counts.ok}</span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 ring-1 ring-rose-100"><AlertCircle className="h-3 w-3" />异常 {counts.anomaly}</span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 ring-1 ring-rose-100" title="数据本身有问题：与领星对账差异过大、行数明显偏少"><AlertCircle className="h-3 w-3" />数据异常 {counts.anomaly}</span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-700 ring-1 ring-violet-100" title="数据是对的，属于经营问题（亏损、掉量），补数不会变，请看经营雷达"><AlertCircle className="h-3 w-3" />经营异常 {counts.watch}</span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 ring-1 ring-amber-100"><AlertCircle className="h-3 w-3" />销售额为 0 {counts.empty}</span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200">缺失 {counts.missing}</span>
                   <div className="ml-auto flex flex-wrap gap-2">
@@ -678,7 +691,8 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
                               title={cell.info
                                 ? [
                                     `${cell.date} · ${cell.info.rows} 行 · 销售额 ${Number(cell.info.sales_amount).toFixed(2)} · 毛利 ${Number(cell.info.gross_profit).toFixed(2)}`,
-                                    ...anomalyReasons(cell.info).map(reason => `⚠ ${reason}`),
+                                    ...anomalyReasons(cell.info).data.map(reason => `⚠ 数据异常：${reason}`),
+                                    ...anomalyReasons(cell.info).business.map(reason => `◆ 经营异常（数据正确）：${reason}`),
                                   ].join('\n')
                                 : `${cell.date} · 云端无数据`}
                             >
