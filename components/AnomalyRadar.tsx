@@ -205,7 +205,7 @@ export const AnomalyRadar: React.FC<{
                                                 </div>
                                                 {onDrillAsin && item.drillAsins && item.drillAsins.length > 0 && (
                                                     <div className="flex flex-wrap items-center gap-1.5">
-                                                        <span className="text-[10px] text-slate-400">嫌疑 ASIN</span>
+                                                        <span className="text-[10px] text-slate-400">嫌疑父体</span>
                                                         {item.drillAsins.map(asin => (
                                                             <button
                                                                 key={asin.asin}

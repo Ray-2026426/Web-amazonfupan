@@ -1299,7 +1299,7 @@ const App: React.FC = () => {
                                 report={radar}
                                 periodLabel={`${filters.startDate} ~ ${filters.endDate}`}
                                 onDrillAsin={asin => {
-                                    focusEntity('childAsins', asin);
+                                    focusEntity('parentAsins', asin);
                                     setDetailType('PL');
                                     setDetailModalOpen(true);
                                 }}

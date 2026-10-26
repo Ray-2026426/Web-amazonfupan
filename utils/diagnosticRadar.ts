@@ -30,7 +30,7 @@ export type Finding = {
     confidence: 'high' | 'medium' | 'low';
     /** 需要人工核对的点 */
     checks?: string[];
-    /** 可下钻的嫌疑 ASIN（按影响绝对值排序），点一下直接聚焦 */
+    /** 可下钻的嫌疑父体 ASIN（按影响绝对值排序），点一下直接聚焦 */
     drillAsins?: { asin: string; name: string; value: number; delta: number }[];
 };
 
@@ -71,24 +71,27 @@ const change = (current: number, base: number): number | null => {
 /** 比率差（百分点） */
 const ratio = (part: number, total: number) => (total > 0 ? part / total : 0);
 
-/** 按 ASIN 汇总销售额，用于判断销售结构（低价款占比）是否变化 */
+/** 诊断的最小颗粒度是「父体」：没有父 ASIN 时退回子 ASIN，避免漏项 */
+const parentOf = (row: DataRow) => row.parent_asin || row.child_asin;
+
+/** 按父体汇总销售额，用于判断销售结构（低价款占比）是否变化 */
 function revenueByAsin(rows: DataRow[]): Map<string, number> {
     const map = new Map<string, number>();
     for (const row of rows) {
-        const key = `${row.shop_name}|${row.child_asin}`;
+        const key = `${row.shop_name}|${parentOf(row)}`;
         map.set(key, (map.get(key) || 0) + safe(row.sales_amount));
     }
     return map;
 }
 
-/** 变化最大的 ASIN（按绝对值排序），用于「结论 → 元凶」下钻 */
+/** 变化最大的父体（按绝对值排序），用于「结论 → 元凶」下钻 */
 function asinMovers(currentRows: DataRow[], lastRows: DataRow[], metric: 'sales_amount' | 'gross_profit', limit = 4) {
     const now = new Map<string, { name: string; value: number }>();
     const past = new Map<string, { name: string; value: number }>();
     const collect = (target: Map<string, { name: string; value: number }>, rows: DataRow[]) => {
         for (const row of rows) {
-            const key = `${row.shop_name}|${row.child_asin}`;
-            const entry = target.get(key) || { name: row.product_name || row.child_asin, value: 0 };
+            const key = `${row.shop_name}|${parentOf(row)}`;
+            const entry = target.get(key) || { name: row.product_name || parentOf(row), value: 0 };
             entry.value += safe(row[metric]);
             target.set(key, entry);
         }
