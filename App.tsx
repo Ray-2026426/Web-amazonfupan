@@ -257,17 +257,15 @@ const App: React.FC = () => {
   const [cloudLastSync, setCloudLastSync] = useState('');
 
   /**
-   * 首次进入（日度模式）直接定位到「最新有数据的那一天」：
-   * 比如 25 号打开，默认选中 24 号，而不是当月 1 号。
-   * 每次页面加载只生效一次，之后用户自己选的区间不会被覆盖。
+   * 「跟随云端最新数据日」只对**没有指定日期**的分享链接生效。
+   * 之前写成「有 URL 就覆盖」，会把链接里指定的历史日期冲掉——这是个真 bug。
    */
   const snappedToLatest = useRef(false);
-  /** 默认进站日期（昨天），用于判断当前是否还是「干净视图」 */
-  const initialDay = useRef(formatDate(new Date(Date.now() - 86400000)));
   useEffect(() => {
     if (snappedToLatest.current || periodMode !== 'day') return;
-    // 进站默认已经定位到「昨天」，只有分享链接里的日期才需要跟随云端最新日期
-    if (!hasViewInUrl()) return;
+    const view = readViewFromUrl();
+    if (!view.mode && !view.from && !view.to) return; // 不是分享链接
+    if (view.from || view.to) return;                 // 链接已指定日期，保持不动
     const latest = cloudCutoff || dataEndDate;
     if (!latest) return;
     snappedToLatest.current = true;
@@ -275,7 +273,29 @@ const App: React.FC = () => {
   }, [cloudCutoff, dataEndDate, periodMode]);
 
   /**
-   * 不再自动把筛选写进地址栏。
+   * 本地数据兜底：没连云端（或数据源选了本地）时，默认区间要落在「有数据的那几个月」，
+   * 否则默认的「昨天」在月报里根本不存在，页面会是空的。
+   */
+  useEffect(() => {
+    if (CLOUD_ENABLED && cloudToken) return;
+    if (!performanceData.length) return;
+    setFilters(prev => {
+      const inRange = prev.startDate && prev.endDate
+          && performanceData.some(row => row.date >= prev.startDate && row.date <= prev.endDate);
+      if (inRange) return prev;
+      const dates = performanceData.map(row => row.date).sort();
+      const lastDate = dates[dates.length - 1];
+      const [year, month] = lastDate.split('-').map(Number);
+      return {
+        ...prev,
+        startDate: `${year}-${String(month).padStart(2, '0')}-01`,
+        endDate: lastDate,
+      };
+    });
+  }, [performanceData, cloudToken]);
+
+  /**
+   * 视图 → 地址栏：不再自动把筛选写进地址栏。
    * 原因：写进 URL 后，下次打开同一个地址就会「恢复上次点过的 ASIN」，
    * 让每次进站都变成全选/日度/昨天的干净视图 —— 分享仍然用命令面板的「复制视图链接」。
    */
@@ -554,8 +574,13 @@ const App: React.FC = () => {
               /**
                * 先并行发起两路：聚合（几百字节，快）+ 明细（十几万行，慢）。
                * 聚合先回来就先画 KPI，明细到了再补表格/下钻——这就是首屏变快的关键。
+               * 有维度筛选时聚合用不上（它只按日期汇总），直接跳过省一次请求。
                */
-              const aggregatePromise = fetchCloudAggregate(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null);
+              const dimensionKeysForFetch: (keyof FilterState)[] = ['countries', 'shops', 'brands', 'managers', 'subCategories', 'parentAsins', 'childAsins', 'productNames'];
+              const hasDimensionFiltersNow = dimensionKeysForFetch.some(key => ((filters[key] as string[]) || []).length > 0);
+              const aggregatePromise = hasDimensionFiltersNow
+                  ? Promise.resolve(null)
+                  : fetchCloudAggregate(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null);
               const [rows, targets] = await (async () => {
                   const rowsPromise = fetchCloudRows(filters.startDate, filters.endDate, cloudToken, controller.signal);
                   const targetsPromise = fetchCloudTargets(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null);
@@ -596,25 +621,7 @@ const App: React.FC = () => {
                *   2) 每日库存快照里的领星主图 pic_url（自动，无需上传）
                * 两路都是可选的，失败不影响主流程。
                */
-              if (productImageData.length === 0) {
-                  const headers = { Authorization: `Bearer ${cloudToken}` };
-                  Promise.all([
-                      fetch('/api/product-images', { headers }).then(response => (response.ok ? response.json() : null)).catch(() => null),
-                      fetch('/api/inventory', { headers }).then(response => (response.ok ? response.json() : null)).catch(() => null),
-                  ]).then(([imagePayload, inventoryPayload]) => {
-                      const uploaded = Array.isArray(imagePayload?.rows) ? imagePayload.rows : [];
-                      const fromInventory = (Array.isArray(inventoryPayload?.rows) ? inventoryPayload.rows : [])
-                          .filter((row: { pic_url?: string; asin?: string }) => row.pic_url && /^https?:\/\//i.test(String(row.pic_url)))
-                          .map((row: { pic_url: string; asin?: string; product_name?: string }) => ({
-                              sku: '',
-                              product_name: row.product_name || '',
-                              image_url: row.pic_url,
-                              asin: row.asin || '',
-                          }));
-                      const merged = [...uploaded, ...fromInventory];
-                      if (merged.length) setProductImageData(merged);
-                  }).catch(() => { /* 图片源缺失不影响主流程 */ });
-              }
+              if (productImageData.length === 0) loadProductImages();
           } catch (error) {
               if (controller.signal.aborted) return;
               const message = String(error instanceof Error ? error.message : error);
@@ -652,6 +659,39 @@ const App: React.FC = () => {
           setLastImportedAt(meta?.lastImportedAt);
       }).catch(error => setPersistenceError(`读取本地状态失败：${String(error)}`));
   };
+
+  /**
+   * 商品图片：合并两个来源（上传的图片表优先，库存快照里的领星主图兜底）。
+   * 库存快照可能比业绩数据晚到几分钟，所以这里做成可重试的独立函数。
+   */
+  const loadProductImages = () => {
+      if (!cloudToken) return;
+      const headers = { Authorization: `Bearer ${cloudToken}` };
+      void Promise.all([
+          fetch('/api/product-images', { headers }).then(response => (response.ok ? response.json() : null)).catch(() => null),
+          fetch('/api/inventory', { headers }).then(response => (response.ok ? response.json() : null)).catch(() => null),
+      ]).then(([imagePayload, inventoryPayload]) => {
+          const uploaded = Array.isArray(imagePayload?.rows) ? imagePayload.rows : [];
+          const fromInventory = (Array.isArray(inventoryPayload?.rows) ? inventoryPayload.rows : [])
+              .filter((row: { pic_url?: string }) => row.pic_url && /^https?:\/\//i.test(String(row.pic_url)))
+              .map((row: { pic_url: string; asin?: string; product_name?: string }) => ({
+                  sku: '',
+                  product_name: row.product_name || '',
+                  image_url: row.pic_url,
+                  asin: row.asin || '',
+              }));
+          const merged = [...uploaded, ...fromInventory];
+          if (merged.length) setProductImageData(merged);
+      }).catch(() => { /* 图片源缺失不影响主流程 */ });
+  };
+
+  /** 图片兜底重试：云端刷新（每 15 分钟）或库存快照晚到时再拉一次 */
+  useEffect(() => {
+      if (!CLOUD_ENABLED || !cloudToken || !cloudConnected) return;
+      if (productImageData.length > 0) return;
+      loadProductImages();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudConnected, cloudToken, cloudRefreshTick, productImageData.length]);
 
   const visibleCloudRows = cloudRowsRange === `${filters.startDate}|${filters.endDate}` ? cloudRows : EMPTY_ROWS;
   /** 数据源开关：云端 / 本地导入。云端连上后仍可切回自己上传的数据 */
