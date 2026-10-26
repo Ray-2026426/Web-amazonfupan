@@ -30,7 +30,7 @@ import { lazyWithRetry } from './components/lazyWithRetry';
 import { CommandPalette, type CommandAction } from './components/CommandPalette';
 import { getImageUploadState, resetImageUpload, subscribeImageUpload } from './components/imageUploadTask';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
-import { buildViewLink, readViewFromUrl, syncViewToUrl } from './components/viewUrl';
+import { buildViewLink, hasViewInUrl, readViewFromUrl, syncViewToUrl } from './components/viewUrl';
 import { InventoryTable } from './components/InventoryTable';
 import { DataUploadModal, type DataUploadResult } from './components/DataUploadModal';
 import { resetTrendChartMetricsSelection } from './components/trendSelection';
@@ -176,21 +176,28 @@ const App: React.FC = () => {
   }, [productImageData]);
 
   // UI States
-  /** 地址栏里带了视图参数就用它（可分享链接 / 刷新还原），否则用默认值 */
+  /**
+   * 默认进站视图：日度 + 昨天 + 全选（不带任何维度筛选）。
+   * 只有地址栏带了视图参数（分享链接）时才按链接还原——否则一律干净进入。
+   */
   const [filters, setFilters] = useState<FilterState>(() => {
-      const view = readViewFromUrl();
-      return {
-          ...initialFilters,
-          ...view.filters,
-          ...(view.from ? { startDate: view.from } : {}),
-          ...(view.to ? { endDate: view.to } : {}),
-      };
+      if (hasViewInUrl()) {
+          const view = readViewFromUrl();
+          return {
+              ...initialFilters,
+              ...view.filters,
+              ...(view.from ? { startDate: view.from } : {}),
+              ...(view.to ? { endDate: view.to } : {}),
+          };
+      }
+      const yesterday = formatDate(new Date(Date.now() - 86400000));
+      return { ...initialFilters, startDate: yesterday, endDate: yesterday };
   });
   const [dataStartDate, setDataStartDate] = useState(DEFAULT_DATA_START);
   const [dataEndDate, setDataEndDate] = useState('');
   const [lastImportedAt, setLastImportedAt] = useState<number | undefined>();
-  /** 时间粒度：日 / 周 / 月。周度的既有语义保留为 isWeeklyMode，减少无谓改动 */
-  const [periodMode, setPeriodMode] = useState<PeriodMode>(() => readViewFromUrl().mode || readStoredPeriodMode());
+  /** 时间粒度：日 / 周 / 月。进站默认日度（分享链接带了粒度才用它） */
+  const [periodMode, setPeriodMode] = useState<PeriodMode>(() => readViewFromUrl().mode || 'day');
   /** 聚焦路径：点 ASIN / 店铺等实体后，全站按它过滤，顶部面包屑逐级退出 */
   const [focusPath, setFocusPath] = useState<{ field: keyof FilterState; value: string; label: string }[]>([]);
   const isWeeklyMode = periodMode === 'week';
@@ -255,20 +262,23 @@ const App: React.FC = () => {
    * 每次页面加载只生效一次，之后用户自己选的区间不会被覆盖。
    */
   const snappedToLatest = useRef(false);
+  /** 默认进站日期（昨天），用于判断当前是否还是「干净视图」 */
+  const initialDay = useRef(formatDate(new Date(Date.now() - 86400000)));
   useEffect(() => {
     if (snappedToLatest.current || periodMode !== 'day') return;
+    // 进站默认已经定位到「昨天」，只有分享链接里的日期才需要跟随云端最新日期
+    if (!hasViewInUrl()) return;
     const latest = cloudCutoff || dataEndDate;
     if (!latest) return;
     snappedToLatest.current = true;
     setFilters(prev => (prev.startDate === latest && prev.endDate === latest ? prev : { ...prev, startDate: latest, endDate: latest }));
   }, [cloudCutoff, dataEndDate, periodMode]);
 
-  /** 视图 → 地址栏：筛选/区间/粒度变化后同步（防抖，避免连点压一堆历史记录） */
-  useEffect(() => {
-    if (isRestoringData) return;
-    const timer = window.setTimeout(() => syncViewToUrl(periodMode, filters), 250);
-    return () => window.clearTimeout(timer);
-  }, [periodMode, filters, isRestoringData]);
+  /**
+   * 不再自动把筛选写进地址栏。
+   * 原因：写进 URL 后，下次打开同一个地址就会「恢复上次点过的 ASIN」，
+   * 让每次进站都变成全选/日度/昨天的干净视图 —— 分享仍然用命令面板的「复制视图链接」。
+   */
 
   /** 浏览器前进/后退 → 还原当时视图 */
   useEffect(() => {
@@ -434,7 +444,17 @@ const App: React.FC = () => {
               if (Array.isArray(savedActions)) setBusinessActions(savedActions);
               
               const savedMeta = savedFilters as AppMeta | FilterState | null;
-              if (savedMeta) {
+              /**
+               * 只有「分享链接」才还原上次的筛选。
+               * 正常情况下进站一律全选 + 日度 + 昨天，避免上次点过的 ASIN 一直粘着。
+               */
+              const restoreFilters = hasViewInUrl();
+              if (savedMeta && !restoreFilters) {
+                  const meta = savedMeta as AppMeta;
+                  if (meta.dataStartDate) setDataStartDate(meta.dataStartDate);
+                  if (meta.dataEndDate) setDataEndDate(meta.dataEndDate);
+                  if (meta.lastImportedAt) setLastImportedAt(meta.lastImportedAt);
+              } else if (savedMeta) {
                   const isNewMeta = 'filters' in savedMeta && (savedMeta as AppMeta).filters?.startDate;
                   if (isNewMeta) {
                       const meta = savedMeta as AppMeta;
