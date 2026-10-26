@@ -30,6 +30,8 @@ export type Finding = {
     confidence: 'high' | 'medium' | 'low';
     /** 需要人工核对的点 */
     checks?: string[];
+    /** 可下钻的嫌疑 ASIN（按影响绝对值排序），点一下直接聚焦 */
+    drillAsins?: { asin: string; name: string; value: number; delta: number }[];
 };
 
 export type RadarReport = {
@@ -77,6 +79,36 @@ function revenueByAsin(rows: DataRow[]): Map<string, number> {
         map.set(key, (map.get(key) || 0) + safe(row.sales_amount));
     }
     return map;
+}
+
+/** 变化最大的 ASIN（按绝对值排序），用于「结论 → 元凶」下钻 */
+function asinMovers(currentRows: DataRow[], lastRows: DataRow[], metric: 'sales_amount' | 'gross_profit', limit = 4) {
+    const now = new Map<string, { name: string; value: number }>();
+    const past = new Map<string, { name: string; value: number }>();
+    const collect = (target: Map<string, { name: string; value: number }>, rows: DataRow[]) => {
+        for (const row of rows) {
+            const key = `${row.shop_name}|${row.child_asin}`;
+            const entry = target.get(key) || { name: row.product_name || row.child_asin, value: 0 };
+            entry.value += safe(row[metric]);
+            target.set(key, entry);
+        }
+    };
+    collect(now, currentRows);
+    collect(past, lastRows);
+    const out: { asin: string; name: string; value: number; delta: number }[] = [];
+    for (const key of new Set([...now.keys(), ...past.keys()])) {
+        const currentValue = now.get(key)?.value || 0;
+        const pastValue = past.get(key)?.value || 0;
+        const delta = currentValue - pastValue;
+        if (Math.abs(delta) < 1) continue;
+        out.push({
+            asin: key.split('|')[1],
+            name: now.get(key)?.name || past.get(key)?.name || '',
+            value: currentValue,
+            delta,
+        });
+    }
+    return out.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, limit);
 }
 
 export function buildRadarReport(input: {
@@ -304,6 +336,15 @@ export function buildRadarReport(input: {
     pushVolume();
     pushAsp();
     pushMargin();
+
+    // 给每条结论挂上「嫌疑 ASIN」，界面点一下就能聚焦下钻
+    if (currentRows.length && lastRows.length) {
+        const salesMovers = asinMovers(currentRows, lastRows, 'sales_amount');
+        const gpMovers = asinMovers(currentRows, lastRows, 'gross_profit');
+        for (const finding of findings) {
+            finding.drillAsins = finding.dimension === 'margin' ? gpMovers : salesMovers;
+        }
+    }
 
     const order: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
     findings.sort((a, b) => order[a.severity] - order[b.severity]);

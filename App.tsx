@@ -47,6 +47,7 @@ const ProfitWaterfall = lazyWithRetry(() => import('./components/ProfitWaterfall
 const StockHealth = lazyWithRetry(() => import('./components/StockHealth').then(m => ({ default: m.StockHealth })));
 import { BusinessCommandCenter } from './components/BusinessCommandCenter';
 import { AnomalyRadar } from './components/AnomalyRadar';
+import { MetricMatrix } from './components/MetricMatrix';
 import { buildRadarReport } from './utils/diagnosticRadar';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles, Search } from 'lucide-react';
@@ -1151,7 +1152,16 @@ const App: React.FC = () => {
                     )}
 
                     {processedData && radar && (
-                        <section id="issues"><AnomalyRadar report={radar} /></section>
+                        <section id="issues">
+                            <AnomalyRadar
+                                report={radar}
+                                onDrillAsin={asin => {
+                                    focusEntity('childAsins', asin);
+                                    setDetailType('PL');
+                                    setDetailModalOpen(true);
+                                }}
+                            />
+                        </section>
                     )}
 
                     {/* 2. PL Table */}
@@ -1179,6 +1189,18 @@ const App: React.FC = () => {
                                 onFocusAsin={asin => focusEntity('childAsins', asin)}
                             />
                         </Suspense>
+                    )}
+
+                    {/* 2.6 多维对比矩阵：ASIN × 日期热力图，点格子直接聚焦 */}
+                    {processedData && (
+                        <MetricMatrix
+                            rows={activeRawData}
+                            onPick={(asin, date) => {
+                                focusEntity('childAsins', asin);
+                                setPeriodMode('day');
+                                setFilters(prev => ({ ...prev, startDate: date, endDate: date }));
+                            }}
+                        />
                     )}
 
                     {/* 3. Traffic Table */}

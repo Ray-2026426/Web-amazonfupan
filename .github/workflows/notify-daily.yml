@@ -1,0 +1,31 @@
+name: 每日经营日报（飞书）
+
+# 每天同步跑完后，把「昨天赚了多少、有没有异常」推到飞书群。
+# 需要仓库 Secret：FEISHU_WEBHOOK（飞书群机器人 Webhook 地址）
+on:
+  schedule:
+    - cron: '30 1 * * *' # 北京时间 09:30，晚于 08:10 的同步
+  workflow_dispatch:
+
+concurrency:
+  group: lingxing-notify
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 推送经营日报
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: node scripts/notify-feishu.mjs

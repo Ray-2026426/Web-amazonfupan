@@ -17,8 +17,8 @@ const SEVERITY_STYLE: Record<Finding['severity'], { dot: string; chip: string; t
 const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
 const signed = (value: number | null) => (value === null ? '—' : `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`);
 
-/** 经营异常雷达：默认只看结论，点开才看证据与动作 */
-export const AnomalyRadar: React.FC<{ report: RadarReport }> = ({ report }) => {
+/** 经营异常雷达：默认只看结论，点开才看证据与动作；结论里的 ASIN 可直接下钻 */
+export const AnomalyRadar: React.FC<{ report: RadarReport; onDrillAsin?: (asin: string) => void }> = ({ report, onDrillAsin }) => {
     const [openId, setOpenId] = useState<string | null>(null);
     const [showAll, setShowAll] = useState(false);
     const { core, findings } = report;
@@ -113,6 +113,27 @@ export const AnomalyRadar: React.FC<{ report: RadarReport }> = ({ report }) => {
                                                     <div className="mt-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-[11px] leading-relaxed text-sky-900">
                                                         <b>动作：</b>{item.action}
                                                     </div>
+                                                    {onDrillAsin && item.drillAsins && item.drillAsins.length > 0 && (
+                                                        <div className="mt-2">
+                                                            <div className="mb-1 text-[10px] text-slate-400">嫌疑 ASIN（点一下聚焦下钻）</div>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {item.drillAsins.map(asin => (
+                                                                    <button
+                                                                        key={asin.asin}
+                                                                        type="button"
+                                                                        onClick={() => onDrillAsin(asin.asin)}
+                                                                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600 transition hover:border-sky-300 hover:text-sky-700"
+                                                                        title={asin.name}
+                                                                    >
+                                                                        <span className="font-mono">{asin.asin}</span>
+                                                                        <span className={asin.delta >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                                                                            {asin.delta >= 0 ? '+' : ''}{(Math.abs(asin.delta) >= 10000 ? `${(asin.delta / 10000).toFixed(1)}万` : asin.delta.toFixed(0))}
+                                                                        </span>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     {item.checks && item.checks.length > 0 && (
                                                         <div className="mt-1.5 text-[10px] text-slate-500">
                                                             需核查：{item.checks.join(' · ')}
