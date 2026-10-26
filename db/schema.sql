@@ -508,3 +508,20 @@ end;
 $$;
 revoke all on function public.relink_image_asins() from public, anon, authenticated;
 grant execute on function public.relink_image_asins() to service_role;
+
+-- 图片表体检：前端用它显示「总行数 / 已匹配 ASIN / 最近上传」，排查图片为什么不显示
+create or replace function public.image_stats()
+returns jsonb
+language sql
+security invoker
+set search_path = public
+as $$
+    select jsonb_build_object(
+        'total', count(*),
+        'with_asin', count(*) filter (where asin is not null),
+        'last_import', (select max(activated_at) from product_image_imports where active)
+    )
+    from product_images;
+$$;
+revoke all on function public.image_stats() from public, anon, authenticated;
+grant execute on function public.image_stats() to service_role;

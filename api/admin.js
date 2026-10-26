@@ -143,6 +143,26 @@ async function save(body) {
       await writeTable('rpc/relink_image_asins', 'POST', {});
       return { relinked: true };
     }
+    case 'images_stats': {
+      // 图片表体检：总数 / 已匹配 ASIN / 最近一次上传时间
+      const base = process.env.SUPABASE_URL?.replace(/\/$/, '');
+      const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
+      if (!base || !key) throw Object.assign(new Error('缺少 Supabase 配置'), { status: 500 });
+      const response = await fetch(`${base}/rest/v1/rpc/image_stats`, {
+        method: 'POST',
+        headers: {
+          apikey: key,
+          'Content-Type': 'application/json',
+          ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}),
+        },
+        body: '{}',
+      });
+      if (!response.ok) {
+        const text = (await response.text()).slice(0, 200);
+        throw Object.assign(new Error(`图片表还没建好（请先在 Supabase 执行 db/schema.sql）：${text}`), { status: 400 });
+      }
+      return { stats: await response.json() };
+    }
     default:
       throw Object.assign(new Error('未知管理操作'), { status: 400 });
   }

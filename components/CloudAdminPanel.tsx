@@ -57,7 +57,24 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
   /** 图片上传是模块级任务：关掉面板也会继续，这里只是订阅它的状态 */
   const [uploadState, setUploadState] = useState(getImageUploadState());
   useEffect(() => subscribeImageUpload(setUploadState), []);
+  /** 图片表体检结果：用来判断"图片为什么不显示"是没数据还是没匹配 */
+  const [imageStats, setImageStats] = useState<{ total: number; with_asin: number; last_import: string | null } | null>(null);
+  const [imageStatsError, setImageStatsError] = useState('');
   const uploadBusy = uploadState.status === 'parsing' || uploadState.status === 'uploading' || uploadState.status === 'activating';
+  useEffect(() => {
+    if (tab !== 'images' || !token) return;
+    setImageStatsError('');
+    void (async () => {
+      try {
+        const result = await request('POST', { action: 'images_stats' }) as { stats?: { total: number; with_asin: number; last_import: string | null } };
+        setImageStats(result?.stats || null);
+      } catch (error) {
+        setImageStats(null);
+        setImageStatsError(String(error instanceof Error ? error.message : error));
+      }
+    })();
+  }, [tab, token, uploadState.status]);
+
   useEffect(() => {
     if (uploadState.status !== 'done') return;
     void (async () => {
@@ -874,6 +891,37 @@ export const CloudAdminPanel: React.FC<{ onClose: () => void; onTargetsUpdated?:
               </div>}
 
               {tab === 'images' && <div className="space-y-4">
+                <section className={cardClass}>
+                  <h3 className={sectionTitle}>图片表体检</h3>
+                  {imageStatsError ? (
+                    <p className="mt-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] leading-relaxed text-rose-700">
+                      {imageStatsError}
+                    </p>
+                  ) : imageStats ? (
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      <div className="rounded-lg bg-slate-50 px-3 py-2">
+                        <div className="text-[10px] text-slate-400">图片行数</div>
+                        <div className="text-sm font-semibold text-slate-800">{imageStats.total}</div>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 px-3 py-2">
+                        <div className="text-[10px] text-slate-400">已匹配 ASIN</div>
+                        <div className={`text-sm font-semibold ${imageStats.with_asin > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{imageStats.with_asin}</div>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 px-3 py-2">
+                        <div className="text-[10px] text-slate-400">最近上传</div>
+                        <div className="text-sm font-semibold text-slate-800">{imageStats.last_import ? new Date(imageStats.last_import).toLocaleDateString('zh-CN') : '—'}</div>
+                      </div>
+                      {imageStats.total > 0 && imageStats.with_asin === 0 && (
+                        <p className="sm:col-span-3 text-[11px] text-amber-700">
+                          图片存进去了，但一条都没匹配到 ASIN：点下方「重新匹配 ASIN」（需要先同步过订单利润，SKU↔ASIN 对照才有数据）。
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[11px] text-slate-400">读取中…</p>
+                  )}
+                </section>
+
                 <section className={cardClass}>
                   <h3 className={sectionTitle}>当前生效的图片表</h3>
                   {data.imageImport ? (
