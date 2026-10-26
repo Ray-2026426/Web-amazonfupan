@@ -100,6 +100,7 @@ async function fetchPaged(toolId, baseParams) {
     let offset = 0;
     let total = null;
     let totalSum = null;
+    let emptyRetries = 0;
     while (total === null || rows.length < total) {
         const d = await getClient().call(toolId, {
             ...baseParams,
@@ -113,12 +114,67 @@ async function fetchPaged(toolId, baseParams) {
         }
         const page = d.list || [];
         rows.push(...page);
+        if (page.length === 0) {
+            // 领星偶发返回空页（限流/超时），但总数还没取完：等几秒重试同一 offset
+            if (rows.length < total && emptyRetries < 2) {
+                emptyRetries += 1;
+                log(`  ${toolId} offset=${offset} 返回空页（${rows.length}/${total}），${3 * emptyRetries}s 后重试`);
+                await new Promise((resolve) => setTimeout(resolve, 3000 * emptyRetries));
+                continue;
+            }
+            break;
+        }
+        emptyRetries = 0;
         offset += PAGE;
-        if (page.length === 0) break;
         if (offset > 500000) break;
     }
     if (rows.length !== total) throw new Error(`${toolId} 分页不完整：${rows.length}/${total}`);
     return { total, total_sum: totalSum, list: rows };
+}
+
+/** 订单利润的公共参数（全量与逐店铺回退共用） */
+const orderProfitParams = (date) => ({
+    start_date: date,
+    end_date: date,
+    currency_type: CURRENCY,
+    summary_field: 'msku',
+    turn_on_summary: '1',
+    sort_type: 'desc',
+    source_service: 'mcp',
+    external_service_mark: 1,
+    date_summary_type: 1,
+    search_type: 2,
+    service_type: 1,
+});
+
+/**
+ * 拉某天的订单利润。
+ * 大促日单日行数可能超过领星单次可翻页上限（实测出现 1000/1410 分页不完整），
+ * 这时退回「逐店铺」查询：每个店铺行数少，能完整取回。
+ */
+async function fetchOrderProfit(date, shops) {
+    try {
+        return await fetchPaged('query_order_profit_list', orderProfitParams(date));
+    } catch (error) {
+        if (!String(error.message || '').includes('分页不完整')) throw error;
+        log(`${date} 订单利润分页不完整，改为逐店铺拉取（${shops.length} 个店铺）`);
+        const list = [];
+        let total = 0;
+        let totalSum = null;
+        for (const shop of shops) {
+            const sid = String(shop.id);
+            try {
+                const part = await fetchPaged('query_order_profit_list', { ...orderProfitParams(date), sids: sid });
+                list.push(...(part.list || []));
+                total += part.total ?? (part.list || []).length;
+                if (!totalSum) totalSum = part.total_sum ?? null;
+            } catch (shopError) {
+                log(`  ${date} 店铺 ${sid} 订单利润失败：${String(shopError.message || '').slice(0, 100)}`);
+            }
+        }
+        log(`${date} 逐店铺合计 ${list.length} 行（声明 ${total} 行）`);
+        return { total: list.length, total_sum: totalSum, list };
+    }
 }
 
 /* ------------------------ 取数：本地快照 ------------------------ */
@@ -322,19 +378,7 @@ async function runPatch({ dates, usedShops, startedAt, range }) {
                 log(`${date} 云端还没有数据，跳过（先用回补任务把这天补上）`);
                 continue;
             }
-            const op = await fetchPaged('query_order_profit_list', {
-                start_date: date,
-                end_date: date,
-                currency_type: CURRENCY,
-                summary_field: 'msku',
-                turn_on_summary: '1',
-                sort_type: 'desc',
-                source_service: 'mcp',
-                external_service_mark: 1,
-                date_summary_type: 1,
-                search_type: 2,
-                service_type: 1,
-            });
+            const op = await fetchOrderProfit(date, usedShops);
             const costMap = mergeOrderProfit(op.list);
             for (const [key, value] of extractProductLinks(op.list)) links.set(key, value);
             const present = new Set(existing.map((row) => `${row.sid}|${row.asin}`));
@@ -439,19 +483,7 @@ async function main() {
         if (FIXTURES) {
             op = readFixture(date, 'order-profit-msku.json') || { list: [] };
         } else {
-            op = await fetchPaged('query_order_profit_list', {
-                start_date: date,
-                end_date: date,
-                currency_type: CURRENCY,
-                summary_field: 'msku',
-                turn_on_summary: '1',
-                sort_type: 'desc',
-                source_service: 'mcp',
-                external_service_mark: 1,
-                date_summary_type: 1,
-                search_type: 2,
-                service_type: 1,
-            });
+            op = await fetchOrderProfit(date, usedShops);
         }
         const costMap = mergeOrderProfit(op.list);
         for (const [key, value] of extractProductLinks(op.list)) productLinks.set(key, value);
