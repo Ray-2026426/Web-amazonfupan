@@ -29,7 +29,7 @@ on:
       chunk_days:
         description: '每块天数（默认 14，建议 7~21）'
         required: false
-        default: '14'
+        default: '7'
       patch:
         description: '补丁模式：只回填 FBA 国际运费 + 成本行，不重拉产品表现（true / false）'
         required: false
@@ -100,7 +100,7 @@ jobs:
   backfill:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 115
+    timeout-minutes: 300
     strategy:
       fail-fast: false
       max-parallel: ${{ fromJSON(github.event.inputs.max_parallel || '1') }}
@@ -161,7 +161,7 @@ jobs:
             exit 0
           fi
           next=$((RETRY + 1))
-          body=$(printf '{"ref":"main","inputs":{"from":"%s","to":"%s","chunk_days":"30","max_parallel":"1","patch":"%s","retry":"%s","next":"%s"}}' \
+          body=$(printf '{"ref":"main","inputs":{"from":"%s","to":"%s","chunk_days":"7","max_parallel":"1","patch":"%s","retry":"%s","next":"%s"}}' \
             "$CHUNK_FROM" "$CHUNK_TO" "${INPUT_PATCH:-false}" "$next" "${INPUT_NEXT:-}")
           curl -sS -f -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -199,7 +199,7 @@ jobs:
           to="${mid%%:*}"
           patch="${mid#*:}"
           if [ "$patch" = "$mid" ]; then patch="false"; fi
-          body=$(printf '{"ref":"main","inputs":{"from":"%s","to":"%s","chunk_days":"14","max_parallel":"1","patch":"%s","retry":"0","next":"%s"}}' \
+          body=$(printf '{"ref":"main","inputs":{"from":"%s","to":"%s","chunk_days":"7","max_parallel":"1","patch":"%s","retry":"0","next":"%s"}}' \
             "$from" "$to" "$patch" "$rest")
           curl -sS -f -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
