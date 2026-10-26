@@ -851,7 +851,13 @@ const App: React.FC = () => {
        * 云端聚合（几百字节）：明细还没到也能先把 KPI / 利润表画出来。
        * 明细到了之后 currentRows 才有值，用于瀑布归因、矩阵、下钻。
        */
-      const cloudMatch = useCloudData && cloudAgg && cloudAgg.key === `${filters.startDate}|${filters.endDate}` ? cloudAgg : null;
+      /**
+       * 服务端聚合只按「日期」汇总，不带品牌/店铺/ASIN 等维度筛选。
+       * 因此只要有维度筛选，就必须回到明细聚合，否则筛选会失效（数据不随筛选变化）。
+       */
+      const dimensionKeys: (keyof FilterState)[] = ['countries', 'shops', 'brands', 'managers', 'subCategories', 'parentAsins', 'childAsins', 'productNames'];
+      const hasDimensionFilters = dimensionKeys.some(key => ((filters[key] as string[]) || []).length > 0);
+      const cloudMatch = useCloudData && !hasDimensionFilters && cloudAgg && cloudAgg.key === `${filters.startDate}|${filters.endDate}` ? cloudAgg : null;
       if (activeData.length === 0 && !cloudMatch) return null;
       if (!filters.startDate || !filters.endDate) return null;
 
