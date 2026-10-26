@@ -66,8 +66,14 @@ export type CloudAggregate = {
   fba_sellable_qty: number;
 };
 
-/** 服务端聚合：首屏 KPI 用这个，几百字节，不必等十几万行明细 */
-export async function fetchCloudAggregate(startDate: string, endDate: string, token: string, signal?: AbortSignal): Promise<{ current: CloudAggregate; last: CloudAggregate | null; year: CloudAggregate | null }> {
+/** 服务端聚合：首屏 KPI 用这个，几百字节，不必等十几万行明细（支持维度筛选） */
+export async function fetchCloudAggregate(
+  startDate: string,
+  endDate: string,
+  token: string,
+  signal?: AbortSignal,
+  filters?: Record<string, string[]>,
+): Promise<{ current: CloudAggregate; last: CloudAggregate | null; year: CloudAggregate | null }> {
   const periods = calculatePeriodDates(startDate, endDate);
   const query = [
     `from=${formatDate(periods.current.start)}`,
@@ -76,8 +82,18 @@ export async function fetchCloudAggregate(startDate: string, endDate: string, to
     `compareTo=${formatDate(periods.last.end)}`,
     `yearFrom=${formatDate(periods.year.start)}`,
     `yearTo=${formatDate(periods.year.end)}`,
-  ].join('&');
-  return request<{ current: CloudAggregate; last: CloudAggregate | null; year: CloudAggregate | null }>(`/api/aggregate?${query}`, token, signal);
+  ];
+  const PARAM_OF: Record<string, string> = {
+    countries: 'country', shops: 'shop', brands: 'brand', managers: 'manager',
+    subCategories: 'sub', parentAsins: 'pasin', productNames: 'pname',
+  };
+  if (filters) {
+    for (const [field, param] of Object.entries(PARAM_OF)) {
+      const values = filters[field];
+      if (Array.isArray(values) && values.length) query.push(`${param}=${encodeURIComponent(values.join(','))}`);
+    }
+  }
+  return request<{ current: CloudAggregate; last: CloudAggregate | null; year: CloudAggregate | null }>(`/api/aggregate?${query.join('&')}`, token, signal);
 }
 
 export async function fetchCloudRows(startDate: string, endDate: string, token: string, signal?: AbortSignal): Promise<DataRow[]> {

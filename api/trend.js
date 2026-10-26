@@ -19,7 +19,49 @@ const SUM_FIELDS = [
 export default function handler(req, res) {
   return respond(req, res, async () => {
     const url = new URL(req.url || '/', 'https://localhost');
-    const mode = url.searchParams.get('mode') === 'week' ? 'week' : 'month';
+    const rawMode = url.searchParams.get('mode');
+    const mode = rawMode === 'week' ? 'week' : rawMode === 'day' ? 'day' : 'month';
+
+    if (mode === 'day') {
+      // 日粒度：直接读 daily_series（数据库按天聚合），最多 180 天
+      const requestedDays = Number(url.searchParams.get('periods') || url.searchParams.get('days')) || 90;
+      const days = Math.max(1, Math.min(requestedDays, 180));
+      const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
+      const from = url.searchParams.get('from')
+        || new Date(Date.parse(`${to}T00:00:00Z`) - (days - 1) * 86400000).toISOString().slice(0, 10);
+      const base = process.env.SUPABASE_URL?.replace(/\/$/, '');
+      const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
+      if (!base || !key) throw new Error('缺少 Supabase 配置');
+      const filters = {};
+      for (const [param, field] of Object.entries({ country: 'countries', shop: 'shops', brand: 'brands', manager: 'managers', sub: 'subCategories', pasin: 'parentAsins', pname: 'productNames' })) {
+        const raw = url.searchParams.get(param);
+        if (!raw) continue;
+        const values = raw.split(',').map(item => item.trim()).filter(Boolean);
+        if (values.length) filters[field] = values;
+      }
+      const response = await fetch(`${base}/rest/v1/rpc/daily_series`, {
+        method: 'POST',
+        headers: {
+          apikey: key,
+          'Content-Type': 'application/json',
+          ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}),
+        },
+        body: JSON.stringify({ p_from: from, p_to: to, p_filters: filters }),
+      });
+      if (!response.ok) {
+        const text = (await response.text()).slice(0, 200);
+        throw new Error(`日趋势读取失败（请确认已执行最新 db/schema.sql）：${text}`);
+      }
+      const series = await response.json();
+      const rows = (Array.isArray(series) ? series : []).map(row => ({
+        ...row,
+        country: '', shop_name: '', brand: '', manager: '', sub_category: '',
+        parent_asin: '', child_asin: '', product_name: '',
+        rating: 0, review_count: 0,
+      }));
+      return res.status(200).json({ mode, periods: rows.length, rows });
+    }
+
     const requested = Number(url.searchParams.get('periods')) || (mode === 'month' ? 12 : 26);
     const periods = Math.max(1, Math.min(requested, mode === 'month' ? 24 : 52));
     const table = mode === 'month' ? 'v_fact_month' : 'v_fact_week';

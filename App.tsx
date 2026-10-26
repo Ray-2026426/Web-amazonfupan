@@ -200,6 +200,10 @@ const App: React.FC = () => {
   const [periodMode, setPeriodMode] = useState<PeriodMode>(() => readViewFromUrl().mode || 'day');
   /** 聚焦路径：点 ASIN / 店铺等实体后，全站按它过滤，顶部面包屑逐级退出 */
   const [focusPath, setFocusPath] = useState<{ field: keyof FilterState; value: string; label: string }[]>([]);
+  /** 维度筛选签名：用于判断「缓存/聚合结果」是否还对应当前筛选 */
+  const dimensionSignature = useMemo(() => (
+      ['countries', 'shops', 'brands', 'managers', 'subCategories', 'parentAsins', 'childAsins', 'productNames'] as (keyof FilterState)[]
+  ).map(key => ((filters[key] as string[]) || []).join(',')).join('|'), [filters]);
   const isWeeklyMode = periodMode === 'week';
   const isDailyMode = periodMode === 'day';
   /** 毛利修正：FBA 国际运费已含在头程，领星算毛利时又扣了一次，勾选后加回来（默认开启） */
@@ -400,22 +404,25 @@ const App: React.FC = () => {
     try { localStorage.setItem('amazon-dashboard-data-source', dataSource); } catch { /* 忽略 */ }
   }, [dataSource]);
 
-  /** 趋势用的长历史（服务端按月/周聚合）：点开趋势时不再只有当前区间 */
-  const [trendHistory, setTrendHistory] = useState<{ month: DataRow[]; week: DataRow[] }>({ month: [], week: [] });
+  /** 趋势用的长历史（服务端按日/周/月聚合）：点开趋势时不再只有当前区间 */
+  const [trendHistory, setTrendHistory] = useState<{ day: DataRow[]; month: DataRow[]; week: DataRow[] }>({ day: [], month: [], week: [] });
   useEffect(() => {
     if (!CLOUD_ENABLED || !cloudToken || !cloudConnected) return;
     let cancelled = false;
     void (async () => {
       try {
         const headers = { Authorization: `Bearer ${cloudToken}` };
-        const [monthResponse, weekResponse] = await Promise.all([
+        const [dayResponse, monthResponse, weekResponse] = await Promise.all([
+          fetch('/api/trend?mode=day&periods=90', { headers }),
           fetch('/api/trend?mode=month&periods=24', { headers }),
           fetch('/api/trend?mode=week&periods=52', { headers }),
         ]);
+        const day = dayResponse.ok ? await dayResponse.json() : null;
         const month = monthResponse.ok ? await monthResponse.json() : null;
         const week = weekResponse.ok ? await weekResponse.json() : null;
         if (cancelled) return;
         setTrendHistory({
+          day: Array.isArray(day?.rows) ? day.rows : [],
           month: Array.isArray(month?.rows) ? month.rows : [],
           week: Array.isArray(week?.rows) ? week.rows : [],
         });
@@ -551,7 +558,7 @@ const App: React.FC = () => {
                * 区间缓存：切回刚看过的区间直接命中，不再等三次接口。
                * 5 分钟内有效；切到新区间才真正请求。
                */
-              const cacheKey = `${filters.startDate}|${filters.endDate}`;
+              const cacheKey = `${filters.startDate}|${filters.endDate}|${dimensionSignature}`;
               const cached = cloudRangeCache.current.get(cacheKey);
               if (cached && Date.now() - cached.at < 5 * 60 * 1000) {
                   setCloudRows(cached.rows);
@@ -574,13 +581,23 @@ const App: React.FC = () => {
               /**
                * 先并行发起两路：聚合（几百字节，快）+ 明细（十几万行，慢）。
                * 聚合先回来就先画 KPI，明细到了再补表格/下钻——这就是首屏变快的关键。
-               * 有维度筛选时聚合用不上（它只按日期汇总），直接跳过省一次请求。
+               * 维度筛选已下推到 SQL（aggregate_range_f），筛选时同样走快路径。
                */
-              const dimensionKeysForFetch: (keyof FilterState)[] = ['countries', 'shops', 'brands', 'managers', 'subCategories', 'parentAsins', 'childAsins', 'productNames'];
-              const hasDimensionFiltersNow = dimensionKeysForFetch.some(key => ((filters[key] as string[]) || []).length > 0);
-              const aggregatePromise = hasDimensionFiltersNow
-                  ? Promise.resolve(null)
-                  : fetchCloudAggregate(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null);
+              const aggregatePromise = fetchCloudAggregate(
+                  filters.startDate,
+                  filters.endDate,
+                  cloudToken,
+                  controller.signal,
+                  {
+                      countries: filters.countries,
+                      shops: filters.shops,
+                      brands: filters.brands,
+                      managers: filters.managers,
+                      subCategories: filters.subCategories,
+                      parentAsins: filters.parentAsins,
+                      productNames: filters.productNames,
+                  },
+              ).catch(() => null);
               const [rows, targets] = await (async () => {
                   const rowsPromise = fetchCloudRows(filters.startDate, filters.endDate, cloudToken, controller.signal);
                   const targetsPromise = fetchCloudTargets(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null);
@@ -892,12 +909,10 @@ const App: React.FC = () => {
        * 明细到了之后 currentRows 才有值，用于瀑布归因、矩阵、下钻。
        */
       /**
-       * 服务端聚合只按「日期」汇总，不带品牌/店铺/ASIN 等维度筛选。
-       * 因此只要有维度筛选，就必须回到明细聚合，否则筛选会失效（数据不随筛选变化）。
+       * 服务端聚合已支持维度筛选（aggregate_range_f），所以有筛选时也能走快路径。
+       * 但聚合结果必须和「当前筛选」绑定：key 里带上筛选签名，变了就重新算。
        */
-      const dimensionKeys: (keyof FilterState)[] = ['countries', 'shops', 'brands', 'managers', 'subCategories', 'parentAsins', 'childAsins', 'productNames'];
-      const hasDimensionFilters = dimensionKeys.some(key => ((filters[key] as string[]) || []).length > 0);
-      const cloudMatch = useCloudData && !hasDimensionFilters && cloudAgg && cloudAgg.key === `${filters.startDate}|${filters.endDate}` ? cloudAgg : null;
+      const cloudMatch = useCloudData && cloudAgg && cloudAgg.key === `${filters.startDate}|${filters.endDate}|${dimensionSignature}` ? cloudAgg : null;
       if (activeData.length === 0 && !cloudMatch) return null;
       if (!filters.startDate || !filters.endDate) return null;
 
@@ -966,7 +981,7 @@ const App: React.FC = () => {
           invRows,
           pacingRatio,
       };
-  }, [activeRawData, displayTargetData, inventoryData, filters, periodMode, dataEndDate, cloudAgg, useCloudData]);
+  }, [activeRawData, displayTargetData, inventoryData, filters, periodMode, dataEndDate, cloudAgg, useCloudData, dimensionSignature]);
 
   /** 经营异常雷达：核心指标毛利额 → 三维（销量/客单价/毛利率）→ 根因 → 动作 */
   const radar = useMemo(() => {
@@ -1412,7 +1427,7 @@ const App: React.FC = () => {
                 rawPerformance={activeRawData}
                 performanceMonthly={useCloudData && trendHistory.month.length ? trendHistory.month : displayPerformanceData}
                 performanceWeekly={useCloudData && trendHistory.week.length ? trendHistory.week : displayWeeklyData}
-                performanceDaily={displayDailyData}
+                performanceDaily={useCloudData && trendHistory.day.length ? trendHistory.day : displayDailyData}
                 productImageLookup={productImageLookup}
                 dataEndDate={dataEndDate}
             /></Suspense>
