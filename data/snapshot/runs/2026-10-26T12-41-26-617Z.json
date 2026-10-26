@@ -1,0 +1,69 @@
+{
+  "at": "2026-10-26T13:16:15.069Z",
+  "range": {
+    "from": "2026-10-16",
+    "to": "2026-10-21"
+  },
+  "days": 6,
+  "rowsAdded": 8625,
+  "rowsTotal": 8625,
+  "bytes": 11864124,
+  "costMatchRate": 0.783,
+  "failedShopCalls": 0,
+  "warnings": [],
+  "mcpCalls": 690,
+  "durationMs": 2088702,
+  "currency": "USD",
+  "report": {
+    "ok": true,
+    "errors": [],
+    "warnings": [],
+    "zeroFiltered": 266625,
+    "costMatchRate": 0.7829565217391304,
+    "negativeShare": 0.5580289855072463,
+    "reconciliations": [
+      {
+        "date": "2026-10-16",
+        "expectedGrossProfit": 1453.78,
+        "actualGrossProfit": 1454.0500000000106,
+        "expectedAmount": 20994.26,
+        "actualAmount": 22376.890000000025
+      },
+      {
+        "date": "2026-10-17",
+        "expectedGrossProfit": 1425.13,
+        "actualGrossProfit": 1425.2000000000091,
+        "expectedAmount": 21691.49,
+        "actualAmount": 23322.920000000002
+      },
+      {
+        "date": "2026-10-18",
+        "expectedGrossProfit": 2942.31,
+        "actualGrossProfit": 2942.539999999972,
+        "expectedAmount": 25796.19,
+        "actualAmount": 27843.580000000027
+      },
+      {
+        "date": "2026-10-19",
+        "expectedGrossProfit": 2289.7,
+        "actualGrossProfit": 2289.859999999968,
+        "expectedAmount": 24854.86,
+        "actualAmount": 26710.260000000017
+      },
+      {
+        "date": "2026-10-20",
+        "expectedGrossProfit": 944.91,
+        "actualGrossProfit": 945.1400000000078,
+        "expectedAmount": 23062.12,
+        "actualAmount": 24735.150000000045
+      },
+      {
+        "date": "2026-10-21",
+        "expectedGrossProfit": 1668.63,
+        "actualGrossProfit": 1668.710000000007,
+        "expectedAmount": 23957.16,
+        "actualAmount": 25795.990000000034
+      }
+    ]
+  }
+}
