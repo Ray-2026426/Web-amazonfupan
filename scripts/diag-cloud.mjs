@@ -48,8 +48,38 @@ if (Array.isArray(requests)) {
 } else console.log(requests.error);
 
 const images = await get('rpc/image_stats');
-console.log('\n=== 图片表 ===');
+console.log('\n=== 图片表（RPC）===');
 console.log(images && !images.error ? JSON.stringify(images) : (images?.error || '无'));
+
+/** 用 PostgREST 的 count 头统计，不依赖任何 SQL 函数 */
+async function countOf(table, query = 'select=id') {
+    const response = await fetch(`${BASE}/rest/v1/${table}?${query}`, {
+        method: 'HEAD',
+        headers: { ...headers, Prefer: 'count=exact' },
+    });
+    if (!response.ok) return `HTTP ${response.status}`;
+    const range = response.headers.get('content-range') || '';
+    return Number(range.split('/')[1]) || 0;
+}
+console.log('\n=== 图片表（count 统计）===');
+console.log('product_images 总数:', await countOf('product_images'));
+console.log('product_images 已匹配 ASIN:', await countOf('product_images', 'select=id&asin=not.is.null'));
+console.log('product_links（SKU↔ASIN 对照）:', await countOf('product_links'));
+
+// 23 号亏损归因：按 ASIN 找出最烧钱的成本项
+const lossDate = process.argv[2] || '2026-10-23';
+const lossRows = await get(`fact_daily?select=asin,product_name,sales_amount,gross_profit,refund_cost,first_mile_cost,storage_fee,fba_fee,procurement_cost,platform_commission,ad_spend&date=eq.${lossDate}&limit=3000`);
+console.log(`\n=== ${lossDate} 亏损归因（Top 8 按成本合计）===`);
+if (Array.isArray(lossRows)) {
+    const scored = lossRows.map(row => {
+        const cost = ['refund_cost', 'first_mile_cost', 'storage_fee', 'fba_fee', 'procurement_cost', 'platform_commission', 'ad_spend']
+            .reduce((sum, key) => sum + Math.abs(Number(row[key] || 0)), 0);
+        return { ...row, cost };
+    }).sort((a, b) => b.cost - a.cost).slice(0, 8);
+    for (const row of scored) {
+        console.log(`${row.asin} | 销售额 ${Number(row.sales_amount).toFixed(0)} | 毛利 ${Number(row.gross_profit).toFixed(0)} | 退款 ${Number(row.refund_cost).toFixed(0)} | 头程 ${Number(row.first_mile_cost).toFixed(0)} | 仓储 ${Number(row.storage_fee).toFixed(0)} | FBA ${Number(row.fba_fee).toFixed(0)} | 采购 ${Number(row.procurement_cost).toFixed(0)} | 广告 ${Number(row.ad_spend).toFixed(0)}`);
+    }
+} else console.log(lossRows.error);
 
 const inv = await get('fact_inventory?select=date&order=date.desc&limit=1');
 console.log('\n=== 库存快照最新日期 ===');
