@@ -195,3 +195,11 @@ table th {
 @keyframes skeleton-shimmer {
   100% { transform: translateX(100%); }
 }
+
+/* 诊断书打印：只打诊断书本身，其他内容隐藏 */
+@media print {
+    body * { visibility: hidden; }
+    #radar, #radar * { visibility: visible; }
+    #radar { position: absolute; inset: 0 auto auto 0; width: 100%; max-width: none; border: 0; box-shadow: none; }
+    #radar .print\:hidden { display: none !important; }
+}

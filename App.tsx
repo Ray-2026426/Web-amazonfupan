@@ -1297,6 +1297,7 @@ const App: React.FC = () => {
                         <section id="issues">
                             <AnomalyRadar
                                 report={radar}
+                                periodLabel={`${filters.startDate} ~ ${filters.endDate}`}
                                 onDrillAsin={asin => {
                                     focusEntity('childAsins', asin);
                                     setDetailType('PL');
