@@ -113,14 +113,32 @@ for (const shop of active) {
     console.log(`  店铺 ${sid}（${shop.name || ''}）：${total ?? '?'} 行`);
 }
 
-console.log(`共 ${rows.length} 行，调用 ${calls} 次`);
-if (!rows.length) {
+/**
+ * 同一店铺里同一个 MSKU 可能因为多 FNSKU / 多 ASIN 出现多行，
+ * 直接 upsert 会报 "ON CONFLICT DO UPDATE command cannot affect row a second time"。
+ * 这里按主键 (date, sid, msku) 先去重：保留在库数量最大的那一行（更接近真实库存）。
+ */
+const deduped = new Map();
+for (const row of rows) {
+    const key = `${row.date}|${row.sid}|${row.msku}`;
+    const existing = deduped.get(key);
+    if (!existing || Number(row.total_onhand || 0) > Number(existing.total_onhand || 0)) {
+        deduped.set(key, row);
+    }
+}
+const uniqueRows = [...deduped.values()];
+if (uniqueRows.length !== rows.length) {
+    console.log(`同一 MSKU 多行：${rows.length} → 去重后 ${uniqueRows.length} 行`);
+}
+
+console.log(`共 ${uniqueRows.length} 行，调用 ${calls} 次`);
+if (!uniqueRows.length) {
     console.log('没有库存数据，跳过写入');
     process.exit(0);
 }
 
 await clearDate();
-for (let i = 0; i < rows.length; i += 500) {
-    await insertBatch(rows.slice(i, i + 500));
+for (let i = 0; i < uniqueRows.length; i += 500) {
+    await insertBatch(uniqueRows.slice(i, i + 500));
 }
-console.log(`已写入 fact_inventory：${rows.length} 行（${DATE}）`);
+console.log(`已写入 fact_inventory：${uniqueRows.length} 行（${DATE}）`);
