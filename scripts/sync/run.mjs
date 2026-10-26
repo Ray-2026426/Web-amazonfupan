@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '../lingxing-client.mjs';
 import {
+    abs,
     aggregateRows,
     extractProductLinks,
     hasMeaningfulCost,
