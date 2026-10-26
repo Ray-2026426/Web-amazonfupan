@@ -21,12 +21,15 @@ export const AppSettingsButton: React.FC<{
     cloudCutoff?: string;
     /** 最近一次成功同步时间 */
     cloudLastSync?: string;
+    /** 数据源：云端 / 本地导入 */
+    dataSource?: 'cloud' | 'local';
+    onChangeDataSource?: (next: 'cloud' | 'local') => void;
     onOpenCloudLogin?: () => void;
     onOpenCloudAdmin?: () => void;
     /** 毛利修正：把 FBA 国际运费加回毛利 */
     addBackFbaFee?: boolean;
     onToggleFbaFee?: (next: boolean) => void;
-}> = ({ cloudEnabled = false, cloudConnected = false, cloudLoading = false, cloudCutoff = '', cloudLastSync = '', onOpenCloudLogin, onOpenCloudAdmin, addBackFbaFee = true, onToggleFbaFee }) => {
+}> = ({ cloudEnabled = false, cloudConnected = false, cloudLoading = false, cloudCutoff = '', cloudLastSync = '', dataSource = 'cloud', onChangeDataSource, onOpenCloudLogin, onOpenCloudAdmin, addBackFbaFee = true, onToggleFbaFee }) => {
     const [open, setOpen] = useState(false);
     const [settings, setSettings] = useState<AppSettings>(() => loadAppSettings());
     const panelRef = useRef<HTMLDivElement>(null);
@@ -155,6 +158,23 @@ export const AppSettingsButton: React.FC<{
                                         {cloudCutoff && cloudLastSync ? ' · ' : ''}
                                         {cloudLastSync ? `上次同步 ${cloudLastSync}` : ''}
                                     </p>
+                                )}
+                                {cloudConnected && onChangeDataSource && (
+                                    <div className="mt-2">
+                                        <div className="mb-1 text-[10px] text-slate-400">数据源</div>
+                                        <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                                            {([['cloud', '云端'], ['local', '本地导入']] as const).map(([value, label]) => (
+                                                <button
+                                                    key={value}
+                                                    type="button"
+                                                    onClick={() => onChangeDataSource(value)}
+                                                    className={`flex-1 rounded-md py-1 text-[11px] font-semibold transition ${dataSource === value ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                                >
+                                                    {label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
                                 )}
                             </div>
                         )}

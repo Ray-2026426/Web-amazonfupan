@@ -351,6 +351,37 @@ const App: React.FC = () => {
   /** 图片上传是后台任务：面板关掉也要能看到进度 */
   const [uploadTask, setUploadTask] = useState(getImageUploadState());
   useEffect(() => subscribeImageUpload(setUploadTask), []);
+  /** 数据源：云端 / 本地导入（记住选择） */
+  const [dataSource, setDataSource] = useState<'cloud' | 'local'>(() => {
+    try { return localStorage.getItem('amazon-dashboard-data-source') === 'local' ? 'local' : 'cloud'; } catch { return 'cloud'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('amazon-dashboard-data-source', dataSource); } catch { /* 忽略 */ }
+  }, [dataSource]);
+
+  /** 趋势用的长历史（服务端按月/周聚合）：点开趋势时不再只有当前区间 */
+  const [trendHistory, setTrendHistory] = useState<{ month: DataRow[]; week: DataRow[] }>({ month: [], week: [] });
+  useEffect(() => {
+    if (!CLOUD_ENABLED || !cloudToken || !cloudConnected) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const headers = { Authorization: `Bearer ${cloudToken}` };
+        const [monthResponse, weekResponse] = await Promise.all([
+          fetch('/api/trend?mode=month&periods=24', { headers }),
+          fetch('/api/trend?mode=week&periods=52', { headers }),
+        ]);
+        const month = monthResponse.ok ? await monthResponse.json() : null;
+        const week = weekResponse.ok ? await weekResponse.json() : null;
+        if (cancelled) return;
+        setTrendHistory({
+          month: Array.isArray(month?.rows) ? month.rows : [],
+          week: Array.isArray(week?.rows) ? week.rows : [],
+        });
+      } catch { /* 失败就退回当前区间数据 */ }
+    })();
+    return () => { cancelled = true; };
+  }, [cloudConnected, cloudToken]);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Modal States
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -569,15 +600,17 @@ const App: React.FC = () => {
   };
 
   const visibleCloudRows = cloudRowsRange === `${filters.startDate}|${filters.endDate}` ? cloudRows : EMPTY_ROWS;
-  const basePerformance = cloudConnected ? visibleCloudRows : performanceData;
-  const baseWeekly = cloudConnected ? visibleCloudRows : weeklyData;
-  const baseDaily = cloudConnected ? visibleCloudRows : EMPTY_ROWS;
+  /** 数据源开关：云端 / 本地导入。云端连上后仍可切回自己上传的数据 */
+  const useCloudData = CLOUD_ENABLED && cloudConnected && dataSource === 'cloud';
+  const basePerformance = useCloudData ? visibleCloudRows : performanceData;
+  const baseWeekly = useCloudData ? visibleCloudRows : weeklyData;
+  const baseDaily = useCloudData ? visibleCloudRows : EMPTY_ROWS;
   // 「毛利修正」：勾选后把 FBA 国际运费加回毛利（该费用已含在头程，领星又扣了一次）
   const displayPerformanceData = useMemo(() => applyFbaFeeCorrection(basePerformance, addBackFbaFee), [basePerformance, addBackFbaFee]);
   const displayWeeklyData = useMemo(() => applyFbaFeeCorrection(baseWeekly, addBackFbaFee), [baseWeekly, addBackFbaFee]);
   /** 日粒度只在云端可用：云端 fact_daily 是真正的按天数据，本地导入的月报/周报没有日粒度 */
   const displayDailyData = useMemo(() => applyFbaFeeCorrection(baseDaily, addBackFbaFee), [baseDaily, addBackFbaFee]);
-  const displayTargetData = cloudConnected && cloudTargetActive ? cloudTargetData : targetData;
+  const displayTargetData = useCloudData && cloudTargetActive ? cloudTargetData : targetData;
   const activeRawData = isDailyMode ? displayDailyData : isWeeklyMode ? displayWeeklyData : displayPerformanceData;
 
   // --- 2. Save Filters + data coverage when they change ---
@@ -902,6 +935,8 @@ const App: React.FC = () => {
           { id: 'fee', label: addBackFbaFee ? '关闭毛利修正' : '开启毛利修正', group: '口径', keywords: ['运费', '国际运费'], run: () => setAddBackFbaFee(value => !value) },
           { id: 'sidebar', label: '显示 / 隐藏筛选侧栏', group: '界面', run: toggleSidebar },
           { id: 'copy-link', label: '复制当前视图链接', group: '分享', keywords: ['share', 'url', '发给同事'], run: () => { void navigator.clipboard?.writeText(buildViewLink(periodMode, filters)); } },
+          { id: 'source-cloud', label: '数据源：云端', group: '数据', keywords: ['database'], run: () => setDataSource('cloud') },
+          { id: 'source-local', label: '数据源：本地导入', group: '数据', keywords: ['excel', '上传'], run: () => setDataSource('local') },
           { id: 'clear-focus', label: '清除聚焦', group: '视图', run: clearAllFocus },
           { id: 'shortcuts', label: '查看快捷键', group: '帮助', keywords: ['keyboard', '帮助'], run: () => setShortcutsOpen(true) },
       ];
@@ -976,6 +1011,8 @@ const App: React.FC = () => {
                     onOpenCloudAdmin={() => setShowCloudAdmin(true)}
                     addBackFbaFee={addBackFbaFee}
                     onToggleFbaFee={setAddBackFbaFee}
+                    dataSource={dataSource}
+                    onChangeDataSource={setDataSource}
                 />
 
                 <button
@@ -1221,8 +1258,8 @@ const App: React.FC = () => {
                 onOpenReviewAnalysis={() => setReviewModalOpen(true)}
                 periodMode={periodMode}
                 rawPerformance={activeRawData}
-                performanceMonthly={displayPerformanceData}
-                performanceWeekly={displayWeeklyData}
+                performanceMonthly={useCloudData && trendHistory.month.length ? trendHistory.month : displayPerformanceData}
+                performanceWeekly={useCloudData && trendHistory.week.length ? trendHistory.week : displayWeeklyData}
                 performanceDaily={displayDailyData}
                 productImageLookup={productImageLookup}
                 dataEndDate={dataEndDate}
