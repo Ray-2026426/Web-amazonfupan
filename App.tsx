@@ -350,6 +350,13 @@ const App: React.FC = () => {
   const cloudRangeCache = useRef(new Map<string, { at: number; rows: DataRow[]; targets: any; latestDate: string }>());
   /** 命令面板（⌘K）：键盘完成切粒度、跳区间、开数据管理、下钻等操作 */
   const [commandOpen, setCommandOpen] = useState(false);
+  /** 主页视图：总览（雷达+三张表）/ 诊断（瀑布+矩阵+库存健康） */
+  const [homeView, setHomeView] = useState<'overview' | 'diagnose'>(() => {
+    try { return localStorage.getItem('amazon-dashboard-home-view') === 'diagnose' ? 'diagnose' : 'overview'; } catch { return 'overview'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('amazon-dashboard-home-view', homeView); } catch { /* 忽略 */ }
+  }, [homeView]);
   /** 云端管理面板打开时定位到哪个 tab（图片上传浮层点进来时用） */
   const [adminInitialTab, setAdminInitialTab] = useState<'images' | undefined>(undefined);
   /** 图片上传是后台任务：面板关掉也要能看到进度 */
@@ -563,15 +570,30 @@ const App: React.FC = () => {
               setCloudStatus(issues.join(' · '));
               setDataEndDate(freshness.latest_date);
               setLastImportedAt(freshness.latestRun?.finished_at ? Date.parse(freshness.latestRun.finished_at) : undefined);
-              // 商品图片表存在云端：连上就自动加载，本地已有时不重复拉
+              /**
+               * 商品图片有两个来源，合并使用：
+               *   1) 你上传的图片表（人工指定，优先级最高）
+               *   2) 每日库存快照里的领星主图 pic_url（自动，无需上传）
+               * 两路都是可选的，失败不影响主流程。
+               */
               if (productImageData.length === 0) {
-                  fetch('/api/product-images', { headers: { Authorization: `Bearer ${cloudToken}` } })
-                      .then(response => (response.ok ? response.json() : null))
-                      .then(payload => {
-                          const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-                          if (rows.length) setProductImageData(rows);
-                      })
-                      .catch(() => { /* 图片表没建也不影响主流程 */ });
+                  const headers = { Authorization: `Bearer ${cloudToken}` };
+                  Promise.all([
+                      fetch('/api/product-images', { headers }).then(response => (response.ok ? response.json() : null)).catch(() => null),
+                      fetch('/api/inventory', { headers }).then(response => (response.ok ? response.json() : null)).catch(() => null),
+                  ]).then(([imagePayload, inventoryPayload]) => {
+                      const uploaded = Array.isArray(imagePayload?.rows) ? imagePayload.rows : [];
+                      const fromInventory = (Array.isArray(inventoryPayload?.rows) ? inventoryPayload.rows : [])
+                          .filter((row: { pic_url?: string; asin?: string }) => row.pic_url && /^https?:\/\//i.test(String(row.pic_url)))
+                          .map((row: { pic_url: string; asin?: string; product_name?: string }) => ({
+                              sku: '',
+                              product_name: row.product_name || '',
+                              image_url: row.pic_url,
+                              asin: row.asin || '',
+                          }));
+                      const merged = [...uploaded, ...fromInventory];
+                      if (merged.length) setProductImageData(merged);
+                  }).catch(() => { /* 图片源缺失不影响主流程 */ });
               }
           } catch (error) {
               if (controller.signal.aborted) return;
@@ -951,6 +973,8 @@ const App: React.FC = () => {
           { id: 'source-cloud', label: '数据源：云端', group: '数据', keywords: ['database'], run: () => setDataSource('cloud') },
           { id: 'source-local', label: '数据源：本地导入', group: '数据', keywords: ['excel', '上传'], run: () => setDataSource('local') },
           { id: 'clear-focus', label: '清除聚焦', group: '视图', run: clearAllFocus },
+          { id: 'view-overview', label: '视图：总览（雷达 + 三张表）', group: '视图', keywords: ['home'], run: () => setHomeView('overview') },
+          { id: 'view-diagnose', label: '视图：诊断（瀑布 / 矩阵 / 库存健康）', group: '视图', keywords: ['diagnose'], run: () => setHomeView('diagnose') },
           { id: 'shortcuts', label: '查看快捷键', group: '帮助', keywords: ['keyboard', '帮助'], run: () => setShortcutsOpen(true) },
       ];
   })();
@@ -1163,6 +1187,31 @@ const App: React.FC = () => {
                         /></section>
                     )}
 
+                    {/* 视图切换：主页只放「雷达 + 三张表」，深度分析收进「诊断」 */}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex w-fit items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
+                            {([['overview', '总览'], ['diagnose', '诊断']] as const).map(([value, label]) => (
+                                <button
+                                    key={value}
+                                    type="button"
+                                    onClick={() => setHomeView(value)}
+                                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${homeView === value ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                                >
+                                    {label}
+                                    {value === 'diagnose' && radar && radar.findings.length > 0 && (
+                                        <span className={`rounded-full px-1.5 text-[10px] ${homeView === value ? 'bg-white/20' : 'bg-rose-50 text-rose-600'}`}>
+                                            {radar.findings.length}
+                                        </span>
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+                        <span className="text-[11px] text-slate-400">
+                            {homeView === 'overview' ? '总览：异常雷达 + 利润 / 流量 / 库存三张表' : '诊断：毛利瀑布 + 对比矩阵 + 库存健康'}
+                        </span>
+                    </div>
+
+                    {homeView === 'overview' && <>
                     {processedData && radar && (
                         <section id="issues">
                             <AnomalyRadar
@@ -1191,6 +1240,32 @@ const App: React.FC = () => {
                         </section>
                     )}
 
+                    {/* 3. Traffic Table */}
+                    {processedData && (
+                        <section id="traffic">
+                            <MetricCompareTable
+                                title="流量与广告"
+                                rows={TRAFFIC_METRICS}
+                                current={processedData.current}
+                                last={processedData.last}
+                                year={processedData.year}
+                                target={processedData.target}
+                                onOpenDetail={() => { setDetailType('Traffic'); setDetailModalOpen(true); }}
+                            />
+                        </section>
+                    )}
+
+                    {/* 4. Inventory Table */}
+                    {processedData && (
+                        <section id="inventory"><InventoryTable 
+                            data={processedData.inventory} 
+                            inventoryRows={processedData.invRows}
+                            onOpenDetail={() => { setDetailType('Inventory'); setDetailModalOpen(true); }}
+                        /></section>
+                    )}
+                    </>}
+
+                    {homeView === 'diagnose' && <>
                     {/* 2.5 毛利瀑布：销售额一路减到毛利，并拆出变化来自「量」还是「率」 */}
                     {processedData && (
                         <Suspense fallback={null}>
@@ -1216,32 +1291,9 @@ const App: React.FC = () => {
                         />
                     )}
 
-                    {/* 3. Traffic Table */}
-                    {processedData && (
-                        <section id="traffic">
-                            <MetricCompareTable
-                                title="流量与广告"
-                                rows={TRAFFIC_METRICS}
-                                current={processedData.current}
-                                last={processedData.last}
-                                year={processedData.year}
-                                target={processedData.target}
-                                onOpenDetail={() => { setDetailType('Traffic'); setDetailModalOpen(true); }}
-                            />
-                        </section>
-                    )}
-
-                    {/* 4. Inventory Table */}
-                    {processedData && (
-                        <section id="inventory"><InventoryTable 
-                            data={processedData.inventory} 
-                            inventoryRows={processedData.invRows}
-                            onOpenDetail={() => { setDetailType('Inventory'); setDetailModalOpen(true); }}
-                        /></section>
-                    )}
-
                     {/* 4.5 库存健康：可售天数 = 可售库存 ÷ 近 28 天日均销量 */}
                     {processedData && <Suspense fallback={null}><StockHealth rows={activeRawData} onFocusAsin={asin => focusEntity('childAsins', asin)} /></Suspense>}
+                    </>}
 
                     {!processedData && (
                         // 云端第一次拉数（或切换区间后还没拿到新数据）时只显示加载态，
