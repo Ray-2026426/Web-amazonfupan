@@ -42,6 +42,21 @@ async function clearDate() {
 }
 
 const client = createClient({ intervalMs: 1300, verbose: true });
+
+/** 领星库存接口偶发 code=500 内部错误：退避重试 3 次 */
+async function fetchStockPage(params, attempt = 1) {
+    try {
+        return await client.call('get_fba_stock_list', params);
+    } catch (error) {
+        const message = String(error?.message || error);
+        if (!/code=500|code=504|超时|timeout|429/i.test(message) || attempt >= 3) throw error;
+        const waitMs = 8000 * attempt;
+        console.log(`  接口报错「${message.slice(0, 60)}」，${waitMs / 1000}s 后重试（第 ${attempt + 1} 次）`);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        return fetchStockPage(params, attempt + 1);
+    }
+}
+
 const shops = (await client.call('get_my_sids', null)).list || [];
 const active = shops.filter((shop) => !shop.is_concept);
 console.log(`日期 ${DATE}，店铺 ${active.length} 个`);
@@ -53,7 +68,7 @@ for (const shop of active) {
     let offset = 0;
     let total = null;
     while (total === null || offset < total) {
-        const data = await client.call('get_fba_stock_list', {
+        const data = await fetchStockPage({
             sid,
             offset,
             length: PAGE,
