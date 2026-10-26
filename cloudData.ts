@@ -32,6 +32,54 @@ export interface CloudFreshness {
 export const fetchCloudFreshness = (token: string, signal?: AbortSignal) =>
   request<CloudFreshness>('/api/freshness', token, signal);
 
+export type CloudAggregate = {
+  rows: number;
+  sales_quantity: number;
+  order_quantity: number;
+  sales_amount: number;
+  gross_profit: number;
+  sessions: number;
+  first_mile_cost: number;
+  procurement_cost: number;
+  storage_fee: number;
+  fba_fee: number;
+  refund_cost: number;
+  platform_commission: number;
+  ad_spend: number;
+  ad_sales: number;
+  ad_orders: number;
+  sp_spend: number;
+  sp_sales: number;
+  sd_spend: number;
+  sd_sales: number;
+  sb_spend: number;
+  sb_sales: number;
+  sbv_spend: number;
+  sbv_sales: number;
+  impressions: number;
+  clicks: number;
+  natural_orders: number;
+  natural_clicks: number;
+  fba_international_fee: number;
+  rating: number;
+  review_count: number;
+  fba_sellable_qty: number;
+};
+
+/** 服务端聚合：首屏 KPI 用这个，几百字节，不必等十几万行明细 */
+export async function fetchCloudAggregate(startDate: string, endDate: string, token: string, signal?: AbortSignal): Promise<{ current: CloudAggregate; last: CloudAggregate | null; year: CloudAggregate | null }> {
+  const periods = calculatePeriodDates(startDate, endDate);
+  const query = [
+    `from=${formatDate(periods.current.start)}`,
+    `to=${formatDate(periods.current.end)}`,
+    `compareFrom=${formatDate(periods.last.start)}`,
+    `compareTo=${formatDate(periods.last.end)}`,
+    `yearFrom=${formatDate(periods.year.start)}`,
+    `yearTo=${formatDate(periods.year.end)}`,
+  ].join('&');
+  return request<{ current: CloudAggregate; last: CloudAggregate | null; year: CloudAggregate | null }>(`/api/aggregate?${query}`, token, signal);
+}
+
 export async function fetchCloudRows(startDate: string, endDate: string, token: string, signal?: AbortSignal): Promise<DataRow[]> {
   const periods = calculatePeriodDates(startDate, endDate);
   const ranges = [periods.current, periods.last, periods.year];

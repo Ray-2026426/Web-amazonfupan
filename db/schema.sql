@@ -160,6 +160,55 @@ from fact_daily
 group by date;
 
 -- ---------------------------------------------------------------------------
+-- 区间聚合：首屏 KPI / 利润表只需要的合计值，在数据库里算完再返回（几十字节 vs 十几万行）
+-- ---------------------------------------------------------------------------
+create or replace function public.aggregate_range(p_from date, p_to date)
+returns jsonb
+language sql
+security invoker
+set search_path = public
+as $$
+    select to_jsonb(t) from (
+        select
+            count(*)::int as rows,
+            coalesce(sum(sales_quantity), 0) as sales_quantity,
+            coalesce(sum(order_quantity), 0) as order_quantity,
+            coalesce(sum(sales_amount), 0) as sales_amount,
+            coalesce(sum(gross_profit), 0) as gross_profit,
+            coalesce(sum(sessions), 0) as sessions,
+            coalesce(sum(first_mile_cost), 0) as first_mile_cost,
+            coalesce(sum(procurement_cost), 0) as procurement_cost,
+            coalesce(sum(storage_fee), 0) as storage_fee,
+            coalesce(sum(fba_fee), 0) as fba_fee,
+            coalesce(sum(refund_cost), 0) as refund_cost,
+            coalesce(sum(platform_commission), 0) as platform_commission,
+            coalesce(sum(ad_spend), 0) as ad_spend,
+            coalesce(sum(ad_sales), 0) as ad_sales,
+            coalesce(sum(ad_orders), 0) as ad_orders,
+            coalesce(sum(sp_spend), 0) as sp_spend,
+            coalesce(sum(sp_sales), 0) as sp_sales,
+            coalesce(sum(sd_spend), 0) as sd_spend,
+            coalesce(sum(sd_sales), 0) as sd_sales,
+            coalesce(sum(sb_spend), 0) as sb_spend,
+            coalesce(sum(sb_sales), 0) as sb_sales,
+            coalesce(sum(sbv_spend), 0) as sbv_spend,
+            coalesce(sum(sbv_sales), 0) as sbv_sales,
+            coalesce(sum(impressions), 0) as impressions,
+            coalesce(sum(clicks), 0) as clicks,
+            coalesce(sum(natural_orders), 0) as natural_orders,
+            coalesce(sum(natural_clicks), 0) as natural_clicks,
+            coalesce(sum(fba_international_fee), 0) as fba_international_fee,
+            coalesce(avg(rating) filter (where rating > 0), 0) as rating,
+            coalesce(sum(review_count), 0) as review_count,
+            coalesce(max(fba_sellable_qty), 0) as fba_sellable_qty
+        from fact_daily
+        where date between p_from and p_to
+    ) t;
+$$;
+revoke all on function public.aggregate_range(date, date) from public, anon, authenticated;
+grant execute on function public.aggregate_range(date, date) to service_role;
+
+-- ---------------------------------------------------------------------------
 -- 每日库存快照：每天抓一次领星「FBA 库存」，按 日期+店铺+MSKU 存一行
 -- ---------------------------------------------------------------------------
 create table if not exists fact_inventory (

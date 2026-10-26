@@ -857,6 +857,24 @@ export const applyFbaFeeCorrection = (rows: DataRow[], enabled: boolean): DataRo
     });
 };
 
+/** 服务端聚合结果 → 前端使用的 AggregatedData（补上派生比率） */
+export const aggregatedFromCloud = (agg: Record<string, unknown> | null | undefined): AggregatedData => {
+    const source = (agg || {}) as Record<string, number>;
+    const salesAmount = Number(source.sales_amount) || 0;
+    const salesQuantity = Number(source.sales_quantity) || 0;
+    const grossProfit = Number(source.gross_profit) || 0;
+    const merged = { ...initialAggregated };
+    for (const key of Object.keys(merged) as (keyof AggregatedData)[]) {
+        const value = Number(source[key as string]);
+        if (Number.isFinite(value)) (merged as unknown as Record<string, number>)[key as string] = value;
+    }
+    merged.gross_margin = salesAmount > 0 ? grossProfit / salesAmount : 0;
+    merged.avg_ticket = salesQuantity > 0 ? salesAmount / salesQuantity : 0;
+    merged.average_rating = Number(source.rating) || 0;
+    merged.review_count = Number(source.review_count) || 0;
+    return merged;
+};
+
 export const aggregateData = (rows: DataRow[]): AggregatedData => {    const agg = { ...initialAggregated };
     let ratingSum = 0;
     let ratingCount = 0;

@@ -5,6 +5,7 @@ import {
   calculatePeriodDates, 
   filterData, 
   aggregateData, 
+  aggregatedFromCloud,
   getTargetForSelection, 
   analyzeDataCompleteness, 
   filterInventoryData, 
@@ -53,7 +54,7 @@ import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parse
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles, Search } from 'lucide-react';
 import { saveToDB, loadFromDB, replaceImportedData } from './db';
 import { DEFAULT_BUSINESS_RULES, generateBusinessIssues, updateActionForIssue } from './utils/businessRules';
-import { CLOUD_ENABLED, clearCloudToken, fetchCloudFreshness, fetchCloudRows, fetchCloudTargets, getCloudToken, saveCloudToken } from './cloudData';
+import { CLOUD_ENABLED, clearCloudToken, fetchCloudAggregate, fetchCloudFreshness, fetchCloudRows, fetchCloudTargets, getCloudToken, saveCloudToken, type CloudAggregate } from './cloudData';
 
 const DEFAULT_DATA_START = '2025-01-01';
 /** 稳定的空数组：避免每次渲染都造新引用，导致下游 useMemo 全部失效重算 */
@@ -237,6 +238,8 @@ const App: React.FC = () => {
   const [showCloudLogin, setShowCloudLogin] = useState(false);
   const [showCloudAdmin, setShowCloudAdmin] = useState(false);
   const [cloudRows, setCloudRows] = useState<DataRow[]>([]);
+  /** 服务端聚合结果（KPI 首屏用）：{ key, current, last, year } */
+  const [cloudAgg, setCloudAgg] = useState<{ key: string; current: CloudAggregate; last: CloudAggregate | null; year: CloudAggregate | null } | null>(null);
   const [cloudRowsRange, setCloudRowsRange] = useState('');
   const [cloudConnected, setCloudConnected] = useState(false);
   const [cloudLoading, setCloudLoading] = useState(false);
@@ -521,10 +524,18 @@ const App: React.FC = () => {
                   setFilters(prev => ({ ...prev, startDate: `${latest.slice(0, 7)}-01`, endDate: latest }));
                   return;
               }
-              const [rows, targets] = await Promise.all([
-                  fetchCloudRows(filters.startDate, filters.endDate, cloudToken, controller.signal),
-                  fetchCloudTargets(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null),
-              ]);
+              /**
+               * 先并行发起两路：聚合（几百字节，快）+ 明细（十几万行，慢）。
+               * 聚合先回来就先画 KPI，明细到了再补表格/下钻——这就是首屏变快的关键。
+               */
+              const aggregatePromise = fetchCloudAggregate(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null);
+              const [rows, targets] = await (async () => {
+                  const rowsPromise = fetchCloudRows(filters.startDate, filters.endDate, cloudToken, controller.signal);
+                  const targetsPromise = fetchCloudTargets(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null);
+                  const aggregate = await aggregatePromise;
+                  if (aggregate && !controller.signal.aborted) setCloudAgg({ key: cacheKey, ...aggregate });
+                  return Promise.all([rowsPromise, targetsPromise]);
+              })();
               if (controller.signal.aborted) return;
               setCloudRows(rows);
               setCloudTargetData(targets?.rows || []);
@@ -794,7 +805,12 @@ const App: React.FC = () => {
   
   const processedData = useMemo(() => {
       const activeData = activeRawData;
-      if (activeData.length === 0) return null;
+      /**
+       * 云端聚合（几百字节）：明细还没到也能先把 KPI / 利润表画出来。
+       * 明细到了之后 currentRows 才有值，用于瀑布归因、矩阵、下钻。
+       */
+      const cloudMatch = useCloudData && cloudAgg && cloudAgg.key === `${filters.startDate}|${filters.endDate}` ? cloudAgg : null;
+      if (activeData.length === 0 && !cloudMatch) return null;
       if (!filters.startDate || !filters.endDate) return null;
 
       const periods = calculatePeriodDates(filters.startDate, filters.endDate);
@@ -803,21 +819,14 @@ const App: React.FC = () => {
       const currentRows = filterData(activeData, periods.current, filters);
       const lastRows = filterData(activeData, periods.last, filters);
       const yearRows = filterData(activeData, periods.year, filters);
-      // Aggregate
-      const current = aggregateData(currentRows);
-      // STRICT: Return null if no data, so comparison logic knows it's missing (not 0)
-      // UPDATED per user request to handle empty as zero for comparison calculations?
-      // Actually, user previously said "restore comparison lines". 
-      // If we return null, TableRenderers.tsx hides the line.
-      // If we return 0 object, it calculates diff against 0.
-      // The previous instruction was "return null instead of zero-filled".
-      // Now I'll keep it as is (using null for missing data to show correct 'No Data' state or dashes)
-      // UNLESS the user wants to see -100% when comparing against 0? 
-      // Usually "missing data" (null) is cleaner than "0 data".
-      // I will assume the previous fix (null) was correct for logic, but maybe they want the UI to allow fullscreen.
-      
-      const last = lastRows.length > 0 ? aggregateData(lastRows) : null;
-      const year = yearRows.length > 0 ? aggregateData(yearRows) : null;
+      // Aggregate：优先用服务端聚合结果（首屏快），没有再回退到明细聚合
+      const current = cloudMatch ? aggregatedFromCloud(cloudMatch.current as unknown as Record<string, unknown>) : aggregateData(currentRows);
+      const last = cloudMatch
+          ? (cloudMatch.last ? aggregatedFromCloud(cloudMatch.last as unknown as Record<string, unknown>) : null)
+          : (lastRows.length > 0 ? aggregateData(lastRows) : null);
+      const year = cloudMatch
+          ? (cloudMatch.year ? aggregatedFromCloud(cloudMatch.year as unknown as Record<string, unknown>) : null)
+          : (yearRows.length > 0 ? aggregateData(yearRows) : null);
 
       // Targets：月度取全月目标；周度/日度按天拆成「区间分摊月目标」。序时仅月度展示用。
       /**
@@ -847,7 +856,10 @@ const App: React.FC = () => {
       const inventory = aggregateInventoryData(invRows);
 
       // Analysis
-      const dataCompleteness = analyzeDataCompleteness(currentRows, lastRows, yearRows, periods);
+      // 明细还没到时不要报「数据缺失」——用聚合渲染期间，只保留目标相关提醒
+      const dataCompleteness = cloudMatch && currentRows.length === 0
+          ? { warnings: [] as string[] }
+          : analyzeDataCompleteness(currentRows, lastRows, yearRows, periods);
       const targetWarnings = analyzeTargetCompleteness(displayTargetData, periods.current.start, periods.current.end);
       
       const warnings = [...dataCompleteness.warnings, ...targetWarnings];
@@ -866,7 +878,7 @@ const App: React.FC = () => {
           invRows,
           pacingRatio,
       };
-  }, [activeRawData, displayTargetData, inventoryData, filters, periodMode, dataEndDate]);
+  }, [activeRawData, displayTargetData, inventoryData, filters, periodMode, dataEndDate, cloudAgg, useCloudData]);
 
   /** 经营异常雷达：核心指标毛利额 → 三维（销量/客单价/毛利率）→ 根因 → 动作 */
   const radar = useMemo(() => {
