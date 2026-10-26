@@ -144,24 +144,37 @@ async function save(body) {
       return { relinked: true };
     }
     case 'images_stats': {
-      // 图片表体检：总数 / 已匹配 ASIN / 最近一次上传时间
+      // 图片表体检：用 PostgREST 的 count 头统计，不依赖任何 SQL 函数（省得每次都要重新执行 schema）
       const base = process.env.SUPABASE_URL?.replace(/\/$/, '');
       const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
       if (!base || !key) throw Object.assign(new Error('缺少 Supabase 配置'), { status: 500 });
-      const response = await fetch(`${base}/rest/v1/rpc/image_stats`, {
-        method: 'POST',
-        headers: {
-          apikey: key,
-          'Content-Type': 'application/json',
-          ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}),
-        },
-        body: '{}',
-      });
-      if (!response.ok) {
-        const text = (await response.text()).slice(0, 200);
-        throw Object.assign(new Error(`图片表还没建好（请先在 Supabase 执行 db/schema.sql）：${text}`), { status: 400 });
-      }
-      return { stats: await response.json() };
+      const auth = {
+        apikey: key,
+        ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}),
+      };
+      const countOf = async (query) => {
+        const response = await fetch(`${base}/rest/v1/product_images?${query}`, {
+          method: 'HEAD',
+          headers: { ...auth, Prefer: 'count=exact' },
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const range = response.headers.get('content-range') || '';
+        const total = Number(range.split('/')[1]);
+        return Number.isFinite(total) ? total : 0;
+      };
+      const [total, withAsin] = await Promise.all([
+        countOf('select=id'),
+        countOf('select=id&asin=not.is.null'),
+      ]);
+      let lastImport = null;
+      try {
+        const response = await fetch(`${base}/rest/v1/product_image_imports?select=activated_at&active=eq.true&limit=1`, { headers: auth });
+        if (response.ok) {
+          const rows = await response.json();
+          lastImport = rows?.[0]?.activated_at || null;
+        }
+      } catch { /* 忽略：没有批次记录也不影响主统计 */ }
+      return { stats: { total, with_asin: withAsin, last_import: lastImport } };
     }
     default:
       throw Object.assign(new Error('未知管理操作'), { status: 400 });
