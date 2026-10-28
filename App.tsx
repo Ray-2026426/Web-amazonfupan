@@ -50,6 +50,7 @@ const StockHealth = lazyWithRetry(() => import('./components/StockHealth').then(
 import { BusinessCommandCenter } from './components/BusinessCommandCenter';
 import { AnomalyRadar } from './components/AnomalyRadar';
 import { MetricMatrix } from './components/MetricMatrix';
+import { InventoryDecision } from './components/InventoryDecision';
 import { buildRadarReport } from './utils/diagnosticRadar';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
 import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles, Search } from 'lucide-react';
@@ -1406,6 +1407,16 @@ const App: React.FC = () => {
                             snapshotNote={useCloudData ? '领星 FBA 库存明细 · 每天 09:00 自动抓取' : '本地导入的库存/库龄报表'}
                             onOpenDetail={() => { setDetailType('Inventory'); setDetailModalOpen(true); }}
                         /></section>
+                    )}
+
+                    {/* 4.6 库存决策：父体级判断补货 / 维持 / 清仓 */}
+                    {processedData && (
+                        <InventoryDecision
+                            rows={processedData.invRows}
+                            salesRows={activeRawData}
+                            imageLookup={productImageLookup}
+                            onFocusParent={asin => focusEntity('parentAsins', asin)}
+                        />
                     )}
                     </>}
 
