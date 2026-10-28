@@ -173,11 +173,6 @@ const App: React.FC = () => {
   const [productImageData, setProductImageData] = useState<ProductImageRow[]>([]);
   const [businessActions, setBusinessActions] = useState<ActionItem[]>([]);
 
-  const productImageLookup = useMemo<ProductImageLookup | null>(() => {
-      if (productImageData.length === 0) return null;
-      return buildProductImageLookup(productImageData);
-  }, [productImageData]);
-
   // UI States
   /**
    * 默认进站视图：日度 + 昨天 + 全选（不带任何维度筛选）。
@@ -256,6 +251,16 @@ const App: React.FC = () => {
   /** 服务端聚合结果（KPI 首屏用）：{ key, current, last, year } */
   const [cloudAgg, setCloudAgg] = useState<{ key: string; current: CloudAggregate; last: CloudAggregate | null; year: CloudAggregate | null } | null>(null);
   const [cloudRowsRange, setCloudRowsRange] = useState('');
+
+  /**
+   * 图片对照表。父体本身没有图，所以额外传入业绩明细，
+   * 让「父 ASIN」能沿用其销量最高子体的图片。
+   */
+  const productImageLookup = useMemo<ProductImageLookup | null>(() => {
+      if (productImageData.length === 0) return null;
+      const salesRows = cloudRows.length > 0 ? cloudRows : performanceData;
+      return buildProductImageLookup(productImageData, salesRows);
+  }, [productImageData, cloudRows, performanceData]);
   const [cloudConnected, setCloudConnected] = useState(false);
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudStatus, setCloudStatus] = useState('');

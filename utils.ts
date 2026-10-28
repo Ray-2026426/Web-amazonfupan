@@ -5,6 +5,8 @@ import type { DataRow, TargetRow, FilterState, AggregatedData, InventoryRow, Inv
 export interface ProductImageLookup {
     bySku: Map<string, string>;
     byProductName: Map<string, string>;
+    /** 父 ASIN → 该父体下销量最高子体的 ASIN（用它的图代表父体） */
+    byParent?: Map<string, string>;
 }
 
 /** 统一键：去空格、小写、全角转半角，便于品名/SKU 对齐 */
@@ -14,7 +16,7 @@ export const normImageKey = (s: string): string => {
     return t;
 };
 
-export const buildProductImageLookup = (rows: ProductImageRow[]): ProductImageLookup => {
+export const buildProductImageLookup = (rows: ProductImageRow[], salesRows: DataRow[] = []): ProductImageLookup => {
     const bySku = new Map<string, string>();
     const byProductName = new Map<string, string>();
     for (const row of rows) {
@@ -25,7 +27,30 @@ export const buildProductImageLookup = (rows: ProductImageRow[]): ProductImageLo
         if (row.asin) bySku.set(normImageKey(row.asin), url);
         if (row.product_name) byProductName.set(normImageKey(row.product_name), url);
     }
-    return { bySku, byProductName };
+
+    /**
+     * 父 ASIN 没有自己的图：取该父体下**销量最高**的子 ASIN 的图来代表。
+     * 这样列表按父体聚合时也有图，而不是一片占位符。
+     */
+    const byParent = new Map<string, string>();
+    if (salesRows.length) {
+        const best = new Map<string, { asin: string; qty: number }>();
+        for (const row of salesRows) {
+            const parent = row.parent_asin || '';
+            const child = row.child_asin || '';
+            if (!parent || !child) continue;
+            const qty = Number(row.sales_quantity) || 0;
+            const current = best.get(parent);
+            if (!current || qty > current.qty) best.set(parent, { asin: child, qty });
+        }
+        for (const [parent, pick] of best) {
+            if (bySku.has(normImageKey(parent))) continue;
+            const url = bySku.get(normImageKey(pick.asin));
+            if (url) byParent.set(normImageKey(parent), url);
+        }
+    }
+
+    return { bySku, byProductName, byParent };
 };
 
 /**
@@ -49,6 +74,11 @@ export const resolveProductImage = (
         for (const k of skuKeys) {
             const hit = lookup.bySku.get(normImageKey(k));
             if (hit) return hit;
+        }
+        // 父 ASIN：用它销量最高的子体图片
+        if (opts.asin && lookup.byParent) {
+            const parentHit = lookup.byParent.get(normImageKey(opts.asin));
+            if (parentHit) return parentHit;
         }
         if (opts.productName) {
             const pn = normImageKey(opts.productName);
