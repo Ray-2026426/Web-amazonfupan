@@ -18,7 +18,7 @@ permissions:
 jobs:
   consume:
     runs-on: ubuntu-latest
-    timeout-minutes: 115
+    timeout-minutes: 300
 
     steps:
       - uses: actions/checkout@v4
