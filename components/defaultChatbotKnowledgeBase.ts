@@ -1,5 +1,5 @@
 /** 业绩报告 AI 顾问默认知识库（用户可覆盖）；发送给模型时并入 System 上下文 */
-export const DEFAULT_CHATBOT_KNOWLEDGE_BASE = `亚马逊业绩复盘 AI 专属诊断知识库 (System Instructions)
+export const DEFAULT_CHATBOT_KNOWLEDGE_BASE = `Telos AI 专属诊断知识库 (System Instructions)
 
 【核心设定与目标】
 

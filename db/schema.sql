@@ -353,6 +353,8 @@ create table if not exists fact_inventory (
     updated_at timestamptz not null default now(),
     primary key (date, sid, msku)
 );
+-- 库龄原始字段（领星库存明细里带 age 的字段原样存下来，前端按区间分桶）
+alter table fact_inventory add column if not exists age_raw jsonb;
 create index if not exists idx_fact_inventory_date on fact_inventory (date);
 alter table fact_inventory enable row level security;
 revoke all on table fact_inventory from anon, authenticated;

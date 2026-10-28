@@ -309,7 +309,7 @@ const FMT = {
 
 log('生成 Excel…');
 const wb = new ExcelJS.Workbook();
-wb.creator = '亚马逊业绩报告 / 领星 MCP 同步';
+wb.creator = 'Telos / 领星 MCP 同步';
 const ws = wb.addWorksheet(`ASIN日报 ${DATE}`, {
     views: [{ state: 'frozen', xSplit: 1, ySplit: 1 }],
 });

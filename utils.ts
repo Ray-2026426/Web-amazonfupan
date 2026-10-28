@@ -932,6 +932,88 @@ export const aggregateData = (rows: DataRow[]): AggregatedData => {    const agg
     return agg;
 };
 
+/** 库龄分桶（与领星库龄报表一致）：从 age_raw 里的键推断每个分桶的数量 */
+const AGE_RANGES: { field: string; min: number; max: number }[] = [
+    { field: 'age_0_30', min: 0, max: 30 },
+    { field: 'age_31_60', min: 31, max: 60 },
+    { field: 'age_61_90', min: 61, max: 90 },
+    { field: 'age_91_180', min: 91, max: 180 },
+    { field: 'age_181_270', min: 181, max: 270 },
+    { field: 'age_271_330', min: 271, max: 330 },
+    { field: 'age_331_365', min: 331, max: 365 },
+    { field: 'age_365_plus', min: 366, max: 100000 },
+];
+
+function ageBucketsOf(ageRaw: unknown): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const range of AGE_RANGES) out[range.field] = 0;
+    if (!ageRaw || typeof ageRaw !== 'object') return out;
+    for (const [key, value] of Object.entries(ageRaw as Record<string, unknown>)) {
+        const numbers = key.match(/\d+/g);
+        if (!numbers || numbers.length === 0) continue;
+        const lower = Number(numbers[0]);
+        const bucket = AGE_RANGES.find(range => lower >= range.min && lower <= range.max);
+        if (!bucket) continue;
+        out[bucket.field] += Number(value) || 0;
+    }
+    return out;
+}
+
+/**
+ * 云端库存快照（fact_inventory）→ 前端库存行。
+ * 只填「表格 3」用得到的字段，其余给 0，避免把类型搞得过于庞杂。
+ */
+export const cloudInventoryToRows = (raw: Record<string, unknown>[]): InventoryRow[] => (
+    raw.map(row => {
+        const num = (key: string) => Number(row[key]) || 0;
+        const text = (key: string) => (row[key] === null || row[key] === undefined ? '' : String(row[key]));
+        const buckets = ageBucketsOf(row.age_raw);
+        const unitCost = num('unit_cost');
+        const ageFields: Record<string, number> = {};
+        for (const range of AGE_RANGES) {
+            ageFields[`${range.field}_qty`] = buckets[range.field];
+            ageFields[`${range.field}_cost`] = buckets[range.field] * unitCost;
+        }
+        return {
+            parent_asin: text('parent_asin'),
+            warehouse: 'FBA',
+            shop_name: text('shop_name'),
+            asin: text('asin'),
+            msku: text('msku'),
+            fnsku: text('fnsku'),
+            sku: text('msku'),
+            product_name: text('product_name'),
+            spu: '',
+            style: '',
+            attribute: '',
+            category_1: '',
+            category_2: '',
+            category_3: '',
+            brand: '',
+            manager: '',
+            country: '',
+            fba_total_qty: num('total_onhand'),
+            fba_total_cost: num('total_cost'),
+            fba_available_qty: num('fulfillable'),
+            fba_available_cost: num('fulfillable') * unitCost,
+            fba_sellable_qty: num('fulfillable'),
+            fba_sellable_cost: num('fulfillable') * unitCost,
+            fbm_sellable_qty: 0,
+            fbm_sellable_cost: 0,
+            fba_reserved_qty: num('reserved'),
+            fba_reserved_cost: num('reserved') * unitCost,
+            fba_transferring_qty: num('inbound_working'),
+            fba_transferring_cost: num('inbound_working') * unitCost,
+            fba_pending_qty: num('inbound_shipped') + num('inbound_receiving'),
+            fba_pending_cost: (num('inbound_shipped') + num('inbound_receiving')) * unitCost,
+            ...ageFields,
+            awd_total_qty: 0,
+            awd_total_cost: 0,
+            pic_url: text('pic_url'),
+        } as unknown as InventoryRow;
+    })
+);
+
 export const aggregateInventoryData = (rows: InventoryRow[]): InventoryAggregated => {
     const agg = { ...initialInventoryAggregated };
     rows.forEach(r => {

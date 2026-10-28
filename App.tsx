@@ -10,6 +10,7 @@ import {
   analyzeDataCompleteness, 
   filterInventoryData, 
   aggregateInventoryData, 
+  cloudInventoryToRows,
   enrichTargetData, 
   getPacingRatio,
   getWeeklyAllocatedTarget,
@@ -164,6 +165,8 @@ const App: React.FC = () => {
   const [cloudTargetData, setCloudTargetData] = useState<TargetRow[]>([]);
   const [cloudTargetActive, setCloudTargetActive] = useState(false);
   const [inventoryData, setInventoryData] = useState<InventoryRow[]>([]);
+  /** 云端库存快照原始行（fact_inventory） */
+  const [cloudInventoryRaw, setCloudInventoryRaw] = useState<Record<string, unknown>[]>([]);
   const [refundData, setRefundData] = useState<RefundRow[]>([]);
   const [reviewData, setReviewData] = useState<ReviewRow[]>([]);
   const [searchTermData, setSearchTermData] = useState<SearchTermRow[]>([]); 
@@ -688,6 +691,8 @@ const App: React.FC = () => {
           fetch('/api/product-images', { headers }).then(response => (response.ok ? response.json() : null)).catch(() => null),
           fetch('/api/inventory', { headers }).then(response => (response.ok ? response.json() : null)).catch(() => null),
       ]).then(([imagePayload, inventoryPayload]) => {
+          // 库存快照顺带拿到：表格 3 与商品图片都靠它
+          if (Array.isArray(inventoryPayload?.rows)) setCloudInventoryRaw(inventoryPayload.rows);
           const uploaded = Array.isArray(imagePayload?.rows) ? imagePayload.rows : [];
           const fromInventory = (Array.isArray(inventoryPayload?.rows) ? inventoryPayload.rows : [])
               .filter((row: { pic_url?: string }) => row.pic_url && /^https?:\/\//i.test(String(row.pic_url)))
@@ -710,9 +715,26 @@ const App: React.FC = () => {
       // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudConnected, cloudToken, cloudRefreshTick, productImageData.length]);
 
+  /** 库存快照：连上云端就拉最新一天，云端刷新时再拉（表格 3 的数据来源） */
+  useEffect(() => {
+      if (!CLOUD_ENABLED || !cloudToken || !cloudConnected) return;
+      let cancelled = false;
+      fetch('/api/inventory', { headers: { Authorization: `Bearer ${cloudToken}` } })
+          .then(response => (response.ok ? response.json() : null))
+          .then(payload => {
+              if (cancelled) return;
+              if (Array.isArray(payload?.rows) && payload.rows.length) setCloudInventoryRaw(payload.rows);
+          })
+          .catch(() => { /* 库存失败不影响主流程 */ });
+      return () => { cancelled = true; };
+  }, [cloudConnected, cloudToken, cloudRefreshTick]);
+
   const visibleCloudRows = cloudRowsRange === `${filters.startDate}|${filters.endDate}` ? cloudRows : EMPTY_ROWS;
   /** 数据源开关：云端 / 本地导入。云端连上后仍可切回自己上传的数据 */
   const useCloudData = CLOUD_ENABLED && cloudConnected && dataSource === 'cloud';
+  /** 云端库存快照（每日）→ 库存行；为 0 时回退到本地导入的库龄报表 */
+  const cloudInventoryRows = useMemo(() => cloudInventoryToRows(cloudInventoryRaw), [cloudInventoryRaw]);
+  const effectiveInventory = useCloudData && cloudInventoryRows.length > 0 ? cloudInventoryRows : inventoryData;
   const basePerformance = useCloudData ? visibleCloudRows : performanceData;
   const baseWeekly = useCloudData ? visibleCloudRows : weeklyData;
   const baseDaily = useCloudData ? visibleCloudRows : EMPTY_ROWS;
@@ -955,7 +977,7 @@ const App: React.FC = () => {
               : getDailyAllocatedTarget(displayTargetData, periods.current.start, periods.current.end, filters);
 
       // Inventory (Snapshot logic usually, here simplified filter)
-      const invRows = filterInventoryData(inventoryData, filters);
+      const invRows = filterInventoryData(effectiveInventory, filters);
       const inventory = aggregateInventoryData(invRows);
 
       // Analysis
@@ -981,7 +1003,7 @@ const App: React.FC = () => {
           invRows,
           pacingRatio,
       };
-  }, [activeRawData, displayTargetData, inventoryData, filters, periodMode, dataEndDate, cloudAgg, useCloudData, dimensionSignature]);
+  }, [activeRawData, displayTargetData, effectiveInventory, filters, periodMode, dataEndDate, cloudAgg, useCloudData, dimensionSignature]);
 
   /** 经营异常雷达：核心指标毛利额 → 三维（销量/客单价/毛利率）→ 根因 → 动作 */
   const radar = useMemo(() => {
@@ -1066,7 +1088,7 @@ const App: React.FC = () => {
       <div className={`fixed inset-y-0 left-0 z-40 transition-transform xl:relative xl:z-20 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} ${sidebarCollapsed ? 'xl:hidden' : 'xl:translate-x-0'}`}>
       <SidebarFilters 
         data={activeRawData}
-        inventoryData={inventoryData}
+        inventoryData={effectiveInventory}
         targetData={displayTargetData}
         filters={filters} 
         setFilters={setFilters} 
@@ -1089,7 +1111,7 @@ const App: React.FC = () => {
                     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0f172a_0%,#2563eb_100%)] text-white shadow-lg shadow-sky-500/20">
                         <LayoutDashboard className="w-5 h-5" />
                     </div>
-                    <span className="hidden text-sm font-bold text-slate-900 sm:inline">亚马逊业绩复盘</span>
+                    <span className="hidden text-sm font-bold tracking-tight text-slate-900 sm:inline">Telos</span>
                 </div>
                 <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/90 p-1">
                     {([

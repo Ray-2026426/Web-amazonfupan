@@ -43,6 +43,17 @@ async function clearDate() {
 
 const client = createClient({ intervalMs: 1300, verbose: true });
 
+/** 领星库存明细里带 age 的字段（库龄区间），原样收集，前端再分桶 */
+function ageRaw(item) {
+    const out = {};
+    for (const [key, value] of Object.entries(item || {})) {
+        if (!/age/i.test(key)) continue;
+        const numeric = Number(value);
+        if (Number.isFinite(numeric) && numeric !== 0) out[key] = numeric;
+    }
+    return Object.keys(out).length ? out : null;
+}
+
 /** 领星库存接口偶发 code=500 内部错误：退避重试 3 次 */
 async function fetchStockPage(params, attempt = 1) {
     try {
@@ -104,7 +115,12 @@ for (const shop of active) {
                 unit_cost: num(item.cg_price ?? item.quantity_price),
                 total_cost: num(item.total_cost ?? item.total_amount),
                 pic_url: text(item.pic_url || item.small_image_url),
+                age_raw: ageRaw(item),
             });
+        }
+        if (!globalThis.__loggedKeys && list[0]) {
+            globalThis.__loggedKeys = true;
+            console.log('  原始字段样例：' + Object.keys(list[0]).join(','));
         }
         offset += PAGE;
         if (list.length === 0) break;
