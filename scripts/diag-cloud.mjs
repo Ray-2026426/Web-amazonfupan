@@ -109,5 +109,11 @@ console.log('\n=== 对账差异 > 2% ===');
 if (Array.isArray(bigDiff) && bigDiff.length) { for (const row of bigDiff) console.log(`${row.date}  差异 ${(Number(row.diff_ratio) * 100).toFixed(1)}%`); } else console.log('（无）');
 
 const inv = await get('fact_inventory?select=date&order=date.desc&limit=1');
+console.log('\n=== 库存快照抽样 ===');
+const invSample = await get('fact_inventory?select=date,sid,shop_name,msku,asin,parent_asin,product_name,fulfillable,reserved,inbound_shipped,inbound_receiving,inbound_working,unsellable,total_onhand,unit_cost,total_cost,age_raw&order=total_onhand.desc&limit=3');
+if (Array.isArray(invSample)) {
+    for (const row of invSample) console.log(JSON.stringify(row).slice(0, 400));
+} else console.log(invSample.error);
+
 console.log('\n=== 库存快照最新日期 ===');
 console.log(Array.isArray(inv) ? (inv[0]?.date || '（空）') : inv.error);

@@ -974,6 +974,17 @@ export const cloudInventoryToRows = (raw: Record<string, unknown>[]): InventoryR
         const text = (key: string) => (row[key] === null || row[key] === undefined ? '' : String(row[key]));
         const buckets = ageBucketsOf(row.age_raw);
         const unitCost = num('unit_cost');
+        const fulfillable = num('fulfillable');
+        const reserved = num('reserved');
+        const inboundShipped = num('inbound_shipped');
+        const inboundReceiving = num('inbound_receiving');
+        const inboundWorking = num('inbound_working');
+        const researching = num('researching');
+        const unsellable = num('unsellable');
+        // 领星有时不返回 total_onhand_quantity：用各状态相加兜底，避免「FBA 总库存」空白
+        const componentTotal = fulfillable + reserved + inboundShipped + inboundReceiving + inboundWorking + researching + unsellable;
+        const totalOnhand = num('total_onhand') || componentTotal;
+        const totalCost = num('total_cost') || totalOnhand * unitCost;
         const ageFields: Record<string, number> = {};
         for (const range of AGE_RANGES) {
             ageFields[`${range.field}_qty`] = buckets[range.field];
@@ -997,20 +1008,20 @@ export const cloudInventoryToRows = (raw: Record<string, unknown>[]): InventoryR
             brand: '',
             manager: '',
             country: '',
-            fba_total_qty: num('total_onhand'),
-            fba_total_cost: num('total_cost'),
-            fba_available_qty: num('fulfillable'),
-            fba_available_cost: num('fulfillable') * unitCost,
-            fba_sellable_qty: num('fulfillable'),
-            fba_sellable_cost: num('fulfillable') * unitCost,
+            fba_total_qty: totalOnhand,
+            fba_total_cost: totalCost,
+            fba_available_qty: fulfillable,
+            fba_available_cost: fulfillable * unitCost,
+            fba_sellable_qty: fulfillable,
+            fba_sellable_cost: fulfillable * unitCost,
             fbm_sellable_qty: 0,
             fbm_sellable_cost: 0,
-            fba_reserved_qty: num('reserved'),
-            fba_reserved_cost: num('reserved') * unitCost,
-            fba_transferring_qty: num('inbound_working'),
-            fba_transferring_cost: num('inbound_working') * unitCost,
-            fba_pending_qty: num('inbound_shipped') + num('inbound_receiving'),
-            fba_pending_cost: (num('inbound_shipped') + num('inbound_receiving')) * unitCost,
+            fba_reserved_qty: reserved,
+            fba_reserved_cost: reserved * unitCost,
+            fba_transferring_qty: inboundWorking,
+            fba_transferring_cost: inboundWorking * unitCost,
+            fba_pending_qty: inboundShipped + inboundReceiving,
+            fba_pending_cost: (inboundShipped + inboundReceiving) * unitCost,
             ...ageFields,
             awd_total_qty: 0,
             awd_total_cost: 0,

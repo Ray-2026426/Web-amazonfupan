@@ -747,6 +747,21 @@ const App: React.FC = () => {
   const displayTargetData = useCloudData && cloudTargetActive ? cloudTargetData : targetData;
   const activeRawData = isDailyMode ? displayDailyData : isWeeklyMode ? displayWeeklyData : displayPerformanceData;
 
+  /** 库存行的负责人/品牌从业绩数据补全（库存快照本身不带这两个维度） */
+  const inventoryWithMeta = useMemo(() => {
+      if (!effectiveInventory.length) return effectiveInventory;
+      const meta = new Map<string, { manager: string; brand: string }>();
+      for (const row of displayPerformanceData) {
+          if (row.child_asin && !meta.has(row.child_asin)) meta.set(row.child_asin, { manager: row.manager || '', brand: row.brand || '' });
+          if (row.parent_asin && !meta.has(row.parent_asin)) meta.set(row.parent_asin, { manager: row.manager || '', brand: row.brand || '' });
+      }
+      if (meta.size === 0) return effectiveInventory;
+      return effectiveInventory.map(item => {
+          const hit = meta.get(item.asin) || meta.get(item.parent_asin);
+          return hit ? { ...item, manager: hit.manager, brand: hit.brand } : item;
+      });
+  }, [effectiveInventory, displayPerformanceData]);
+
   // --- 2. Save Filters + data coverage when they change ---
   useEffect(() => {
       if (!isRestoringData && !cloudConnected && performanceData.length > 0 && filters.startDate) {
@@ -978,7 +993,7 @@ const App: React.FC = () => {
               : getDailyAllocatedTarget(displayTargetData, periods.current.start, periods.current.end, filters);
 
       // Inventory (Snapshot logic usually, here simplified filter)
-      const invRows = filterInventoryData(effectiveInventory, filters);
+      const invRows = filterInventoryData(inventoryWithMeta, filters);
       const inventory = aggregateInventoryData(invRows);
 
       // Analysis
@@ -1004,7 +1019,7 @@ const App: React.FC = () => {
           invRows,
           pacingRatio,
       };
-  }, [activeRawData, displayTargetData, effectiveInventory, filters, periodMode, dataEndDate, cloudAgg, useCloudData, dimensionSignature]);
+  }, [activeRawData, displayTargetData, inventoryWithMeta, filters, periodMode, dataEndDate, cloudAgg, useCloudData, dimensionSignature]);
 
   /** 经营异常雷达：核心指标毛利额 → 三维（销量/客单价/毛利率）→ 根因 → 动作 */
   const radar = useMemo(() => {
@@ -1089,7 +1104,7 @@ const App: React.FC = () => {
       <div className={`fixed inset-y-0 left-0 z-40 transition-transform xl:relative xl:z-20 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} ${sidebarCollapsed ? 'xl:hidden' : 'xl:translate-x-0'}`}>
       <SidebarFilters 
         data={activeRawData}
-        inventoryData={effectiveInventory}
+        inventoryData={inventoryWithMeta}
         targetData={displayTargetData}
         filters={filters} 
         setFilters={setFilters} 

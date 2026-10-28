@@ -304,7 +304,7 @@ const Sparkline: React.FC<{ values: number[]; labels?: string[] }> = ({ values, 
             <polyline points={points.join(' ')} fill="none" stroke="#0ea5e9" strokeWidth="1.6" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
             {anomalies.map(point => (
                 <g key={point.index}>
-                    <circle cx={point.x} cy={point.y} r="2.4" fill="#f43f5e" vectorEffect="non-scaling-stroke" />
+                    <circle cx={point.x} cy={point.y} r="0.9" fill="#f43f5e" />
                     {labels?.[point.index] && <title>{`${labels[point.index]}：${point.value.toFixed(0)}`}</title>}
                 </g>
             ))}
