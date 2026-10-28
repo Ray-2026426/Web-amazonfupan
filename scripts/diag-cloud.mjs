@@ -81,6 +81,33 @@ if (Array.isArray(lossRows)) {
     }
 } else console.log(lossRows.error);
 
+
+// 全量缺口检查：2025 与 2026 各自的缺失日期
+async function gapsOf(from, to) {
+    const rows = await get(`v_fact_daily_coverage?select=date&date=gte.${from}&date=lte.${to}&order=date.asc&limit=2000`);
+    if (!Array.isArray(rows)) return { error: rows?.error || '读取失败' };
+    const have = new Set(rows.map((row) => String(row.date).slice(0, 10)));
+    const missing = [];
+    const cursor = new Date(`${from}T00:00:00Z`);
+    const end = new Date(`${to}T00:00:00Z`);
+    while (cursor <= end) {
+        const day = cursor.toISOString().slice(0, 10);
+        if (!have.has(day)) missing.push(day);
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return { total: have.size, missing };
+}
+console.log('\n=== 全量缺口检查 ===');
+const today = new Date().toISOString().slice(0, 10);
+for (const [label, from, to] of [['2025 全年', '2025-01-01', '2025-12-31'], ['2026 至今', '2026-01-01', today]]) {
+    const result = await gapsOf(from, to);
+    if (result.error) { console.log(`${label}：${result.error}`); continue; }
+    console.log(`${label}：有数据 ${result.total} 天，缺失 ${result.missing.length} 天${result.missing.length ? ' → ' + result.missing.slice(0, 12).join(',') : ''}`);
+}
+const bigDiff = await get('daily_checks?select=date,diff_ratio&diff_ratio=gt.0.02&order=date.desc&limit=12');
+console.log('\n=== 对账差异 > 2% ===');
+if (Array.isArray(bigDiff) && bigDiff.length) { for (const row of bigDiff) console.log(`${row.date}  差异 ${(Number(row.diff_ratio) * 100).toFixed(1)}%`); } else console.log('（无）');
+
 const inv = await get('fact_inventory?select=date&order=date.desc&limit=1');
 console.log('\n=== 库存快照最新日期 ===');
 console.log(Array.isArray(inv) ? (inv[0]?.date || '（空）') : inv.error);
