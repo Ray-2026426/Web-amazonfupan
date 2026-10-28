@@ -58,13 +58,26 @@ async function clearDate() {
 
 const client = createClient({ intervalMs: 1300, verbose: true });
 
-/** 领星库存明细里带 age 的字段（库龄区间），原样收集，前端再分桶 */
+/**
+ * 领星库存明细里的库龄字段（字段名以 inv_age_*_days 为准），
+ * 归一成前端使用的 8 个分桶；其它派生字段（如 0_to_90）忽略，避免重复计数。
+ */
+const AGE_FIELDS = {
+    age_0_30: 'inv_age_0_to_30_days',
+    age_31_60: 'inv_age_31_to_60_days',
+    age_61_90: 'inv_age_61_to_90_days',
+    age_91_180: 'inv_age_91_to_180_days',
+    age_181_270: 'inv_age_181_to_270_days',
+    age_271_330: 'inv_age_271_to_330_days',
+    age_331_365: 'inv_age_331_to_365_days',
+    age_365_plus: 'inv_age_365_plus_days',
+};
+
 function ageRaw(item) {
     const out = {};
-    for (const [key, value] of Object.entries(item || {})) {
-        if (!/age/i.test(key)) continue;
-        const numeric = Number(value);
-        if (Number.isFinite(numeric) && numeric !== 0) out[key] = numeric;
+    for (const [bucket, field] of Object.entries(AGE_FIELDS)) {
+        const value = num(item?.[field]);
+        if (value) out[bucket] = value;
     }
     return Object.keys(out).length ? out : null;
 }

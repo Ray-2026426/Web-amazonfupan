@@ -949,6 +949,11 @@ function ageBucketsOf(ageRaw: unknown): Record<string, number> {
     for (const range of AGE_RANGES) out[range.field] = 0;
     if (!ageRaw || typeof ageRaw !== 'object') return out;
     for (const [key, value] of Object.entries(ageRaw as Record<string, unknown>)) {
+        // 同步时已归一成 age_0_30 这类键，直接取
+        if (AGE_RANGES.some(range => range.field === key)) {
+            out[key] += Number(value) || 0;
+            continue;
+        }
         const numbers = key.match(/\d+/g);
         if (!numbers || numbers.length === 0) continue;
         const lower = Number(numbers[0]);

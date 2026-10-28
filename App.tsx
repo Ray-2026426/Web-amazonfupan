@@ -207,6 +207,7 @@ const App: React.FC = () => {
   const dimensionSignature = useMemo(() => (
       ['countries', 'shops', 'brands', 'managers', 'subCategories', 'parentAsins', 'childAsins', 'productNames'] as (keyof FilterState)[]
   ).map(key => ((filters[key] as string[]) || []).join(',')).join('|'), [filters]);
+  const hasActiveFilters = dimensionSignature.replace(/\|/g, '').length > 0;
   const isWeeklyMode = periodMode === 'week';
   const isDailyMode = periodMode === 'day';
   /** 毛利修正：FBA 国际运费已含在头程，领星算毛利时又扣了一次，勾选后加回来（默认开启） */
@@ -1287,6 +1288,7 @@ const App: React.FC = () => {
                             filters={filters}
                             targetRows={displayTargetData}
                             pacingRatio={processedData.pacingRatio}
+                            historyData={useCloudData && !hasActiveFilters ? trendHistory.day : performanceData}
                         /></section>
                     )}
 

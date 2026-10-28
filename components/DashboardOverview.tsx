@@ -17,6 +17,8 @@ interface DashboardOverviewProps {
     target: AggregatedData;
     periodMode?: PeriodMode;
     rawData?: DataRow[];
+    /** 长历史（服务端按天聚合）：只用于画趋势，不受当前选中区间限制 */
+    historyData?: DataRow[];
     filters?: FilterState;
     targetRows?: TargetRow[];
     /** 时间进度 0~1；&lt;1 时显示序时达成率（仅累计量） */
@@ -320,6 +322,7 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
     target,
     periodMode = 'month',
     rawData = [],
+    historyData,
     filters,
     targetRows = [],
     pacingRatio = 1,
@@ -329,6 +332,8 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
     const [expandedMetric, setExpandedMetric] = useState<MetricCardKey | null>(null);
     /** 首屏主指标：默认毛利额（更关心利润），可切到销售额 */
     const [mainMetric, setMainMetric] = useState<'sales_amount' | 'gross_profit'>('gross_profit');
+    /** 趋势用的数据源：优先长历史，这样选单日/短区间时曲线依然连续 */
+    const trendSource = historyData && historyData.length > 0 ? historyData : rawData;
     /** 趋势面板的期数范围：默认近 12 期，日度默认近 30 天 */
     const [trendRange, setTrendRange] = useState<number>(isDailyMode ? 30 : 12);
     /** 切粒度时把期数重置成该粒度合理的默认值，避免「近12天」这种别扭组合 */
@@ -342,22 +347,22 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
 
     /** 主指标近 30 天的日序列（云端日明细；本地月报只有月粒度，画不出趋势就留空） */
     const sparkSeries = useMemo(() => {
-        if (!rawData.length) return { values: [] as number[], labels: [] as string[] };
+        if (!trendSource.length) return { values: [] as number[], labels: [] as string[] };
         const byDate = new Map<string, number>();
-        for (const row of rawData) {
+        for (const row of trendSource) {
             const value = mainMetric === 'sales_amount' ? Number(row.sales_amount) || 0 : Number(row.gross_profit) || 0;
             byDate.set(row.date, (byDate.get(row.date) || 0) + value);
         }
         const entries = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-30);
         return { values: entries.map(([, value]) => value), labels: entries.map(([date]) => date) };
-    }, [rawData, mainMetric]);
+    }, [trendSource, mainMetric]);
     const sparkValues = sparkSeries.values;
 
     const mainValue = mainMetric === 'sales_amount' ? current.sales_amount : current.gross_profit;
     const mainTarget = mainMetric === 'sales_amount' ? target.sales_amount : target.gross_profit;
     const mainAchievement = mainTarget > 0 ? (mainValue / mainTarget) * 100 : NaN;
 
-    const hasChartData = rawData.length > 0 && filters;
+    const hasChartData = trendSource.length > 0 && filters;
 
     const getMetricConfig = (key: MetricCardKey) => {
         switch (key) {
@@ -417,7 +422,7 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
                     </div>
                 </div>
                 <Suspense fallback={<p className="py-8 text-center text-sm text-slate-500">正在加载趋势图…</p>}><MiniTrendChart
-                    rawData={rawData!}
+                    rawData={trendSource!}
                     filters={filters!}
                     metricKey={expandedMetric}
                     metricLabel={cfg.label}
