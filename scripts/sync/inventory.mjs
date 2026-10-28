@@ -27,13 +27,28 @@ function headers() {
     };
 }
 
+let ageColumnReady = true;
+
+const withoutAge = (list) => list.map(({ age_raw: _ignored, ...rest }) => rest);
+const postRows = (list) => fetch(`${BASE}/rest/v1/fact_inventory?on_conflict=date,sid,msku`, {
+    method: 'POST',
+    headers: { ...headers(), Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(list),
+});
+
 async function insertBatch(rows) {
-    const response = await fetch(`${BASE}/rest/v1/fact_inventory?on_conflict=date,sid,msku`, {
-        method: 'POST',
-        headers: { ...headers(), Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(rows),
-    });
-    if (!response.ok) throw new Error(`写入失败 HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    let response = await postRows(ageColumnReady ? rows : withoutAge(rows));
+    if (response.ok) return;
+    const detail = (await response.text()).slice(0, 300);
+    // 还没跑最新 schema 时没有 age_raw 列：降级写入，别让整次快照失败
+    if (ageColumnReady && /age_raw/.test(detail)) {
+        ageColumnReady = false;
+        console.log('  表里还没有 age_raw 列（跑一次 db/schema.sql 即可启用库龄），本次先跳过库龄');
+        response = await postRows(withoutAge(rows));
+        if (response.ok) return;
+        throw new Error(`写入失败 HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    }
+    throw new Error(`写入失败 HTTP ${response.status}: ${detail}`);
 }
 
 async function clearDate() {
