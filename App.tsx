@@ -167,6 +167,8 @@ const App: React.FC = () => {
   const [inventoryData, setInventoryData] = useState<InventoryRow[]>([]);
   /** 云端库存快照原始行（fact_inventory） */
   const [cloudInventoryRaw, setCloudInventoryRaw] = useState<Record<string, unknown>[]>([]);
+  /** 库存快照的业务日期（用于表格 3 的「数据时刻」提示） */
+  const [cloudInventoryDate, setCloudInventoryDate] = useState('');
   const [refundData, setRefundData] = useState<RefundRow[]>([]);
   const [reviewData, setReviewData] = useState<ReviewRow[]>([]);
   const [searchTermData, setSearchTermData] = useState<SearchTermRow[]>([]); 
@@ -698,7 +700,10 @@ const App: React.FC = () => {
           fetch('/api/inventory', { headers }).then(response => (response.ok ? response.json() : null)).catch(() => null),
       ]).then(([imagePayload, inventoryPayload]) => {
           // 库存快照顺带拿到：表格 3 与商品图片都靠它
-          if (Array.isArray(inventoryPayload?.rows)) setCloudInventoryRaw(inventoryPayload.rows);
+          if (Array.isArray(inventoryPayload?.rows)) {
+              setCloudInventoryRaw(inventoryPayload.rows);
+              if (inventoryPayload.date) setCloudInventoryDate(String(inventoryPayload.date));
+          }
           const uploaded = Array.isArray(imagePayload?.rows) ? imagePayload.rows : [];
           const fromInventory = (Array.isArray(inventoryPayload?.rows) ? inventoryPayload.rows : [])
               .filter((row: { pic_url?: string }) => row.pic_url && /^https?:\/\//i.test(String(row.pic_url)))
@@ -729,7 +734,10 @@ const App: React.FC = () => {
           .then(response => (response.ok ? response.json() : null))
           .then(payload => {
               if (cancelled) return;
-              if (Array.isArray(payload?.rows) && payload.rows.length) setCloudInventoryRaw(payload.rows);
+              if (Array.isArray(payload?.rows) && payload.rows.length) {
+                  setCloudInventoryRaw(payload.rows);
+                  if (payload.date) setCloudInventoryDate(String(payload.date));
+              }
           })
           .catch(() => { /* 库存失败不影响主流程 */ });
       return () => { cancelled = true; };
@@ -755,15 +763,27 @@ const App: React.FC = () => {
   /** 库存行的负责人/品牌从业绩数据补全（库存快照本身不带这两个维度） */
   const inventoryWithMeta = useMemo(() => {
       if (!effectiveInventory.length) return effectiveInventory;
-      const meta = new Map<string, { manager: string; brand: string }>();
+      const meta = new Map<string, { manager: string; brand: string; country: string }>();
       for (const row of displayPerformanceData) {
-          if (row.child_asin && !meta.has(row.child_asin)) meta.set(row.child_asin, { manager: row.manager || '', brand: row.brand || '' });
-          if (row.parent_asin && !meta.has(row.parent_asin)) meta.set(row.parent_asin, { manager: row.manager || '', brand: row.brand || '' });
+          if (row.child_asin && !meta.has(row.child_asin)) meta.set(row.child_asin, { manager: row.manager || '', brand: row.brand || '', country: row.country || '' });
+          if (row.parent_asin && !meta.has(row.parent_asin)) meta.set(row.parent_asin, { manager: row.manager || '', brand: row.brand || '', country: row.country || '' });
       }
-      if (meta.size === 0) return effectiveInventory;
+      if (meta.size === 0) {
+          return effectiveInventory.map(item => ({
+              ...item,
+              manager: (item.manager || '').trim() || '未归属',
+              brand: (item.brand || '').trim() || '未归属',
+              country: (item.country || '').trim() || '未归属',
+          }));
+      }
       return effectiveInventory.map(item => {
           const hit = meta.get(item.asin) || meta.get(item.parent_asin);
-          return hit ? { ...item, manager: hit.manager, brand: hit.brand } : item;
+          return {
+              ...item,
+              manager: (hit?.manager || item.manager || '').trim() || '未归属',
+              brand: (hit?.brand || item.brand || '').trim() || '未归属',
+              country: (hit?.country || item.country || '').trim() || '未归属',
+          };
       });
   }, [effectiveInventory, displayPerformanceData]);
 
@@ -1382,6 +1402,8 @@ const App: React.FC = () => {
                         <section id="inventory"><InventoryTable 
                             data={processedData.inventory} 
                             inventoryRows={processedData.invRows}
+                            snapshotDate={cloudInventoryDate}
+                            snapshotNote={useCloudData ? '领星 FBA 库存明细 · 每天 09:00 自动抓取' : '本地导入的库存/库龄报表'}
                             onOpenDetail={() => { setDetailType('Inventory'); setDetailModalOpen(true); }}
                         /></section>
                     )}

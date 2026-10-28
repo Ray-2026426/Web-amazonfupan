@@ -1052,6 +1052,8 @@ export const cloudInventoryToRows = (raw: Record<string, unknown>[]): InventoryR
             fba_transferring_cost: inboundWorking * unitCost,
             fba_pending_qty: inboundShipped + inboundReceiving,
             fba_pending_cost: (inboundShipped + inboundReceiving) * unitCost,
+            fba_unsellable_qty: unsellable,
+            fba_unsellable_cost: unsellable * unitCost,
             ...ageFields,
             awd_total_qty: 0,
             awd_total_cost: 0,
