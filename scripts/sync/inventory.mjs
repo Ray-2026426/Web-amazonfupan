@@ -146,6 +146,14 @@ for (const shop of active) {
                 age_raw: ageRaw(item),
             });
         }
+        if (!globalThis.__loggedRow && list[0]) {
+            globalThis.__loggedRow = true;
+            const sample = {};
+            for (const key of ['afn_fulfillable_quantity','afn_reserved_quantity','afn_inbound_shipped_quantity','afn_inbound_receiving_quantity','afn_inbound_working_quantity','afn_unsellable_quantity','total_onhand_quantity','total_fulfillable_quantity','available_total','quantity','sku','asin','fnsku','pic_url','cg_price','total_amount','inv_age_0_to_30_days','inv_age_365_plus_days']) {
+                sample[key] = list[0][key];
+            }
+            console.log('原始行样例：' + JSON.stringify(sample));
+        }
         if (!globalThis.__loggedKeys && list[0]) {
             globalThis.__loggedKeys = true;
             console.log('  原始字段样例：' + Object.keys(list[0]).join(','));
