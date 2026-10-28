@@ -27,6 +27,8 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ data, inventoryR
     if (!inv) return null;
 
     const combinedQty = (inv.fba_total_qty || 0) + (inv.awd_total_qty || 0);
+    /** 库龄各桶合计：为 0 说明还没接入库龄报表，界面上给出提示而不是显示一排 0 */
+    const combinedAgeQty = BUCKETS.reduce((sum, [key]) => sum + ((inv[`${key}_qty` as keyof InventoryAggregated] as number) || 0), 0);
 
     const columns = useMemo(() => {
         const fbaQty = inv.fba_total_qty;
@@ -72,6 +74,11 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({ data, inventoryR
                             <Clock className="h-3.5 w-3.5 text-slate-300" />
                             <span className="font-mono text-xs font-semibold text-slate-200">{snapshotDate}</span>
                         </div>
+                    )}
+                    {inv.fba_total_qty > 0 && combinedAgeQty === 0 && (
+                        <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-2 py-0.5 text-[10px] font-medium text-amber-200">
+                            库龄结构待接入（当前为领星 FBA 库存明细）
+                        </span>
                     )}
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
