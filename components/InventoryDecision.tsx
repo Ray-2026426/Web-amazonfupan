@@ -31,6 +31,9 @@ type DecisionRow = {
     asin: string;
     name: string;
     manager: string;
+    country: string;
+    shop: string;
+    brand: string;
     qty: number;
     cost: number;
     dailySales: number;
@@ -54,6 +57,9 @@ export const InventoryDecision: React.FC<{
 }> = ({ rows, salesRows, imageLookup, onFocusParent }) => {
     const [sortKey, setSortKey] = useState<'cost' | 'days' | 'payback'>('cost');
     const [statusFilter, setStatusFilter] = useState<Status | 'all'>('all');
+    const [countryFilter, setCountryFilter] = useState('all');
+    const [shopFilter, setShopFilter] = useState('all');
+    const [brandFilter, setBrandFilter] = useState('all');
 
     const { decisions, windowDays } = useMemo(() => {
         if (!rows.length) return { decisions: [] as DecisionRow[], windowDays: 28 };
@@ -66,9 +72,11 @@ export const InventoryDecision: React.FC<{
             ? new Date(Date.parse(`${lastDate}T00:00:00Z`) - (windowDays - 1) * 86400000).toISOString().slice(0, 10)
             : '';
 
+        const distinctDays = new Set<string>();
         const salesByParent = new Map<string, { qty: number; amount: number; profit: number }>();
         for (const row of salesRows) {
             if (cutoff && row.date < cutoff) continue;
+            distinctDays.add(row.date);
             const key = row.parent_asin || row.child_asin;
             if (!key) continue;
             const entry = salesByParent.get(key) || { qty: 0, amount: 0, profit: 0 };
@@ -97,9 +105,12 @@ export const InventoryDecision: React.FC<{
             const totalAge = AGE_BUCKETS.reduce((sum, bucket) => sum + ageQty(bucket.key), 0);
             const oldQty = ageQty('age_181_270_qty') + ageQty('age_271_330_qty') + ageQty('age_331_365_qty') + ageQty('age_365_plus_qty');
 
+            // 关键：按「实际有数据的天数」求日均，否则只选了 1 天时会把日均压低 28 倍，
+            // 结果所有父体都显示"积压"，断货/补货永远是 0。
+            const effectiveDays = Math.max(distinctDays.size, 1);
             const sales = salesByParent.get(key);
-            const dailySales = sales ? sales.qty / windowDays : 0;
-            const monthlyProfit = sales ? sales.profit * (30 / windowDays) : 0;
+            const dailySales = sales ? sales.qty / effectiveDays : 0;
+            const monthlyProfit = sales ? sales.profit * (30 / effectiveDays) : 0;
             const daysOfSupply = dailySales > 0 ? qty / dailySales : null;
 
             let status: Status;
@@ -115,6 +126,9 @@ export const InventoryDecision: React.FC<{
                 asin: first?.parent_asin || first?.asin || key,
                 name: first?.product_name || key,
                 manager: first?.manager || '未归属',
+                country: (first?.country || '').trim() || '未归属',
+                shop: (first?.shop_name || '').trim() || '未归属',
+                brand: (first?.brand || '').trim() || '未归属',
                 qty,
                 cost,
                 dailySales,
@@ -128,17 +142,26 @@ export const InventoryDecision: React.FC<{
         }
 
         decisions.sort((a, b) => b.cost - a.cost);
-        return { decisions, windowDays };
+        return { decisions, windowDays: Math.max(distinctDays.size, 1) };
     }, [rows, salesRows]);
 
+    const options = useMemo(() => ({
+        countries: [...new Set(decisions.map(item => item.country))].sort(),
+        shops: [...new Set(decisions.map(item => item.shop))].sort(),
+        brands: [...new Set(decisions.map(item => item.brand))].sort(),
+    }), [decisions]);
+
     const visible = useMemo(() => {
-        const base = statusFilter === 'all' ? decisions : decisions.filter(item => item.status === statusFilter);
+        let base = statusFilter === 'all' ? decisions : decisions.filter(item => item.status === statusFilter);
+        if (countryFilter !== 'all') base = base.filter(item => item.country === countryFilter);
+        if (shopFilter !== 'all') base = base.filter(item => item.shop === shopFilter);
+        if (brandFilter !== 'all') base = base.filter(item => item.brand === brandFilter);
         const sorted = [...base];
         if (sortKey === 'cost') sorted.sort((a, b) => b.cost - a.cost);
         if (sortKey === 'days') sorted.sort((a, b) => (a.daysOfSupply ?? 99999) - (b.daysOfSupply ?? 99999));
         if (sortKey === 'payback') sorted.sort((a, b) => (b.paybackMonths ?? -1) - (a.paybackMonths ?? -1));
         return sorted.slice(0, 30);
-    }, [decisions, statusFilter, sortKey]);
+    }, [decisions, statusFilter, sortKey, countryFilter, shopFilter, brandFilter]);
 
     const summary = useMemo(() => {
         const totalCost = decisions.reduce((sum, item) => sum + item.cost, 0);
@@ -208,7 +231,19 @@ export const InventoryDecision: React.FC<{
                 })}
             </div>
 
-            <div className="flex items-center justify-end gap-1 border-b border-slate-100 px-5 py-2 text-[11px] text-slate-500">
+            <div className="flex flex-wrap items-center justify-end gap-2 border-b border-slate-100 px-5 py-2 text-[11px] text-slate-500">
+                <select value={countryFilter} onChange={event => setCountryFilter(event.target.value)} className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-600">
+                    <option value="all">全部国家</option>
+                    {options.countries.map(value => <option key={value} value={value}>{value}</option>)}
+                </select>
+                <select value={shopFilter} onChange={event => setShopFilter(event.target.value)} className="max-w-[160px] rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-600">
+                    <option value="all">全部店铺</option>
+                    {options.shops.map(value => <option key={value} value={value}>{value}</option>)}
+                </select>
+                <select value={brandFilter} onChange={event => setBrandFilter(event.target.value)} className="max-w-[140px] rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-600">
+                    <option value="all">全部品牌</option>
+                    {options.brands.map(value => <option key={value} value={value}>{value}</option>)}
+                </select>
                 <span className="text-slate-400">排序</span>
                 {([['cost', '占用资金'], ['days', '可售天数'], ['payback', '回收月数']] as const).map(([value, label]) => (
                     <button
@@ -227,6 +262,9 @@ export const InventoryDecision: React.FC<{
                     <thead className="bg-slate-50/80 text-[11px] uppercase tracking-[0.12em] text-slate-500">
                         <tr>
                             <th className="px-4 py-2.5">父体 / 品名</th>
+                            <th className="px-3 py-2.5">国家</th>
+                            <th className="px-3 py-2.5">店铺</th>
+                            <th className="px-3 py-2.5">品牌</th>
                             <th className="px-3 py-2.5">负责人</th>
                             <th className="px-3 py-2.5 text-right">库存量</th>
                             <th className="px-3 py-2.5 text-right">库存成本</th>
@@ -257,6 +295,9 @@ export const InventoryDecision: React.FC<{
                                             </div>
                                         </div>
                                     </td>
+                                    <td className="px-3 py-2 text-slate-600">{item.country}</td>
+                                    <td className="max-w-[120px] truncate px-3 py-2 text-slate-600" title={item.shop}>{item.shop}</td>
+                                    <td className="max-w-[100px] truncate px-3 py-2 text-slate-600" title={item.brand}>{item.brand}</td>
                                     <td className="px-3 py-2 text-slate-600">{item.manager}</td>
                                     <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-800">{formatNumber(item.qty)}</td>
                                     <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-600">{formatRMB(item.cost)}</td>
