@@ -26,6 +26,18 @@ const headers = {
 const iso = (date) => date.toISOString().slice(0, 10);
 const DAY = 86400000;
 
+/** Supabase 偶发 500：读覆盖失败时重试 3 次，别让自愈因此整次失败 */
+async function getLatestDateWithRetry(attempt = 1) {
+    try {
+        return await getLatestDate();
+    } catch (error) {
+        if (attempt >= 3) throw error;
+        console.log(`读取覆盖失败（第 ${attempt} 次）：${error.message}，8s 后重试`);
+        await new Promise((resolve) => setTimeout(resolve, 8000 * attempt));
+        return getLatestDateWithRetry(attempt + 1);
+    }
+}
+
 async function getLatestDate() {
     const response = await fetch(`${BASE}/rest/v1/v_fact_daily_coverage?select=date&order=date.desc&limit=1`, { headers });
     if (!response.ok) throw new Error(`读取覆盖失败：HTTP ${response.status}`);
@@ -45,7 +57,7 @@ async function enqueue(dates) {
 const yesterday = new Date(Date.now() - DAY);
 const target = iso(yesterday);
 
-const latest = await getLatestDate();
+const latest = await getLatestDateWithRetry();
 if (!latest) {
     console.log('云端还没有任何数据，跳过（先跑一次全量回补）');
     process.exit(0);
