@@ -9,7 +9,13 @@ name: 领星数据自动同步
 #   3. 提交 sync-trigger.txt（用于让协助者/脚本远程触发，跑 1 天）
 on:
   schedule:
-    - cron: '10 0 * * *'
+    # GitHub 的 cron 是「尽力而为」，实测经常延迟 2~5 小时甚至整次跳过。
+    # 所以每天安排多次，谁先跑成谁算数；已是最新的话后续运行会直接跳过（见 is-fresh 步骤）。
+    - cron: '10 0 * * *'   # 08:10
+    - cron: '10 2 * * *'   # 10:10
+    - cron: '10 4 * * *'   # 12:10
+    - cron: '10 6 * * *'   # 14:10
+    - cron: '10 10 * * *'  # 18:10
   workflow_dispatch:
     inputs:
       days:
@@ -66,7 +72,27 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: node scripts/sync/selfcheck.mjs
 
+      - name: 判断是否已是最新
+        # 每天安排多次定时；只要云端已覆盖到昨天，后面的运行直接跳过，不浪费领星配额
+        id: freshness
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          RESULT=$(node scripts/sync/is-fresh.mjs | tail -n 2)
+          echo "$RESULT"
+          STATE=$(printf '%s\n' "$RESULT" | head -n 1)
+          if [ "$STATE" = "fresh" ] && [ "${EVENT_NAME:-}" = "schedule" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
       - name: 同步（领星 → 数据库）
+        if: steps.freshness.outputs.skip != 'true'
         env:
           LINGXING_MCP_KEY: ${{ secrets.LINGXING_MCP_KEY }}
           LINGXING_CURRENCY: ${{ vars.LINGXING_CURRENCY || 'USD' }}
