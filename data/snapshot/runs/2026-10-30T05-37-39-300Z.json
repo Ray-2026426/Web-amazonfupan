@@ -1,0 +1,48 @@
+{
+  "at": "2026-10-30T06:02:43.976Z",
+  "range": {
+    "from": "2026-10-27",
+    "to": "2026-10-29"
+  },
+  "days": 3,
+  "rowsAdded": 4205,
+  "rowsTotal": 4205,
+  "bytes": 6819951,
+  "costMatchRate": 0.8,
+  "failedShopCalls": 0,
+  "warnings": [],
+  "mcpCalls": 345,
+  "durationMs": 1504861,
+  "currency": "USD",
+  "report": {
+    "ok": true,
+    "errors": [],
+    "warnings": [],
+    "zeroFiltered": 134215,
+    "costMatchRate": 0.7997621878715815,
+    "negativeShare": 0.5731272294887039,
+    "reconciliations": [
+      {
+        "date": "2026-10-27",
+        "expectedGrossProfit": 3014.89,
+        "actualGrossProfit": 3015.16999999997,
+        "expectedAmount": 24227.85,
+        "actualAmount": 26029.280000000017
+      },
+      {
+        "date": "2026-10-28",
+        "expectedGrossProfit": 1735.79,
+        "actualGrossProfit": 1735.8900000000085,
+        "expectedAmount": 23574.43,
+        "actualAmount": 25523.130000000012
+      },
+      {
+        "date": "2026-10-29",
+        "expectedGrossProfit": 2026.48,
+        "actualGrossProfit": 2026.729999999969,
+        "expectedAmount": 22233.37,
+        "actualAmount": 24017.6
+      }
+    ]
+  }
+}
