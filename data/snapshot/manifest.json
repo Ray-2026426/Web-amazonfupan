@@ -27,23 +27,24 @@
     "2026-10-26",
     "2026-10-27",
     "2026-10-28",
-    "2026-10-29"
+    "2026-10-29",
+    "2026-10-30"
   ],
   "lastRun": {
-    "at": "2026-10-30T06:02:43.976Z",
+    "at": "2026-10-31T05:53:33.974Z",
     "range": {
-      "from": "2026-10-27",
-      "to": "2026-10-29"
+      "from": "2026-10-28",
+      "to": "2026-10-30"
     },
     "days": 3,
-    "rowsAdded": 4205,
-    "rowsTotal": 4205,
-    "bytes": 6819951,
-    "costMatchRate": 0.8,
+    "rowsAdded": 4128,
+    "rowsTotal": 4128,
+    "bytes": 6697493,
+    "costMatchRate": 0.813,
     "failedShopCalls": 0,
     "warnings": [],
     "mcpCalls": 345,
-    "durationMs": 1504861
+    "durationMs": 1521478
   },
   "currency": "USD"
 }
