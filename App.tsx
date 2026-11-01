@@ -289,6 +289,25 @@ const App: React.FC = () => {
   }, [cloudCutoff, dataEndDate, periodMode]);
 
   /**
+   * 默认进站落在「昨天」，但云端同步有延迟（每天首批数据约 13:30 才到），
+   * 这时昨天往往还没有数据 —— 页面会空着，而趋势图用的是长历史、照样有点，
+   * 看起来就像「时间选择和趋势图对不上」。落地后在这里把区间校正到最新可用日。
+   * 只校正一次，且只在「所选区间整体晚于数据截止日」时生效，不覆盖用户主动选的历史日期。
+   */
+  const snappedToDataEnd = useRef(false);
+  useEffect(() => {
+    if (snappedToDataEnd.current || periodMode !== 'day') return;
+    const view = readViewFromUrl();
+    if (view.from || view.to) return; // 分享链接指定了日期，保持不动
+    const latest = cloudCutoff || dataEndDate;
+    if (!latest || !/^\d{4}-\d{2}-\d{2}$/.test(latest)) return;
+    snappedToDataEnd.current = true;
+    setFilters(prev => (prev.endDate && prev.endDate <= latest
+      ? prev
+      : { ...prev, startDate: latest, endDate: latest }));
+  }, [cloudCutoff, dataEndDate, periodMode]);
+
+  /**
    * 本地数据兜底：没连云端（或数据源选了本地）时，默认区间要落在「有数据的那几个月」，
    * 否则默认的「昨天」在月报里根本不存在，页面会是空的。
    */
@@ -442,6 +461,16 @@ const App: React.FC = () => {
     })();
     return () => { cancelled = true; };
   }, [cloudConnected, cloudToken]);
+
+  /**
+   * 趋势长历史同样是领星原值（不含前端「毛利修正」开关），
+   * 统一在这里补一次修正，保证趋势线、KPI、明细表是同一个毛利口径。
+   */
+  const trendHistoryCorrected = useMemo(() => ({
+    day: applyFbaFeeCorrection(trendHistory.day, addBackFbaFee),
+    month: applyFbaFeeCorrection(trendHistory.month, addBackFbaFee),
+    week: applyFbaFeeCorrection(trendHistory.week, addBackFbaFee),
+  }), [trendHistory, addBackFbaFee]);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Modal States
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -945,23 +974,35 @@ const App: React.FC = () => {
       const anchorStr = dataEndDate && /^\d{4}-\d{2}-\d{2}$/.test(dataEndDate) ? dataEndDate : fmt(now);
       const [ay, am, ad] = anchorStr.split('-').map(Number);
       const anchor = new Date(ay, am - 1, ad);
+      const latest = cloudCutoff || dataEndDate;
 
-      if (mode === 'week') {
-          // 默认看上一个完整自然周（数据通常截止到昨天/今天）
-          const lastWeekDay = new Date(anchor.getTime() - 7 * 24 * 60 * 60 * 1000);
-          const { start, end } = getISOWeekDateRange(lastWeekDay);
-          setFilters(prev => ({ ...prev, startDate: formatDate(start), endDate: formatDate(end) }));
-      } else if (mode === 'day') {
-          // 默认最近 7 天（含截止日），只有一个日期时就是单日
-          const start = new Date(anchor);
-          start.setDate(anchor.getDate() - 6);
-          setFilters(prev => ({ ...prev, startDate: fmt(start), endDate: fmt(anchor) }));
-      } else {
+      setFilters(prev => {
+          /**
+           * 已经在看一段有数据的区间时，切粒度只是换「怎么聚合」，不应该把用户挑好的区间吞掉。
+           * 只有区间缺失/倒置/超出数据范围时才回落到该粒度的默认区间。
+           */
+          const usable = prev.startDate && prev.endDate
+              && prev.startDate <= prev.endDate
+              && (!latest || prev.endDate <= latest);
+          if (usable) return prev;
+
+          if (mode === 'week') {
+              // 默认看上一个完整自然周（数据通常截止到昨天/今天）
+              const lastWeekDay = new Date(anchor.getTime() - 7 * 24 * 60 * 60 * 1000);
+              const { start, end } = getISOWeekDateRange(lastWeekDay);
+              return { ...prev, startDate: formatDate(start), endDate: formatDate(end) };
+          }
+          if (mode === 'day') {
+              // 默认最近 7 天（含截止日），只有一个日期时就是单日
+              const start = new Date(anchor);
+              start.setDate(anchor.getDate() - 6);
+              return { ...prev, startDate: fmt(start), endDate: fmt(anchor) };
+          }
           // 月度回到截止日所在自然月
           const start = new Date(ay, am - 1, 1);
           const end = new Date(ay, am, 0);
-          setFilters(prev => ({ ...prev, startDate: fmt(start), endDate: fmt(end) }));
-      }
+          return { ...prev, startDate: fmt(start), endDate: fmt(end) };
+      });
   };
 
   // --- Processing Logic ---
@@ -987,12 +1028,12 @@ const App: React.FC = () => {
       const lastRows = filterData(activeData, periods.last, filters);
       const yearRows = filterData(activeData, periods.year, filters);
       // Aggregate：优先用服务端聚合结果（首屏快），没有再回退到明细聚合
-      const current = cloudMatch ? aggregatedFromCloud(cloudMatch.current as unknown as Record<string, unknown>) : aggregateData(currentRows);
+      const current = cloudMatch ? aggregatedFromCloud(cloudMatch.current as unknown as Record<string, unknown>, addBackFbaFee) : aggregateData(currentRows);
       const last = cloudMatch
-          ? (cloudMatch.last ? aggregatedFromCloud(cloudMatch.last as unknown as Record<string, unknown>) : null)
+          ? (cloudMatch.last ? aggregatedFromCloud(cloudMatch.last as unknown as Record<string, unknown>, addBackFbaFee) : null)
           : (lastRows.length > 0 ? aggregateData(lastRows) : null);
       const year = cloudMatch
-          ? (cloudMatch.year ? aggregatedFromCloud(cloudMatch.year as unknown as Record<string, unknown>) : null)
+          ? (cloudMatch.year ? aggregatedFromCloud(cloudMatch.year as unknown as Record<string, unknown>, addBackFbaFee) : null)
           : (yearRows.length > 0 ? aggregateData(yearRows) : null);
 
       // Targets：月度取全月目标；周度/日度按天拆成「区间分摊月目标」。序时仅月度展示用。
@@ -1045,7 +1086,7 @@ const App: React.FC = () => {
           invRows,
           pacingRatio,
       };
-  }, [activeRawData, displayTargetData, inventoryWithMeta, filters, periodMode, dataEndDate, cloudAgg, useCloudData, dimensionSignature]);
+  }, [activeRawData, displayTargetData, inventoryWithMeta, filters, periodMode, dataEndDate, cloudAgg, useCloudData, dimensionSignature, addBackFbaFee]);
 
   /** 经营异常雷达：核心指标毛利额 → 三维（销量/客单价/毛利率）→ 根因 → 动作 */
   const radar = useMemo(() => {
@@ -1330,7 +1371,7 @@ const App: React.FC = () => {
                             targetRows={displayTargetData}
                             pacingRatio={processedData.pacingRatio}
                             historyData={useCloudData && !hasActiveFilters
-                                ? (periodMode === 'month' ? trendHistory.month : periodMode === 'week' ? trendHistory.week : trendHistory.day)
+                                ? (periodMode === 'month' ? trendHistoryCorrected.month : periodMode === 'week' ? trendHistoryCorrected.week : trendHistoryCorrected.day)
                                 : performanceData}
                         /></section>
                     )}
@@ -1505,9 +1546,9 @@ const App: React.FC = () => {
                 onOpenReviewAnalysis={() => setReviewModalOpen(true)}
                 periodMode={periodMode}
                 rawPerformance={activeRawData}
-                performanceMonthly={useCloudData && trendHistory.month.length ? trendHistory.month : displayPerformanceData}
-                performanceWeekly={useCloudData && trendHistory.week.length ? trendHistory.week : displayWeeklyData}
-                performanceDaily={useCloudData && trendHistory.day.length ? trendHistory.day : displayDailyData}
+                performanceMonthly={useCloudData && trendHistoryCorrected.month.length ? trendHistoryCorrected.month : displayPerformanceData}
+                performanceWeekly={useCloudData && trendHistoryCorrected.week.length ? trendHistoryCorrected.week : displayWeeklyData}
+                performanceDaily={useCloudData && trendHistoryCorrected.day.length ? trendHistoryCorrected.day : displayDailyData}
                 productImageLookup={productImageLookup}
                 dataEndDate={dataEndDate}
             /></Suspense>

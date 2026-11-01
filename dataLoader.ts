@@ -889,7 +889,8 @@ const parseProductImagesWithExcelJs = async (file: File): Promise<{ rows: Produc
             if (typeof value.text === 'string') return value.text;
             if (typeof value.hyperlink === 'string') return value.hyperlink;
             if ('result' in value) return String(value.result ?? '');
-            if (value instanceof Date) return value.toISOString().slice(0, 10);
+            // ExcelJS 读回的日期单元格是「本地零点」，用 toISOString 会整体早一天，必须按本地时间取
+            if (value instanceof Date) return formatDate(value);
             return '';
         }
         return String(value);

@@ -133,6 +133,14 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({ startDate, end
     const startIso = formatDate(rangeStart);
     const endIso = formatDate(rangeEnd);
 
+    /** 待选区间：整段高亮（周/月粒度下能看到完整的待选周/月，而不是只有首尾两天） */
+    const pendingRange = pendingStart ? wrapToMode(pendingStart, mode) : null;
+    const pendingStartIso = pendingRange ? formatDate(pendingRange.start) : '';
+    const pendingEndIso = pendingRange ? formatDate(pendingRange.end) : '';
+
+    /** 粒度文案统一用「已生效」的 periodMode，避免弹层里切了粒度但没应用时标签跟着变 */
+    const modeLabel = (value: PeriodMode) => (value === 'day' ? '按天' : value === 'week' ? '按周' : '按月');
+
     const triggerText = `${formatByMode(rangeStart, periodMode)} → ${formatByMode(rangeEnd, periodMode)}`;
 
     return (
@@ -147,7 +155,7 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({ startDate, end
                     <span className="truncate font-mono text-xs font-semibold text-slate-100">{triggerText}</span>
                 </span>
                 <span className="shrink-0 rounded-md bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
-                    {mode === 'day' ? '按天' : mode === 'week' ? '按周' : '按月'}
+                    {modeLabel(periodMode)}
                 </span>
             </button>
 
@@ -184,13 +192,13 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({ startDate, end
                     {/* 右栏：双月日历 */}
                     <div className="flex-1 p-3">
                         <div className="mb-2 flex items-center justify-between">
-                            <button type="button" onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))} className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="上个月">
+                            <button type="button" onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 2, 1))} className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="往前两个月">
                                 <ChevronLeft className="h-4 w-4" />
                             </button>
                             <div className="flex-1 text-center text-xs font-semibold text-slate-700">
                                 {months.map(m => `${m.getFullYear()} 年 ${m.getMonth() + 1} 月`).join('  /  ')}
                             </div>
-                            <button type="button" onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))} className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="下个月">
+                            <button type="button" onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 2, 1))} className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="往后两个月">
                                 <ChevronRight className="h-4 w-4" />
                             </button>
                         </div>
@@ -214,7 +222,7 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({ startDate, end
                                                 const iso = formatDate(date);
                                                 const inRange = iso >= startIso && iso <= endIso;
                                                 const isEdge = iso === startIso || iso === endIso;
-                                                const isPending = pendingStart ? formatDate(wrapToMode(pendingStart, mode).start) === iso || formatDate(wrapToMode(pendingStart, mode).end) === iso : false;
+                                                const isPending = Boolean(pendingStartIso) && iso >= pendingStartIso && iso <= pendingEndIso;
                                                 return (
                                                     <button
                                                         key={iso}

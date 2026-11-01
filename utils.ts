@@ -257,8 +257,21 @@ export const getCurrentWeekInfo = () => {
 export const calculatePeriodDates = (startStr: string, endStr: string) => {
   // Use manual parsing to ensure we are working with Local Time midnight
   // Avoids new Date("YYYY-MM-DD") acting pulling standard UTC and shifting timezones
-  const [sy, sm, sd] = startStr.split('-').map(Number);
-  const [ey, em, ed] = endStr.split('-').map(Number);
+  const [sRaw, eRaw] = [startStr.split('-').map(Number), endStr.split('-').map(Number)];
+  if (!sRaw.every(Number.isFinite) || !eRaw.every(Number.isFinite)) {
+    // 非法输入兜底：回落到今天，避免 NaN 一路传下去
+    const today = formatDate(new Date());
+    return calculatePeriodDates(today, today);
+  }
+  let [sy, sm, sd] = sRaw;
+  let [ey, em, ed] = eRaw;
+
+  // 区间倒置（分享链接/手输）时先交换，避免 MoM / YoY 算出负数长度的对照区间
+  if (sy * 10000 + sm * 100 + sd > ey * 10000 + em * 100 + ed) {
+    [sy, ey] = [ey, sy];
+    [sm, em] = [em, sm];
+    [sd, ed] = [ed, sd];
+  }
 
   const start = new Date(sy, sm - 1, sd);
   const end = new Date(ey, em - 1, ed);
@@ -887,17 +900,26 @@ export const applyFbaFeeCorrection = (rows: DataRow[], enabled: boolean): DataRo
     });
 };
 
-/** 服务端聚合结果 → 前端使用的 AggregatedData（补上派生比率） */
-export const aggregatedFromCloud = (agg: Record<string, unknown> | null | undefined): AggregatedData => {
+/**
+ * 服务端聚合结果 → 前端使用的 AggregatedData（补上派生比率）。
+ *
+ * 服务端聚合（aggregate_range_f）返回的是领星原值，不含前端「毛利修正」的开关键，
+ * 所以勾选修正时必须在这里同样把 FBA 国际运费加回 gross_profit，
+ * 否则首屏走服务端聚合、明细到达后走本地聚合，毛利额会跳变一个运费的量。
+ */
+export const aggregatedFromCloud = (agg: Record<string, unknown> | null | undefined, addBackFbaFee = false): AggregatedData => {
     const source = (agg || {}) as Record<string, number>;
     const salesAmount = Number(source.sales_amount) || 0;
     const salesQuantity = Number(source.sales_quantity) || 0;
-    const grossProfit = Number(source.gross_profit) || 0;
+    const fbaFee = addBackFbaFee ? Math.abs(Number(source.fba_international_fee) || 0) : 0;
+    const grossProfit = (Number(source.gross_profit) || 0) + fbaFee;
     const merged = { ...initialAggregated };
     for (const key of Object.keys(merged) as (keyof AggregatedData)[]) {
         const value = Number(source[key as string]);
         if (Number.isFinite(value)) (merged as unknown as Record<string, number>)[key as string] = value;
     }
+    // 循环会用服务端原值覆盖 gross_profit，这里必须把修正后的值写回去
+    merged.gross_profit = grossProfit;
     merged.gross_margin = salesAmount > 0 ? grossProfit / salesAmount : 0;
     merged.avg_ticket = salesQuantity > 0 ? salesAmount / salesQuantity : 0;
     merged.average_rating = Number(source.rating) || 0;

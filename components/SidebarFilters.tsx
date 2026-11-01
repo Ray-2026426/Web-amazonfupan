@@ -278,6 +278,8 @@ export const SidebarFilters: React.FC<SidebarProps> = ({ data, inventoryData = [
                     }
                 }
             } else if (isWeeklyMode) {
+                // 形如 2026-W15；格式不对直接跳过，避免 split 出 NaN 后静默不更新
+                if (!/^\d{4}-W\d{1,2}$/.test(startVal) || !/^\d{4}-W\d{1,2}$/.test(endVal)) return;
                 const [sy, sw] = startVal.split('-W').map(Number);
                 const [ey, ew] = endVal.split('-W').map(Number);
                 if (sy && sw && ey && ew) {
