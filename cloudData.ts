@@ -96,18 +96,37 @@ export async function fetchCloudAggregate(
   return request<{ current: CloudAggregate; last: CloudAggregate | null; year: CloudAggregate | null }>(`/api/aggregate?${query.join('&')}`, token, signal);
 }
 
-export async function fetchCloudRows(startDate: string, endDate: string, token: string, signal?: AbortSignal): Promise<DataRow[]> {
+/**
+ * 明细三段（当前期 / 上期 / 去年同期）分批返回。
+ *
+ * 当前期先到就先回调 `onPartial`，页面可以立刻画本周期的表格和下钻；
+ * 上期与去年同期的行随后补齐（只影响对比列）。等三段全部到齐才返回完整结果。
+ */
+export async function fetchCloudRows(
+  startDate: string,
+  endDate: string,
+  token: string,
+  signal?: AbortSignal,
+  onPartial?: (rows: DataRow[]) => void,
+): Promise<DataRow[]> {
   const periods = calculatePeriodDates(startDate, endDate);
-  const ranges = [periods.current, periods.last, periods.year];
-  const responses = await Promise.all(ranges.map(({ start, end }) => {
-    const from = formatDate(start);
-    const to = formatDate(end);
-    return request<{ rows: DataRow[] }>(`/api/data?from=${from}&to=${to}`, token, signal);
-  }));
+  const load = ({ start, end }: { start: Date; end: Date }) =>
+    request<{ rows: DataRow[] }>(`/api/data?from=${formatDate(start)}&to=${formatDate(end)}`, token, signal);
+
   const seen = new Map<string, DataRow>();
-  for (const response of responses) {
-    for (const row of response.rows) seen.set(`${row.date}|${row.id}`, row);
-  }
+  const push = (rows: DataRow[]) => {
+    for (const row of rows) seen.set(`${row.date}|${row.id}`, row);
+  };
+
+  // 先只要当前期：这是表格/下钻的主数据，等到它就能出图
+  const current = await load(periods.current);
+  push(current.rows);
+  if (onPartial && !signal?.aborted) onPartial([...seen.values()]);
+
+  // 对比区间并行补上
+  const [last, year] = await Promise.all([load(periods.last), load(periods.year)]);
+  push(last.rows);
+  push(year.rows);
   return [...seen.values()];
 }
 

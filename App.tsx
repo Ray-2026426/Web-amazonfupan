@@ -490,14 +490,11 @@ const App: React.FC = () => {
       const restoreData = async () => {
           setIsRestoringData(true);
           try {
-              const [monthly, weekly, targets, inv, refunds, reviews, productImages, savedFilters, savedActions] = await Promise.all([
+              const [monthly, weekly, targets, inv, savedFilters, savedActions] = await Promise.all([
                   loadFromDB('monthly'),
                   loadFromDB('weekly'),
                   loadFromDB('targets'),
                   loadFromDB('inventory'),
-                  loadFromDB('refunds'),
-                  loadFromDB('reviews'),
-                  loadFromDB('product_images'),
                   loadFromDB('meta'),
                   loadFromDB('business_actions')
               ]);
@@ -506,9 +503,6 @@ const App: React.FC = () => {
               if (weekly) setWeeklyData(weekly);
               if (targets) setTargetData(targets);
               if (inv) setInventoryData(inv);
-              if (refunds) setRefundData(refunds);
-              if (reviews) setReviewData(reviews);
-              if (productImages?.length) setProductImageData(productImages);
               if (Array.isArray(savedActions)) setBusinessActions(savedActions);
               
               const savedMeta = savedFilters as AppMeta | FilterState | null;
@@ -574,6 +568,27 @@ const App: React.FC = () => {
       restoreData();
   }, []);
 
+  /**
+   * 退款 / 评价 / 商品图片三张表只服务弹窗和缩略图，体积却最大。
+   * 放到首屏之后再读，避免它们把「云端数据请求」和第一屏一起拖住。
+   */
+  useEffect(() => {
+      let cancelled = false;
+      const loadAuxiliary = async () => {
+          const [refunds, reviews, productImages] = await Promise.all([
+              loadFromDB('refunds').catch(() => null),
+              loadFromDB('reviews').catch(() => null),
+              loadFromDB('product_images').catch(() => null),
+          ]);
+          if (cancelled) return;
+          if (refunds) setRefundData(refunds);
+          if (reviews) setReviewData(reviews);
+          if (productImages?.length) setProductImageData(productImages);
+      };
+      const timer = window.setTimeout(loadAuxiliary, 0);
+      return () => { cancelled = true; window.clearTimeout(timer); };
+  }, []);
+
   useEffect(() => {
       if (!CLOUD_ENABLED) return;
       const timer = window.setInterval(() => setCloudRefreshTick(value => value + 1), 15 * 60 * 1000);
@@ -605,7 +620,8 @@ const App: React.FC = () => {
                   setCloudRows(cached.rows);
                   setCloudTargetData(cached.targets?.rows || []);
                   setCloudTargetActive(cached.targets?.active || false);
-                  setCloudRowsRange(cacheKey);
+                  // 必须是「start|end」：visibleCloudRows 用这个格式比对，写成带筛选签名的 key 会让明细被当成空
+                  setCloudRowsRange(`${filters.startDate}|${filters.endDate}`);
                   setCloudConnected(true);
                   setCloudCutoff(cached.latestDate || '');
                   setCloudStatus('');
@@ -640,7 +656,18 @@ const App: React.FC = () => {
                   },
               ).catch(() => null);
               const [rows, targets] = await (async () => {
-                  const rowsPromise = fetchCloudRows(filters.startDate, filters.endDate, cloudToken, controller.signal);
+                  const rowsPromise = fetchCloudRows(
+                      filters.startDate,
+                      filters.endDate,
+                      cloudToken,
+                      controller.signal,
+                      // 当前期明细一到就先把表格/下钻画出来，对比区间稍后补
+                      (partial) => {
+                          if (controller.signal.aborted) return;
+                          setCloudRows(partial);
+                          setCloudRowsRange(`${filters.startDate}|${filters.endDate}`);
+                      },
+                  );
                   const targetsPromise = fetchCloudTargets(filters.startDate, filters.endDate, cloudToken, controller.signal).catch(() => null);
                   const aggregate = await aggregatePromise;
                   if (aggregate && !controller.signal.aborted) setCloudAgg({ key: cacheKey, ...aggregate });
