@@ -1329,7 +1329,9 @@ const App: React.FC = () => {
                             filters={filters}
                             targetRows={displayTargetData}
                             pacingRatio={processedData.pacingRatio}
-                            historyData={useCloudData && !hasActiveFilters ? trendHistory.day : performanceData}
+                            historyData={useCloudData && !hasActiveFilters
+                                ? (periodMode === 'month' ? trendHistory.month : periodMode === 'week' ? trendHistory.week : trendHistory.day)
+                                : performanceData}
                         /></section>
                     )}
 
