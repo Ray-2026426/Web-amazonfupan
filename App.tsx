@@ -1422,9 +1422,6 @@ const App: React.FC = () => {
                                 </button>
                             ))}
                         </div>
-                        <span className="text-[11px] text-slate-400">
-                            {homeView === 'overview' ? '总览：异常雷达 + 利润 / 流量 / 库存三张表' : '诊断：毛利瀑布 + 对比矩阵 + 库存健康'}
-                        </span>
                     </div>
 
                     {homeView === 'overview' && <>
@@ -1474,7 +1471,6 @@ const App: React.FC = () => {
                             data={processedData.inventory} 
                             inventoryRows={processedData.invRows}
                             snapshotDate={cloudInventoryDate}
-                            snapshotNote={useCloudData ? '领星 FBA 库存明细 · 每天 09:00 自动抓取' : '本地导入的库存/库龄报表'}
                             onOpenDetail={() => { setDetailType('Inventory'); setDetailModalOpen(true); }}
                         /></section>
                     )}

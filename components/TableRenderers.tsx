@@ -106,9 +106,7 @@ const TransposedTable = ({
     return (
         <div className="overflow-hidden rounded-3xl border border-white/80 bg-white shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] ring-1 ring-slate-200/70">
             <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 bg-[linear-gradient(135deg,#0f172a_0%,#172554_100%)] px-5 py-4 text-white">
-                <div>
-                    <div className="mt-1 text-sm font-bold tracking-[0.08em]">{title}</div>
-                </div>
+                <h3 className="text-sm font-bold tracking-[0.08em]">{title}</h3>
                 <div className="flex flex-wrap items-center justify-end gap-2">
                     <button type="button" onClick={() => setShowColumns(v => !v)} className="rounded-2xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-semibold text-white">显示列</button>
                     {customAction}
@@ -326,7 +324,7 @@ export const PLTable: React.FC<TableProps> = ({ current, last, year, onOpenDetai
 
     const allColumns = [...columns, ...costColumns];
 
-    return <TransposedTable title="表格 1：P&L 核心业绩" columns={allColumns} onOpenDetail={onOpenDetail} />;
+    return <TransposedTable title="P&L 核心业绩" columns={allColumns} onOpenDetail={onOpenDetail} />;
 };
 
 export const TrafficTable: React.FC<TableProps> = ({ current, last, year, onOpenDetail, onOpenKeywordAnalysis }) => {
@@ -427,7 +425,7 @@ export const TrafficTable: React.FC<TableProps> = ({ current, last, year, onOpen
 
     return (
         <TransposedTable 
-            title="表格 2：流量与广告效率" 
+            title="流量与广告效率" 
             columns={columns} 
             onOpenDetail={onOpenDetail} 
             customAction={

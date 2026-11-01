@@ -2,10 +2,10 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronRight, Printer, Target } from 'lucide-react';
 import type { RadarReport, Finding, Dimension } from '../utils/diagnosticRadar';
 
-const DIMENSION_LABEL: Record<Dimension, { label: string; hint: string }> = {
-    volume: { label: '销量', hint: '曝光 × 点击率 × 转化率' },
-    asp: { label: '客单价', hint: '折扣 / 销售结构 / 价格战' },
-    margin: { label: '毛利率', hint: '成本占比 / 广告 TACOS' },
+const DIMENSION_LABEL: Record<Dimension, { label: string }> = {
+    volume: { label: '销量' },
+    asp: { label: '客单价' },
+    margin: { label: '毛利率' },
 };
 
 const SEVERITY: Record<Finding['severity'], { text: string; dot: string; chip: string; rail: string }> = {
@@ -43,7 +43,7 @@ export const AnomalyRadar: React.FC<{
     periodLabel?: string;
     /** 生成时间，不传则用当前时间 */
     generatedAt?: string;
-}> = ({ report, onDrillAsin, periodLabel, generatedAt }) => {
+}> = ({ report, onDrillAsin, periodLabel }) => {
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
     const { core, findings, normalNotes } = report;
 
@@ -54,7 +54,6 @@ export const AnomalyRadar: React.FC<{
             ? { label: '需关注', tone: 'bg-amber-500', text: 'text-amber-700', ring: 'ring-amber-200', bg: 'bg-amber-50' }
             : { label: '表现正常', tone: 'bg-emerald-600', text: 'text-emerald-700', ring: 'ring-emerald-200', bg: 'bg-emerald-50' };
 
-    const stamp = generatedAt || new Date().toLocaleString('zh-CN', { hour12: false });
     const serial = useMemo(() => {
         const seed = `${periodLabel || ''}${findings.length}${core.value.toFixed(0)}`;
         let hash = 0;
@@ -79,7 +78,6 @@ export const AnomalyRadar: React.FC<{
                         <h2 className="mt-2 text-[19px] font-bold tracking-tight text-slate-900">
                             毛利额诊断 · {periodLabel || '当前区间'}
                         </h2>
-                        <p className="mt-1 text-[11px] text-slate-400">生成时间 {stamp} · 口径：领星同步数据（已与订单利润对账）</p>
                     </div>
                     <div className="flex items-start gap-2">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ${statusMeta.bg} ${statusMeta.text} ${statusMeta.ring}`}>
@@ -102,25 +100,21 @@ export const AnomalyRadar: React.FC<{
                         label="毛利额"
                         value={money(core.value)}
                         tone={core.value < 0 ? 'bad' : 'neutral'}
-                        note={core.value < 0 ? '本期为负' : '核心指标'}
                     />
                     <MetricCell
                         label="目标达成"
                         value={core.attainment === null ? '—' : pct(core.attainment)}
                         tone={core.attainment === null ? 'neutral' : core.attainment >= 0.9 ? 'good' : 'bad'}
-                        note={core.attainment === null ? '未设目标' : '目标 100%'}
                     />
                     <MetricCell
                         label="同比"
                         value={signed(core.yoy)}
                         tone={core.yoy === null ? 'neutral' : core.yoy >= 0 ? 'good' : 'bad'}
-                        note="较去年同期"
                     />
                     <MetricCell
                         label="环比"
                         value={signed(core.mom)}
                         tone={core.mom === null ? 'neutral' : core.mom >= 0 ? 'good' : 'bad'}
-                        note="较上一周期"
                     />
                 </div>
 
@@ -147,11 +141,11 @@ export const AnomalyRadar: React.FC<{
             {/* 异常：诊断路径 + 编号问题 */}
             {core.anomalous && (
                 <div className="px-6 py-5">
-                    <SectionTitle index="01" title="诊断路径" hint="毛利额 → 达成/同比/环比 → 量 · 价 · 率 → 根因 → 动作" />
+                    <SectionTitle index="01" title="诊断路径" />
                     <DiagnosisPath findings={findings} />
 
                     <div className="mt-6">
-                        <SectionTitle index="02" title={`问题清单（${findings.length} 项）`} hint="按严重程度排序，展开可看证据与动作" />
+                        <SectionTitle index="02" title={`问题清单（${findings.length} 项）`} />
                         <ol className="mt-3 space-y-3">
                             {findings.map((item, index) => {
                                 const open = expanded[item.id] ?? index < 2;
@@ -172,7 +166,6 @@ export const AnomalyRadar: React.FC<{
                                                     <span className="font-mono text-[11px] text-slate-300">{String(index + 1).padStart(2, '0')}</span>
                                                     <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ${meta.chip}`}>{meta.text}</span>
                                                     <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">{dimension.label}</span>
-                                                    <span className="text-[10px] text-slate-400">{dimension.hint}</span>
                                                 </div>
                                                 <p className="mt-1.5 truncate text-[13px] font-medium text-slate-900">{item.title}</p>
                                             </div>
@@ -235,7 +228,7 @@ export const AnomalyRadar: React.FC<{
 
                     {reviewItems.length > 0 && (
                         <div className="mt-6">
-                            <SectionTitle index="03" title="复核清单" hint="以下项目数据无法自动判定，需人工确认" />
+                            <SectionTitle index="03" title="复核清单" />
                             <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
                                 {reviewItems.map(item => (
                                     <li key={`${item.finding.id}-${item.check}`} className="flex items-start gap-2 text-[11.5px] text-slate-600">
@@ -248,21 +241,14 @@ export const AnomalyRadar: React.FC<{
                     )}
                 </div>
             )}
-
-            {/* 页脚 */}
-            <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50/70 px-6 py-3 text-[10px] text-slate-400">
-                <span>判定阈值：达成率 &lt; 90% · 同比 &lt; −10% · 环比 &lt; −10%</span>
-                <span>数据来源：领星 · 每日对账差异 &lt; 2% 视为可信</span>
-            </footer>
         </section>
     );
 };
 
-const SectionTitle: React.FC<{ index: string; title: string; hint?: string }> = ({ index, title, hint }) => (
+const SectionTitle: React.FC<{ index: string; title: string }> = ({ index, title }) => (
     <div className="flex flex-wrap items-baseline gap-2">
         <span className="font-mono text-[10px] text-slate-300">{index}</span>
         <h3 className="text-[12px] font-semibold tracking-wide text-slate-800">{title}</h3>
-        {hint && <span className="text-[10px] text-slate-400">{hint}</span>}
     </div>
 );
 
