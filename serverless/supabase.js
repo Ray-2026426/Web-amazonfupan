@@ -223,7 +223,12 @@ export function splitRange(from, to) {
 
 export async function rowsForRange(from, to) {
   const days = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000 + 1;
-  const parts = days <= 45 ? [{ granularity: 'day', from, to }] : splitRange(from, to);
+  const isWholeSingleMonth = from.slice(0, 7) === to.slice(0, 7) && from.endsWith('-01') && to === monthEnd(to);
+  const parts = isWholeSingleMonth
+    ? [{ granularity: 'month', from, to }]
+    : days <= 45
+      ? [{ granularity: 'day', from, to }]
+      : splitRange(from, to);
   const currency = process.env.LINGXING_CURRENCY || 'USD';
   const segments = [];
   for (const part of parts) {
