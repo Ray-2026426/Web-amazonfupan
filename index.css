@@ -1,141 +1,148 @@
 /*
- * 主题样式（亮 / 暗）—— 基础层
+ * 主题样式（Apple × Kairo 品牌视觉体系）
  *
- * 分工：
- *   · styles/tailwind.css —— @tailwind base/components/utilities，构建期生成（不再用 CDN）。
- *   · dark-theme.css      —— 工具类覆盖表（自动生成，覆盖源码里用到的每一个调色板类）。
- *                            生成器：scripts/gen-dark-theme.mjs；由 index.tsx 最后引入。
- *   · 本文件              —— 无法用「工具类覆盖」表达的全局规则：页面底色、根容器渐变、
- *                            滚动条、表单控件配色、阴影压平、主题切换动效、表格字号。
+ * 亮色基准：
+ *   - 页面底色：#f5f5f7（Apple 浅灰）
+ *   - 卡片表面：#ffffff
+ *   - 主文字：#1d1d1f / 次文字：#424245 / 弱文字：#86868b
+ *   - 品牌主色：#4f46e5（Kairo 靛蓝） / 渐变：#3b82f6 → #6366f1 → #7c3aed
  *
- * 暗色配色基准（参考 GitHub Dark，数据密集型界面长时间阅读舒适）：
- *   - 页面底色：#0d1117（最沉）
- *   - 卡片表面：#161b22（轻微抬升，比底色「亮一档」）
- *   - 卡内子区域：#1c2128
- *   - 表头/分块：#21262d
- *   - 边框：#30363d（清晰可见但不喧宾夺主）
- *   - 主文字：#e6edf3（柔白，不刺眼）
- *   - 次要文字：#c9d1d9 / #8b949e
- *   - 蓝色强调：#58a6ff（柔和的 GitHub 蓝，识别度高且不灼眼）
- *
- * 关于 !important：改为构建期 Tailwind 后，dark-theme.css 的选择器都带 html.dark 前缀，
- * 特异性已高于普通工具类，因此绝大多数规则不再需要 !important（Recharts 内联样式除外）。
+ * 暗色基准（与 Kairo 深色模式对齐）：
+ *   - 页面底色：#111318
+ *   - 卡片表面：#191c24
+ *   - 卡内子区域：#151821
+ *   - 主文字：#f5f5f7 / 次文字：#c7c9d1 / 弱文字：#a7abb8
  */
 
-:root { color-scheme: light; }
-html.dark { color-scheme: dark; }
-
-/* ---------- 页面底色与字体 ----------
- * 移除 Google Fonts 外链后，使用系统字体栈（Inter 可用则用），
- * 保证内网 / 弱网 / 被墙环境下不出现白屏或不可读。
- */
-body {
-    margin: 0;
-    background-color: #f8fafc;
-    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-    -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
+:root {
+  color-scheme: light;
+  --kairo-canvas: #f5f5f7;
+  --kairo-card: #ffffff;
+  --kairo-inset: #f8f9fb;
+  --kairo-ink: #1d1d1f;
+  --kairo-ink-secondary: #424245;
+  --kairo-ink-tertiary: #86868b;
+  --kairo-ink-muted: #aeaeb2;
+  --kairo-line: rgba(0, 0, 0, 0.06);
+  --kairo-brand: #4f46e5;
+  --kairo-brand-strong: #4338ca;
+  --kairo-brand-soft: #eef2ff;
+  --kairo-accent: #8b5cf6;
+  --kairo-up: #10b981;
+  --kairo-down: #ef4444;
+  --kairo-warn: #f59e0b;
 }
 
-/* ---------- 页面底色与字色 ---------- */
-html.dark { background-color: #0d1117; }
+html.dark {
+  color-scheme: dark;
+  --kairo-canvas: #111318;
+  --kairo-card: #191c24;
+  --kairo-inset: #151821;
+  --kairo-ink: #f5f5f7;
+  --kairo-ink-secondary: #c7c9d1;
+  --kairo-ink-tertiary: #a7abb8;
+  --kairo-ink-muted: #858a99;
+  --kairo-line: rgba(255, 255, 255, 0.09);
+  --kairo-brand: #6366f1;
+  --kairo-brand-strong: #818cf8;
+  --kairo-brand-soft: rgba(99, 102, 241, 0.16);
+}
+
+/* ---------- 页面底色与字体 ---------- */
+body {
+  margin: 0;
+  background-color: var(--kairo-canvas);
+  color: var(--kairo-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.num-tabular {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* ---------- 暗色页面底色与字色 ---------- */
+html.dark { background-color: #111318; }
 
 html.dark body {
-    background-color: #0d1117;
-    color: #e6edf3;
+  background-color: #111318;
+  color: #f5f5f7;
 }
 
-/* App 根容器用的是浅蓝径向渐变（circle at top, #e0f2fe → #f8fafc）。
- * 暗色下不能直接去掉（那样整个应用会变成一块死平的深色），
- * 换成同结构的深色径向渐变：顶部微微提亮，保留原设计的纵深感。 */
 html.dark [class*="radial-gradient"] {
-    background-image: radial-gradient(circle at top, #131c2b 0%, #0d1117 45%, #0d1117 100%) !important;
-    background-color: #0d1117 !important;
+  background-image: none !important;
+  background-color: #111318 !important;
 }
 
-/* ---------- 滚动条（全局细窄，暗色下更明显） ---------- */
+/* ---------- 滚动条（全局细窄） ---------- */
 * {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(134, 134, 139, 0.35) transparent;
 }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-    background: rgba(100, 116, 139, 0.45);
-    border-radius: 999px;
+  background: rgba(134, 134, 139, 0.35);
+  border-radius: 999px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.75); }
+::-webkit-scrollbar-thumb:hover { background: rgba(134, 134, 139, 0.6); }
 html.dark .custom-scroll::-webkit-scrollbar-track { background: transparent; }
-html.dark .custom-scroll::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.35); border-radius: 999px; }
-html.dark .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.6); }
+html.dark .custom-scroll::-webkit-scrollbar-thumb { background: rgba(167, 171, 184, 0.3); border-radius: 999px; }
+html.dark .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(167, 171, 184, 0.55); }
 
-/* ---------- 表单控件 ----------
- * 保证文字与占位符在深色底上可见；color-scheme: dark 已让原生控件（日期选择器、
- * 下拉箭头、自动填充）跟随暗色，这里只补文字色。
- */
+/* ---------- 表单控件 ---------- */
 html.dark input,
 html.dark textarea,
-html.dark select { color: #e6edf3; }
+html.dark select { color: #f5f5f7; }
 html.dark input::placeholder,
-html.dark textarea::placeholder { color: #6e7681 !important; }
+html.dark textarea::placeholder { color: #858a99 !important; }
 
-/* 自动填充（Chrome）会强行刷白底黑字，暗色下必须压掉 */
 html.dark input:-webkit-autofill,
 html.dark input:-webkit-autofill:hover,
 html.dark input:-webkit-autofill:focus {
-    -webkit-text-fill-color: #e6edf3;
-    -webkit-box-shadow: 0 0 0 1000px #21262d inset;
+  -webkit-text-fill-color: #f5f5f7;
+  -webkit-box-shadow: 0 0 0 1000px #191c24 inset;
 }
 
-/* ---------- 阴影 ----------
- * 暗色下投影几乎不可见，却会在卡片边缘形成「灰雾」，统一压掉。
- * ring（外描边）走的是 --tw-ring-shadow，不受影响。
- */
+/* ---------- 暗色阴影压平 ---------- */
 html.dark [class*="shadow-"] {
-    --tw-shadow-color: rgba(0, 0, 0, 0.55);
-    --tw-shadow: 0 0 #0000;
+  --tw-shadow-color: rgba(0, 0, 0, 0.5);
+  --tw-shadow: 0 0 #0000;
 }
 
-/* ---------- 主题切换按钮动效 ---------- */
+/* ---------- 主题切换与动效 ---------- */
 .theme-toggle-btn { transition: background-color .2s ease, color .2s ease, transform .15s ease; }
 .theme-toggle-btn:active { transform: scale(0.96); }
 
 /* ---------- 表格字号（总控设置） ---------- */
 html[data-table-font="sm"] table { font-size: 12px !important; }
-html[data-table-font="md"] table { font-size: 14px !important; }
-html[data-table-font="lg"] table { font-size: 16px !important; }
+html[data-table-font="md"] table { font-size: 13.5px !important; }
+html[data-table-font="lg"] table { font-size: 15px !important; }
 
 html[data-table-font="sm"] table th,
 html[data-table-font="sm"] table td { font-size: 12px !important; }
 html[data-table-font="md"] table th,
-html[data-table-font="md"] table td { font-size: 14px !important; }
+html[data-table-font="md"] table td { font-size: 13.5px !important; }
 html[data-table-font="lg"] table th,
-html[data-table-font="lg"] table td { font-size: 16px !important; }
+html[data-table-font="lg"] table td { font-size: 15px !important; }
 
-html:not([data-table-font]) table { font-size: 14px; }
+html:not([data-table-font]) table { font-size: 13.5px; }
 
 html[data-table-density="compact"] table th,
 html[data-table-density="compact"] table td { padding-top: 0.45rem !important; padding-bottom: 0.45rem !important; }
 html[data-table-density="comfortable"] table th,
-html[data-table-density="comfortable"] table td { padding-top: 0.85rem; padding-bottom: 0.85rem; }
+html[data-table-density="comfortable"] table td { padding-top: 0.78rem; padding-bottom: 0.78rem; }
 
-/* ---------- 层级 token（视觉一致性） ----------
- * 只保留两个层级，避免「28px / 24px / 3xl」混用导致层级模糊：
- *   · panel（页头、三张主表、经营雷达、加载/空状态）：
- *       rounded-3xl + shadow 0 24px 70px -42px rgba(15,23,42,.45)
- *   · card（指标卡、内嵌信息块）：
- *       rounded-2xl + shadow 0 18px 50px -30px rgba(15,23,42,.35)
- */
-
-:focus-visible { outline: 2px solid #0284c7; outline-offset: 2px; }
+:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
 /* ------------------------------------------------------------------ *
- * 长表格性能：让浏览器跳过视口外的行（只排版/绘制可见部分）。
- * 数据量上来后（几万行明细），这一条能明显减少滚动掉帧。
- * contain-intrinsic-size 给一个近似行高，避免滚动条抖动。
+ * 长表格性能
  * ------------------------------------------------------------------ */
 tbody > tr {
   content-visibility: auto;
@@ -143,8 +150,7 @@ tbody > tr {
 }
 
 /* ------------------------------------------------------------------ *
- * 加载进度条（不确定时长）：光带从左到右循环滑动。
- * 纯 CSS，不占 JS 线程；prefers-reduced-motion 下会自动降级为静态。
+ * 加载进度条（Kairo 靛蓝渐变光带）
  * ------------------------------------------------------------------ */
 .loading-bar-fill {
   position: absolute;
@@ -152,8 +158,8 @@ tbody > tr {
   bottom: 0;
   width: 42%;
   border-radius: 9999px;
-  background: linear-gradient(90deg, #7dd3fc 0%, #38bdf8 45%, #0284c7 100%);
-  box-shadow: 0 0 12px rgba(2, 132, 199, 0.35);
+  background: linear-gradient(90deg, #3b82f6 0%, #6366f1 55%, #7c3aed 100%);
+  box-shadow: 0 0 12px rgba(79, 70, 229, 0.35);
   animation: loading-bar-slide 1.35s cubic-bezier(0.45, 0, 0.55, 1) infinite;
   will-change: transform;
 }
@@ -164,14 +170,16 @@ tbody > tr {
 }
 
 /* ------------------------------------------------------------------ *
- * 表格统一质感：斑马纹 + 等宽数字 + 行悬停。
- * 用低透明度灰蓝叠加，亮色/暗色主题下都不会突兀。
+ * 表格统一质感：极淡斑马纹 + 等宽数字 + 浅靛蓝行悬停
  * ------------------------------------------------------------------ */
 table tbody tr:nth-child(even) > td {
-  background-color: rgba(148, 163, 184, 0.055);
+  background-color: rgba(134, 134, 139, 0.035);
 }
 table tbody tr:hover > td {
-  background-color: rgba(56, 189, 248, 0.10);
+  background-color: rgba(79, 70, 229, 0.06);
+}
+html.dark table tbody tr:hover > td {
+  background-color: rgba(99, 102, 241, 0.12);
 }
 table td,
 table th {
@@ -182,7 +190,7 @@ table th {
 .skeleton {
   position: relative;
   overflow: hidden;
-  background-color: rgba(148, 163, 184, 0.18);
+  background-color: rgba(134, 134, 139, 0.14);
 }
 .skeleton::after {
   content: '';
@@ -192,14 +200,17 @@ table th {
   background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
   animation: skeleton-shimmer 1.6s ease-in-out infinite;
 }
+html.dark .skeleton::after {
+  background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}
 @keyframes skeleton-shimmer {
   100% { transform: translateX(100%); }
 }
 
-/* 诊断书打印：只打诊断书本身，其他内容隐藏 */
+/* 诊断书打印 */
 @media print {
-    body * { visibility: hidden; }
-    #radar, #radar * { visibility: visible; }
-    #radar { position: absolute; inset: 0 auto auto 0; width: 100%; max-width: none; border: 0; box-shadow: none; }
-    #radar .print\:hidden { display: none !important; }
+  body * { visibility: hidden; }
+  #radar, #radar * { visibility: visible; }
+  #radar { position: absolute; inset: 0 auto auto 0; width: 100%; max-width: none; border: 0; box-shadow: none; }
+  #radar .print\:hidden { display: none !important; }
 }

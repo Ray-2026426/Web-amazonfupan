@@ -31,7 +31,15 @@ import { lazyWithRetry } from './components/lazyWithRetry';
 import { CommandPalette, type CommandAction } from './components/CommandPalette';
 import { getImageUploadState, resetImageUpload, subscribeImageUpload } from './components/imageUploadTask';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
-import { buildViewLink, hasViewInUrl, readViewFromUrl, syncViewToUrl } from './components/viewUrl';
+import { buildViewLink, hasViewInUrl, readViewFromUrl, syncViewToUrl, type WorkspaceTab } from './components/viewUrl';
+import { KairoLogo } from './components/ui/KairoLogo';
+import { RightDrawer } from './components/ui/RightDrawer';
+import { StatusPill } from './components/ui/StatusPill';
+import { TopFilterBar, stepDateRange } from './components/TopFilterBar';
+import { OverviewQuickRanks } from './components/OverviewQuickRanks';
+import { EntityQuickDrawer, type QuickDrawerTarget } from './components/EntityQuickDrawer';
+import { TopicsHub } from './components/TopicsHub';
+import { applyAppSettings, loadAppSettings, saveAppSettings } from './components/appSettings';
 import { InventoryTable } from './components/InventoryTable';
 import { DataUploadModal, type DataUploadResult } from './components/DataUploadModal';
 import { resetTrendChartMetricsSelection } from './components/trendSelection';
@@ -53,7 +61,7 @@ import { MetricMatrix } from './components/MetricMatrix';
 import { InventoryDecision } from './components/InventoryDecision';
 import { buildRadarReport } from './utils/diagnosticRadar';
 import { parseMonthlyPerformance, parseWeeklyPerformance, parseTargetData, parseInventoryData, parseRefundData, parseReviewData, parseProductImageData } from './dataLoader';
-import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles, Search } from 'lucide-react';
+import { FileSpreadsheet, CalendarDays, Database, LayoutDashboard, Menu, X, Sparkles, Search, Sun, Moon, RefreshCw } from 'lucide-react';
 import { saveToDB, loadFromDB, replaceImportedData } from './db';
 import { DEFAULT_BUSINESS_RULES, generateBusinessIssues, updateActionForIssue } from './utils/businessRules';
 import { CLOUD_ENABLED, clearCloudToken, fetchCloudAggregate, fetchCloudFreshness, fetchCloudRows, fetchCloudTargets, getCloudToken, saveCloudToken, type CloudAggregate } from './cloudData';
@@ -415,13 +423,35 @@ const App: React.FC = () => {
   const cloudRangeCache = useRef(new Map<string, { at: number; rows: DataRow[]; targets: any; latestDate: string }>());
   /** 命令面板（⌘K）：键盘完成切粒度、跳区间、开数据管理、下钻等操作 */
   const [commandOpen, setCommandOpen] = useState(false);
-  /** 主页视图：总览（雷达+三张表）/ 诊断（瀑布+矩阵+库存健康） */
-  const [homeView, setHomeView] = useState<'overview' | 'diagnose'>(() => {
-    try { return localStorage.getItem('amazon-dashboard-home-view') === 'diagnose' ? 'diagnose' : 'overview'; } catch { return 'overview'; }
+  /** 顶部 5 标签页导航（总览 / 利润 / 广告与流量 / 库存 / 专题），同步进 URL */
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(() => {
+    const fromUrl = readViewFromUrl().tab;
+    if (fromUrl) return fromUrl;
+    try {
+      const stored = localStorage.getItem('telos-active-tab') as WorkspaceTab | null;
+      if (stored && ['overview', 'profit', 'traffic', 'inventory', 'topics'].includes(stored)) return stored;
+    } catch { /* 忽略 */ }
+    return 'overview';
   });
   useEffect(() => {
-    try { localStorage.setItem('amazon-dashboard-home-view', homeView); } catch { /* 忽略 */ }
-  }, [homeView]);
+    try { localStorage.setItem('telos-active-tab', activeTab); } catch { /* 忽略 */ }
+    syncViewToUrl(periodMode, filters, activeTab);
+  }, [activeTab, periodMode, filters]);
+
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [quickDrawerTarget, setQuickDrawerTarget] = useState<QuickDrawerTarget | null>(null);
+  const [isDarkTheme, setIsDarkTheme] = useState(() => loadAppSettings().theme === 'dark');
+  const toggleQuickTheme = () => {
+    const cur = loadAppSettings();
+    const nextTheme = cur.theme === 'dark' ? 'light' : 'dark';
+    const next = { ...cur, theme: nextTheme as 'light' | 'dark' };
+    saveAppSettings(next);
+    applyAppSettings(next);
+    setIsDarkTheme(nextTheme === 'dark');
+  };
+
+  /** 主页视图（保留兼容） */
+  const [homeView, setHomeView] = useState<'overview' | 'diagnose'>('overview');
   /** 云端管理面板打开时定位到哪个 tab（图片上传浮层点进来时用） */
   const [adminInitialTab, setAdminInitialTab] = useState<'images' | undefined>(undefined);
   /** 图片上传是后台任务：面板关掉也要能看到进度 */
@@ -1142,16 +1172,35 @@ const App: React.FC = () => {
       });
   }, [processedData, periodMode]);
 
+  const handleStepPeriod = (delta: -1 | 1) => {
+      setFilters(prev => {
+          const next = stepDateRange(prev.startDate, prev.endDate, periodMode, delta);
+          return { ...prev, startDate: next.startDate, endDate: next.endDate };
+      });
+  };
+
   useEffect(() => {
+      const TABS: WorkspaceTab[] = ['overview', 'profit', 'traffic', 'inventory', 'topics'];
       const onKey = (event: KeyboardEvent) => {
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
               event.preventDefault();
               setCommandOpen(value => !value);
+              return;
+          }
+          const tag = (event.target as HTMLElement | null)?.tagName;
+          if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (event.target as HTMLElement | null)?.isContentEditable) return;
+          if (event.metaKey || event.ctrlKey || event.altKey) return;
+          if (event.key >= '1' && event.key <= '5') {
+              setActiveTab(TABS[Number(event.key) - 1]);
+          } else if (event.key === 'ArrowLeft') {
+              handleStepPeriod(-1);
+          } else if (event.key === 'ArrowRight') {
+              handleStepPeriod(1);
           }
       };
       window.addEventListener('keydown', onKey);
       return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [periodMode]);
 
   /** 命令面板动作：全部复用现有 handler，保证和按钮行为一致 */
   const commandActions: CommandAction[] = (() => {
@@ -1181,112 +1230,182 @@ const App: React.FC = () => {
           { id: 'detail-traffic', label: '打开流量广告明细', group: '下钻', run: () => handleOpenDetailByType('Traffic') },
           { id: 'detail-inventory', label: '打开库存明细', group: '下钻', run: () => handleOpenDetailByType('Inventory') },
           { id: 'fee', label: addBackFbaFee ? '关闭毛利修正' : '开启毛利修正', group: '口径', keywords: ['运费', '国际运费'], run: () => setAddBackFbaFee(value => !value) },
-          { id: 'sidebar', label: '显示 / 隐藏筛选侧栏', group: '界面', run: toggleSidebar },
-          { id: 'copy-link', label: '复制当前视图链接', group: '分享', keywords: ['share', 'url', '发给同事'], run: () => { void navigator.clipboard?.writeText(buildViewLink(periodMode, filters)); } },
+          { id: 'sidebar', label: '打开更多筛选抽屉', group: '界面', run: () => setMoreFiltersOpen(true) },
+          { id: 'copy-link', label: '复制当前视图链接', group: '分享', keywords: ['share', 'url', '发给同事'], run: () => { void navigator.clipboard?.writeText(buildViewLink(periodMode, filters, activeTab)); } },
           { id: 'source-cloud', label: '数据源：云端', group: '数据', keywords: ['database'], run: () => setDataSource('cloud') },
           { id: 'source-local', label: '数据源：本地导入', group: '数据', keywords: ['excel', '上传'], run: () => setDataSource('local') },
           { id: 'clear-focus', label: '清除聚焦', group: '视图', run: clearAllFocus },
-          { id: 'view-overview', label: '视图：总览（雷达 + 三张表）', group: '视图', keywords: ['home'], run: () => setHomeView('overview') },
-          { id: 'view-diagnose', label: '视图：诊断（瀑布 / 矩阵 / 库存健康）', group: '视图', keywords: ['diagnose'], run: () => setHomeView('diagnose') },
+          { id: 'tab-overview', label: '切到：总览 (快捷键 1)', group: '视图', keywords: ['home', 'overview'], run: () => setActiveTab('overview') },
+          { id: 'tab-profit', label: '切到：利润 (快捷键 2)', group: '视图', keywords: ['pl', 'profit'], run: () => setActiveTab('profit') },
+          { id: 'tab-traffic', label: '切到：广告与流量 (快捷键 3)', group: '视图', keywords: ['traffic', 'ads'], run: () => setActiveTab('traffic') },
+          { id: 'tab-inventory', label: '切到：库存 (快捷键 4)', group: '视图', keywords: ['inventory', 'stock'], run: () => setActiveTab('inventory') },
+          { id: 'tab-topics', label: '切到：专题 (快捷键 5)', group: '视图', keywords: ['topics', 'refund', 'review'], run: () => setActiveTab('topics') },
           { id: 'shortcuts', label: '查看快捷键', group: '帮助', keywords: ['keyboard', '帮助'], run: () => setShortcutsOpen(true) },
       ];
   })();
 
+  const TAB_ITEMS: Array<{ id: WorkspaceTab; label: string; title: string }> = [
+    { id: 'overview', label: '总览', title: '经营总览' },
+    { id: 'profit', label: '利润', title: '利润分析' },
+    { id: 'traffic', label: '广告与流量', title: '广告与流量' },
+    { id: 'inventory', label: '库存', title: '库存管理' },
+    { id: 'topics', label: '专题', title: '深度专题' },
+  ];
+  const currentTabMeta = TAB_ITEMS.find(t => t.id === activeTab) || TAB_ITEMS[0];
+
+  const partialPeriodInfo = (() => {
+    if (!filters.startDate || !filters.endDate || !processedData) return null;
+    if (processedData.pacingRatio >= 0.999) return null;
+    const totalDays = Math.max(
+      1,
+      Math.round((Date.parse(`${filters.endDate}T00:00:00Z`) - Date.parse(`${filters.startDate}T00:00:00Z`)) / 86400000) + 1
+    );
+    const elapsedDays = Math.max(1, Math.min(totalDays, Math.round(totalDays * processedData.pacingRatio)));
+    return { elapsedDays, totalDays };
+  })();
+
   return (
-    <div className="flex h-screen overflow-hidden bg-[radial-gradient(circle_at_top,#e0f2fe_0%,#eff6ff_22%,#f8fafc_52%,#f8fafc_100%)] font-sans text-slate-900">
-      {sidebarOpen && <button type="button" aria-label="关闭筛选侧栏" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-slate-950/50 xl:hidden" />}
-      <div className={`fixed inset-y-0 left-0 z-40 transition-transform xl:relative xl:z-20 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} ${sidebarCollapsed ? 'xl:hidden' : 'xl:translate-x-0'}`}>
-      <SidebarFilters 
-        data={activeRawData}
-        inventoryData={inventoryWithMeta}
-        targetData={displayTargetData}
-        filters={filters} 
-        setFilters={setFilters} 
-        warnings={processedData?.warnings}
-        periodMode={periodMode}
-        onRangeChange={(startDate, endDate, mode) => {
-            setPeriodMode(mode);
-            setFilters(prev => ({ ...prev, startDate, endDate }));
-        }}
-        onLoadSnapshot={handleLoadSnapshot}
-      />
-      </div>
-      
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        {/* Top Bar */}
-        <header className="relative z-10 mx-3 mt-3 flex flex-shrink-0 flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/70 bg-white/85 px-4 py-3 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-            <div className="flex items-center gap-5">
-                <button type="button" aria-label={sidebarVisible ? '隐藏筛选侧栏' : '显示筛选侧栏'} title={sidebarVisible ? '隐藏筛选侧栏' : '显示筛选侧栏'} onClick={toggleSidebar} className="rounded-xl border border-slate-200 p-2 text-slate-700 transition hover:border-sky-300 hover:text-sky-700">{sidebarVisible ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}</button>
-                <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#0f172a_0%,#2563eb_100%)] text-white shadow-lg shadow-sky-500/20">
-                        <LayoutDashboard className="w-5 h-5" />
-                    </div>
-                    <span className="hidden text-sm font-bold tracking-tight text-slate-900 sm:inline">Telos</span>
-                </div>
-                <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50/90 p-1">
-                    {([
-                        { mode: 'month' as PeriodMode, label: '月度' },
-                        { mode: 'week' as PeriodMode, label: '周度' },
-                        { mode: 'day' as PeriodMode, label: '日度' },
-                    ]).map(({ mode, label }) => {
-                        const active = periodMode === mode;
-                        const disabled = mode === 'day' && !cloudConnected;
-                        return (
-                            <button
-                                key={mode}
-                                type="button"
-                                onClick={() => !disabled && handleSetPeriodMode(mode)}
-                                disabled={disabled}
-                                title={disabled ? '日度视图需要连接云端数据（云端按天同步）；本地导入的月报/周报没有日粒度' : undefined}
-                                className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-40 ${active ? 'bg-white text-sky-700 shadow-sm ring-1 ring-sky-100' : 'text-slate-500 hover:text-slate-700'}`}
-                            >
-                                {label}
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
-            
-            <div className="flex items-center gap-2 sm:gap-3">
-                <WorldClock />
-                <div className="h-8 w-px bg-slate-200 mx-1 hidden lg:block"></div>
+    <div className="flex min-h-screen flex-col bg-[#f5f5f7] font-sans text-[#1d1d1f] dark:bg-[#111318] dark:text-[#f5f5f7]">
+      {/* Apple × Kairo 56px 吸顶导航栏 */}
+      <header className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between gap-4 border-b border-black/[0.06] bg-[#f5f5f7]/85 px-4 backdrop-blur-xl sm:px-8 dark:border-white/[0.08] dark:bg-[#111318]/85">
+        <div className="flex items-center gap-6 lg:gap-8">
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            className="flex items-center gap-2.5 text-left"
+          >
+            <KairoLogo size={26} />
+            <span className="text-[17px] font-bold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">Telos</span>
+            <span className="hidden text-[13px] font-medium text-[#86868b] sm:inline dark:text-[#a7abb8]">业绩</span>
+          </button>
 
-                <AppSettingsButton
-                    cloudEnabled={CLOUD_ENABLED}
-                    cloudConnected={cloudConnected}
-                    cloudLoading={cloudLoading}
-                    cloudCutoff={cloudCutoff}
-                    cloudLastSync={cloudLastSync}
-                    onOpenCloudLogin={() => setShowCloudLogin(true)}
-                    onOpenCloudAdmin={() => setShowCloudAdmin(true)}
-                    addBackFbaFee={addBackFbaFee}
-                    onToggleFbaFee={setAddBackFbaFee}
-                    dataSource={dataSource}
-                    onChangeDataSource={setDataSource}
-                />
-
+          <nav aria-label="主导航" className="hidden items-center gap-6 md:flex">
+            {TAB_ITEMS.map(tab => {
+              const active = activeTab === tab.id;
+              return (
                 <button
-                    type="button"
-                    onClick={() => setCommandOpen(true)}
-                    title="搜索功能或输入命令（⌘K / Ctrl+K）"
-                    className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 transition hover:border-sky-300 hover:text-sky-700 sm:flex"
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`relative flex h-14 items-center gap-1.5 text-[14px] transition-colors ${
+                    active
+                      ? 'font-semibold text-[#4f46e5] dark:text-indigo-400'
+                      : 'text-[#86868b] hover:text-[#1d1d1f] dark:text-[#a7abb8] dark:hover:text-[#f5f5f7]'
+                  }`}
                 >
-                    <Search className="h-3.5 w-3.5" />
-                    搜索命令
-                    <span className="rounded border border-slate-200 px-1 py-0.5 text-[10px] text-slate-400">⌘K</span>
+                  {tab.label}
+                  {tab.id === 'overview' && radar && radar.findings.length > 0 && (
+                    <span className="rounded-full bg-[#eef2ff] px-1.5 py-0.5 text-[10px] font-semibold text-[#4f46e5] dark:bg-indigo-500/20 dark:text-indigo-300">
+                      {radar.findings.length}
+                    </span>
+                  )}
+                  {active && (
+                    <span className="absolute inset-x-0 bottom-0 h-[2px] rounded-full bg-[#4f46e5] dark:bg-indigo-400" />
+                  )}
                 </button>
+              );
+            })}
+          </nav>
+        </div>
 
-                <button 
-                    onClick={() => setShowUploadModal(true)}
-                    disabled={restoreFailed}
-                    title={restoreFailed ? '本地数据读取失败，刷新并排查后再导入' : undefined}
-                    className="flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#0284c7_0%,#2563eb_100%)] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-sky-500/20 transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    {displayPerformanceData.length > 0 ? '更新数据源' : '导入数据源'}
-                </button>
-            </div>
-        </header>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCommandOpen(true)}
+            title="搜索功能或输入命令（⌘K / Ctrl+K）"
+            className="hidden h-8 items-center gap-2 rounded-xl border border-black/[0.06] bg-white px-3 text-xs text-[#86868b] transition hover:border-indigo-500/30 hover:text-[#1d1d1f] sm:flex dark:border-white/[0.08] dark:bg-[#191c24] dark:text-[#a7abb8] dark:hover:text-[#f5f5f7]"
+          >
+            <Search className="h-3.5 w-3.5" />
+            <span>搜索或命令</span>
+            <span className="rounded border border-black/[0.08] px-1 py-0.5 text-[10px] text-[#86868b] dark:border-white/[0.12]">⌘K</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleQuickTheme}
+            title={isDarkTheme ? '切换浅色模式' : '切换深色模式'}
+            aria-label={isDarkTheme ? '切换浅色模式' : '切换深色模式'}
+            className="theme-toggle-btn flex h-8 w-8 items-center justify-center rounded-xl border border-black/[0.06] bg-white text-[#424245] transition hover:border-indigo-500/30 hover:text-[#4f46e5] dark:border-white/[0.08] dark:bg-[#191c24] dark:text-[#c7c9d1]"
+          >
+            {isDarkTheme ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+
+          <AppSettingsButton
+            cloudEnabled={CLOUD_ENABLED}
+            cloudConnected={cloudConnected}
+            cloudLoading={cloudLoading}
+            cloudCutoff={cloudCutoff}
+            cloudLastSync={cloudLastSync}
+            onOpenCloudLogin={() => setShowCloudLogin(true)}
+            onOpenCloudAdmin={() => setShowCloudAdmin(true)}
+            addBackFbaFee={addBackFbaFee}
+            onToggleFbaFee={setAddBackFbaFee}
+            dataSource={dataSource}
+            onChangeDataSource={setDataSource}
+          />
+        </div>
+      </header>
+
+      {/* 移动端标签条 */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-black/[0.06] bg-white px-3 py-1.5 md:hidden dark:border-white/[0.08] dark:bg-[#191c24]">
+        {TAB_ITEMS.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+              activeTab === tab.id
+                ? 'bg-[#eef2ff] font-semibold text-[#4f46e5] dark:bg-indigo-500/20 dark:text-indigo-300'
+                : 'text-[#86868b] dark:text-[#a7abb8]'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 更多筛选右侧抽屉 */}
+      <RightDrawer
+        open={moreFiltersOpen}
+        onClose={() => setMoreFiltersOpen(false)}
+        title="全部筛选与自定义日期"
+        subtitle="选择国家、店铺、品牌、负责人、类目、ASIN 或自定义区间"
+        widthClass="w-[420px]"
+      >
+        <div className="-mx-6 -my-5">
+          <SidebarFilters
+            data={activeRawData}
+            inventoryData={inventoryWithMeta}
+            targetData={displayTargetData}
+            filters={filters}
+            setFilters={setFilters}
+            warnings={processedData?.warnings}
+            periodMode={periodMode}
+            onRangeChange={(startDate, endDate, mode) => {
+              setPeriodMode(mode);
+              setFilters(prev => ({ ...prev, startDate, endDate }));
+            }}
+            onLoadSnapshot={handleLoadSnapshot}
+          />
+        </div>
+      </RightDrawer>
+
+      {/* 右侧快速下钻抽屉 */}
+      <EntityQuickDrawer
+        target={quickDrawerTarget}
+        periodLabel={`${filters.startDate} ~ ${filters.endDate}`}
+        rows={processedData?.currentRows || activeRawData}
+        onClose={() => setQuickDrawerTarget(null)}
+        onFocusFilter={(kind, key) => {
+          focusEntity(kind === 'shop' ? 'shops' : 'childAsins', key);
+        }}
+        onOpenFullDetail={() => {
+          setDetailType('PL');
+          setDetailModalOpen(true);
+        }}
+      />
         {showCloudAdmin && <Suspense fallback={null}><CloudAdminPanel initialTab={adminInitialTab} onClose={() => { setShowCloudAdmin(false); setAdminInitialTab(undefined); }} onTargetsUpdated={() => setCloudRefreshTick(value => value + 1)} /></Suspense>}
         <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} actions={commandActions} />
 
@@ -1349,198 +1468,272 @@ const App: React.FC = () => {
             </div>
         )}
 
-        {/* Scrollable Content */}
-        <main className="flex-1 overflow-y-auto p-3 sm:p-6 custom-scroll">
-            {CLOUD_ENABLED && cloudStatus && <div role="status" className="mx-auto mb-3 max-w-[1680px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">{cloudStatus}</div>}
-            {persistenceError && <div role="alert" className="mx-auto mb-3 flex max-w-[1680px] items-center justify-between rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"><span>{persistenceError}</span><button type="button" onClick={() => setPersistenceError('')} className="ml-3 font-bold">关闭</button></div>}
+      {/* 主内容区（Apple 宽留白居中画布） */}
+      <main className="flex-1">
+        <div className="mx-auto max-w-[1280px] space-y-6 px-4 py-7 pb-24 sm:px-8">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h1 className="text-[28px] font-bold tracking-tight text-[#1d1d1f] dark:text-[#f5f5f7]">
+                {currentTabMeta.title}
+              </h1>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] text-[#86868b] dark:text-[#a7abb8]">
+                <span className="num-tabular">{filters.startDate} – {filters.endDate}</span>
+                {partialPeriodInfo && (
+                  <StatusPill tone="partial">
+                    ● 进行中 · 已有 {partialPeriodInfo.elapsedDays}/{partialPeriodInfo.totalDays} 天
+                  </StatusPill>
+                )}
+                <span>· USD</span>
+                {(cloudCutoff || dataEndDate) && <span>· 数据截至 {cloudCutoff || dataEndDate}</span>}
+                {processedData && (
+                  <span className="hidden lg:inline">
+                    · {addBackFbaFee ? '毛利已加回国际运费' : '毛利为领星原始口径'}
+                  </span>
+                )}
+              </div>
+            </div>
 
-            {/* 聚焦面包屑：点表格里的 ASIN / 店铺后出现，逐级退出 */}
-            {focusPath.length > 0 && (
-                <div className="mx-auto mb-3 flex max-w-[1680px] flex-wrap items-center gap-1.5 rounded-xl border border-sky-100 bg-sky-50/70 px-3 py-1.5 text-[11px] text-sky-900">
-                    <span className="font-semibold">聚焦</span>
-                    {focusPath.map(item => (
-                        <button
-                            key={`${item.field}-${item.value}`}
-                            type="button"
-                            onClick={() => blurEntity(item.field)}
-                            className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 ring-1 ring-sky-100 transition hover:ring-sky-300"
-                        >
-                            {item.label}
-                            <X className="h-3 w-3" />
-                        </button>
-                    ))}
-                    <button type="button" onClick={clearAllFocus} className="ml-1 text-sky-600 transition hover:text-sky-800">全部清除</button>
-                    <span className="ml-auto hidden text-[10px] text-sky-400 sm:inline">Esc 退出聚焦</span>
-                </div>
-            )}
-            {isRestoringData ? (
-                <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/80 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-                    <Database className="mb-4 h-12 w-12 text-sky-300 animate-pulse" />
-                    <p className="text-lg font-semibold text-slate-700">正在恢复本地缓存…</p>
-                    <LoadingBar className="mt-5" />
-                </div>
+            <div className="flex items-center gap-2.5">
+              {cloudConnected && (
+                <button
+                  type="button"
+                  onClick={() => setCloudRefreshTick(v => v + 1)}
+                  disabled={cloudLoading}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-black/[0.08] bg-white px-3.5 text-[13px] font-medium text-[#1d1d1f] transition hover:bg-black/[0.03] disabled:opacity-50 dark:border-white/[0.1] dark:bg-[#191c24] dark:text-[#f5f5f7]"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${cloudLoading ? 'animate-spin' : ''}`} />
+                  刷新
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(true)}
+                disabled={restoreFailed}
+                title={restoreFailed ? '本地数据读取失败，刷新并排查后再导入' : undefined}
+                className="inline-flex h-9 items-center gap-2 rounded-xl bg-[#4f46e5] px-4 text-[13px] font-semibold text-white shadow-[0_6px_16px_-6px_rgba(79,70,229,0.65)] transition hover:bg-[#4338ca] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                {displayPerformanceData.length > 0 ? '更新数据' : '导入数据'}
+              </button>
+            </div>
+          </div>
+
+          <TopFilterBar
+            data={activeRawData}
+            filters={filters}
+            setFilters={setFilters}
+            periodMode={periodMode}
+            cloudConnected={cloudConnected}
+            onChangePeriodMode={handleSetPeriodMode}
+            onStepPeriod={handleStepPeriod}
+            onOpenMoreFilters={() => setMoreFiltersOpen(true)}
+          />
+
+          {CLOUD_ENABLED && cloudStatus && (
+            <div role="status" className="rounded-2xl border border-amber-200/80 bg-amber-50/90 px-4 py-2.5 text-xs font-medium text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+              {cloudStatus}
+            </div>
+          )}
+          {persistenceError && (
+            <div role="alert" className="flex items-center justify-between rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
+              <span>{persistenceError}</span>
+              <button type="button" onClick={() => setPersistenceError('')} className="ml-3 font-semibold">关闭</button>
+            </div>
+          )}
+
+          {focusPath.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-2xl border border-indigo-500/20 bg-[#eef2ff] px-3.5 py-2 text-xs text-[#4f46e5] dark:bg-indigo-500/15 dark:text-indigo-200">
+              <span className="font-semibold">当前聚焦</span>
+              {focusPath.map(item => (
+                <button
+                  key={`${item.field}-${item.value}`}
+                  type="button"
+                  onClick={() => blurEntity(item.field)}
+                  className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-[#1d1d1f] shadow-sm transition hover:text-[#4f46e5] dark:bg-[#191c24] dark:text-[#f5f5f7]"
+                >
+                  {item.label}
+                  <X className="h-3 w-3" />
+                </button>
+              ))}
+              <button type="button" onClick={clearAllFocus} className="ml-1 font-medium hover:underline">全部清除</button>
+              <span className="ml-auto hidden text-[11px] opacity-70 sm:inline">Esc 退出聚焦</span>
+            </div>
+          )}
+
+          {isRestoringData ? (
+            <div className="flex flex-col items-center justify-center rounded-[24px] border border-black/[0.06] bg-white py-24 text-[#86868b] dark:border-white/[0.08] dark:bg-[#191c24]">
+              <Database className="mb-4 h-11 w-11 animate-pulse text-indigo-400" />
+              <p className="text-base font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">正在恢复本地缓存…</p>
+              <LoadingBar className="mt-5" />
+            </div>
+          ) : !processedData ? (
+            (cloudLoading || (CLOUD_ENABLED && Boolean(cloudToken) && !cloudConnected && !cloudStatus)) && !activeRawData.length ? (
+              <LoadingSkeleton label={`正在加载 ${filters.startDate} ~ ${filters.endDate} 的业绩数据…`} />
             ) : (
-                <div className="max-w-[1680px] mx-auto space-y-6 pb-20">
-                    {processedData && (
-                        <p className="text-[11px] text-slate-400">
-                            毛利口径：{addBackFbaFee ? '已加回 FBA 国际运费（原始值见导出表「订单毛利润」）' : '领星原始值，未加回 FBA 国际运费'}
-                        </p>
-                    )}
-                    
-                    {/* 1. Overview Cards */}
-                    {processedData && (
-                        <section id="overview"><DashboardOverview 
-                            current={processedData.current} 
-                            target={processedData.target} 
-                            periodMode={periodMode}
-                            rawData={activeRawData}
-                            filters={filters}
-                            targetRows={displayTargetData}
-                            pacingRatio={processedData.pacingRatio}
-                            historyData={useCloudData && !hasActiveFilters
-                                ? (periodMode === 'month' ? trendHistoryCorrected.month : periodMode === 'week' ? trendHistoryCorrected.week : trendHistoryCorrected.day)
-                                : performanceData}
-                        /></section>
-                    )}
-
-                    {/* 视图切换：主页只放「雷达 + 三张表」，深度分析收进「诊断」 */}
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex w-fit items-center gap-1 rounded-xl border border-slate-200 bg-white p-1">
-                            {([['overview', '总览'], ['diagnose', '诊断']] as const).map(([value, label]) => (
-                                <button
-                                    key={value}
-                                    type="button"
-                                    onClick={() => setHomeView(value)}
-                                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${homeView === value ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800'}`}
-                                >
-                                    {label}
-                                    {value === 'diagnose' && radar && radar.findings.length > 0 && (
-                                        <span className={`rounded-full px-1.5 text-[10px] ${homeView === value ? 'bg-white/20' : 'bg-rose-50 text-rose-600'}`}>
-                                            {radar.findings.length}
-                                        </span>
-                                    )}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {homeView === 'overview' && <>
-                    {processedData && radar && (
-                        <section id="issues">
-                            <AnomalyRadar
-                                report={radar}
-                                periodLabel={`${filters.startDate} ~ ${filters.endDate}`}
-                                onDrillAsin={asin => {
-                                    focusEntity('parentAsins', asin);
-                                    setDetailType('PL');
-                                    setDetailModalOpen(true);
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {/* 2. PL Table */}
-                    {processedData && (
-                        <section id="pl"><PLTable
-                            current={processedData.current}
-                            last={processedData.last}
-                            year={processedData.year}
-                            target={processedData.target}
-                            onOpenDetail={() => { setDetailType('PL'); setDetailModalOpen(true); }}
-                            onOpenCalculator={() => handleOpenCalculator()}
-                            onOpenRefundAnalysis={() => handleOpenRefundAnalysis()}
-                            onOpenReviewAnalysis={() => setReviewModalOpen(true)}
-                        /></section>
-                    )}
-
-                    {/* 3. Traffic Table */}
-                    {processedData && (
-                        <section id="traffic"><TrafficTable
-                            current={processedData.current}
-                            last={processedData.last}
-                            year={processedData.year}
-                            target={processedData.target}
-                            onOpenDetail={() => { setDetailType('Traffic'); setDetailModalOpen(true); }}
-                            onOpenKeywordAnalysis={() => setKeywordModalOpen(true)}
-                        /></section>
-                    )}
-
-                    {/* 4. Inventory Table */}
-                    {processedData && (
-                        <section id="inventory"><InventoryTable 
-                            data={processedData.inventory} 
-                            inventoryRows={processedData.invRows}
-                            snapshotDate={cloudInventoryDate}
-                            onOpenDetail={() => { setDetailType('Inventory'); setDetailModalOpen(true); }}
-                        /></section>
-                    )}
-
-                    {/* 4.6 库存决策：父体级判断补货 / 维持 / 清仓 */}
-                    {processedData && (
-                        <InventoryDecision
-                            rows={processedData.invRows}
-                            salesRows={activeRawData}
-                            imageLookup={productImageLookup}
-                            onFocusParent={asin => focusEntity('parentAsins', asin)}
-                        />
-                    )}
-                    </>}
-
-                    {homeView === 'diagnose' && <>
-                    {/* 2.5 毛利瀑布：销售额一路减到毛利，并拆出变化来自「量」还是「率」 */}
-                    {processedData && (
-                        <Suspense fallback={null}>
-                            <ProfitWaterfall
-                                current={processedData.current}
-                                last={processedData.last}
-                                currentRows={processedData.currentRows}
-                                lastRows={processedData.lastRows}
-                                onFocusAsin={asin => focusEntity('childAsins', asin)}
-                            />
-                        </Suspense>
-                    )}
-
-                    {/* 2.6 多维对比矩阵：ASIN × 日期热力图，点格子直接聚焦 */}
-                    {processedData && (
-                        <MetricMatrix
-                            rows={activeRawData}
-                            onPick={(asin, date) => {
-                                focusEntity('childAsins', asin);
-                                setPeriodMode('day');
-                                setFilters(prev => ({ ...prev, startDate: date, endDate: date }));
-                            }}
-                        />
-                    )}
-
-                    {/* 4.5 库存健康：可售天数 = 可售库存 ÷ 近 28 天日均销量 */}
-                    {processedData && <Suspense fallback={null}><StockHealth rows={activeRawData} onFocusAsin={asin => focusEntity('childAsins', asin)} /></Suspense>}
-                    </>}
-
-                    {!processedData && (
-                        // 云端第一次拉数（或切换区间后还没拿到新数据）时只显示加载态，
-                        // 不要甩「暂无数据 + 导入数据」，那会让人以为数据丢了
-                        (cloudLoading || (CLOUD_ENABLED && Boolean(cloudToken) && !cloudConnected && !cloudStatus)) && !activeRawData.length ? (
-                            <div>
-                                <LoadingSkeleton label={`正在加载 ${filters.startDate} ~ ${filters.endDate} 的业绩数据…`} />
-                            </div>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center rounded-3xl border border-white/80 bg-white/85 py-24 text-slate-400 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-                                <div className="mb-5 rounded-2xl bg-sky-50 p-6 text-sky-300 ring-1 ring-sky-100">
-                                    <FileSpreadsheet className="w-12 h-12" />
-                                </div>
-                                <p className="text-lg font-semibold text-slate-700">{restoreFailed ? '本地数据暂时无法读取' : activeRawData.length ? '当前选择无数据' : cloudConnected ? '当前区间云端暂无数据' : '暂无数据'}</p>
-                                <p className="mt-1 text-sm text-slate-500">{restoreFailed ? '请检查浏览器存储权限后刷新页面' : activeRawData.length ? '请调整分析周期，或切换到有数据的粒度（月度/周度/日度）' : isDailyMode && !cloudConnected ? '日度视图需要连接云端数据；本地导入的月报/周报没有日粒度' : cloudConnected ? '可调整分析周期，或到「数据管理 → 数据质量」看哪些日期缺数据并补数' : '可先加载样例，也可导入自己的数据'}</p>
-                                {!restoreFailed && !activeRawData.length && !cloudConnected && <div className="mt-5 flex flex-wrap justify-center gap-2">
-                                    <button type="button" onClick={downloadImportTemplate} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">下载模板</button>
-                                    <button type="button" onClick={handleLoadSample} className="rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700">加载脱敏样例</button>
-                                    <button type="button" onClick={() => setShowUploadModal(true)} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white">导入自己的数据</button>
-                                </div>}
-                            </div>
-                        )
-                    )}
+              <div className="flex flex-col items-center justify-center rounded-[24px] border border-black/[0.06] bg-white py-24 text-[#86868b] dark:border-white/[0.08] dark:bg-[#191c24]">
+                <div className="mb-5 rounded-2xl bg-[#eef2ff] p-5 text-[#4f46e5] dark:bg-indigo-500/15 dark:text-indigo-300">
+                  <FileSpreadsheet className="h-10 w-10" />
                 </div>
-            )}
-        </main>
+                <p className="text-lg font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">
+                  {restoreFailed ? '本地数据暂时无法读取' : activeRawData.length ? '当前周期暂无数据' : cloudConnected ? '当前区间云端暂无数据' : '暂无业绩数据'}
+                </p>
+                <p className="mt-1.5 max-w-md text-center text-sm text-[#86868b]">
+                  {restoreFailed
+                    ? '请检查浏览器存储权限后刷新页面'
+                    : activeRawData.length
+                    ? '请使用上方周期切换器调整日期，或切换月 / 周 / 日粒度'
+                    : isDailyMode && !cloudConnected
+                    ? '日度视图需要连接云端数据；本地导入的月报/周报没有日粒度'
+                    : cloudConnected
+                    ? '可切换其他月份/周，或在设置 → 数据管理里查看同步进度'
+                    : '可以先加载脱敏样例体验界面，或直接导入自己的报表'}
+                </p>
+                {!restoreFailed && !activeRawData.length && !cloudConnected && (
+                  <div className="mt-6 flex flex-wrap justify-center gap-2.5">
+                    <button type="button" onClick={downloadImportTemplate} className="rounded-xl border border-black/[0.08] bg-white px-4 py-2 text-sm font-medium text-[#1d1d1f] hover:bg-black/[0.03] dark:border-white/[0.1] dark:bg-[#191c24] dark:text-[#f5f5f7]">下载模板</button>
+                    <button type="button" onClick={handleLoadSample} className="rounded-xl border border-indigo-500/20 bg-[#eef2ff] px-4 py-2 text-sm font-semibold text-[#4f46e5]">加载脱敏样例</button>
+                    <button type="button" onClick={() => setShowUploadModal(true)} className="rounded-xl bg-[#4f46e5] px-4 py-2 text-sm font-semibold text-white">导入数据</button>
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            <div className="space-y-6">
+              {activeTab === 'overview' && (
+                <>
+                  <section id="overview">
+                    <DashboardOverview
+                      current={processedData.current}
+                      target={processedData.target}
+                      periodMode={periodMode}
+                      rawData={activeRawData}
+                      filters={filters}
+                      targetRows={displayTargetData}
+                      pacingRatio={processedData.pacingRatio}
+                      historyData={
+                        useCloudData && !hasActiveFilters
+                          ? periodMode === 'month'
+                            ? trendHistoryCorrected.month
+                            : periodMode === 'week'
+                            ? trendHistoryCorrected.week
+                            : trendHistoryCorrected.day
+                          : performanceData
+                      }
+                    />
+                  </section>
+
+                  {radar && (
+                    <section id="issues">
+                      <AnomalyRadar
+                        report={radar}
+                        periodLabel={`${filters.startDate} ~ ${filters.endDate}`}
+                        onDrillAsin={asin => setQuickDrawerTarget({ kind: 'asin', key: asin })}
+                      />
+                    </section>
+                  )}
+
+                  <OverviewQuickRanks
+                    rows={processedData.currentRows}
+                    inventoryRows={processedData.invRows}
+                    onSelectEntity={(kind, key) => setQuickDrawerTarget({ kind, key })}
+                    onGoToTab={tab => setActiveTab(tab)}
+                  />
+                </>
+              )}
+
+              {activeTab === 'profit' && (
+                <>
+                  <section id="pl">
+                    <PLTable
+                      current={processedData.current}
+                      last={processedData.last}
+                      year={processedData.year}
+                      target={processedData.target}
+                      onOpenDetail={() => { setDetailType('PL'); setDetailModalOpen(true); }}
+                      onOpenCalculator={() => handleOpenCalculator()}
+                      onOpenRefundAnalysis={() => handleOpenRefundAnalysis()}
+                      onOpenReviewAnalysis={() => setReviewModalOpen(true)}
+                    />
+                  </section>
+
+                  <Suspense fallback={null}>
+                    <ProfitWaterfall
+                      current={processedData.current}
+                      last={processedData.last}
+                      currentRows={processedData.currentRows}
+                      lastRows={processedData.lastRows}
+                      onFocusAsin={asin => setQuickDrawerTarget({ kind: 'asin', key: asin })}
+                    />
+                  </Suspense>
+
+                  <MetricMatrix
+                    rows={activeRawData}
+                    onPick={(asin, date) => {
+                      focusEntity('childAsins', asin);
+                      setPeriodMode('day');
+                      setFilters(prev => ({ ...prev, startDate: date, endDate: date }));
+                    }}
+                  />
+                </>
+              )}
+
+              {activeTab === 'traffic' && (
+                <section id="traffic">
+                  <TrafficTable
+                    current={processedData.current}
+                    last={processedData.last}
+                    year={processedData.year}
+                    target={processedData.target}
+                    onOpenDetail={() => { setDetailType('Traffic'); setDetailModalOpen(true); }}
+                    onOpenKeywordAnalysis={() => setKeywordModalOpen(true)}
+                  />
+                </section>
+              )}
+
+              {activeTab === 'inventory' && (
+                <>
+                  <section id="inventory">
+                    <InventoryTable
+                      data={processedData.inventory}
+                      inventoryRows={processedData.invRows}
+                      snapshotDate={cloudInventoryDate}
+                      onOpenDetail={() => { setDetailType('Inventory'); setDetailModalOpen(true); }}
+                    />
+                  </section>
+
+                  <InventoryDecision
+                    rows={processedData.invRows}
+                    salesRows={activeRawData}
+                    imageLookup={productImageLookup}
+                    onFocusParent={asin => setQuickDrawerTarget({ kind: 'asin', key: asin })}
+                  />
+
+                  <Suspense fallback={null}>
+                    <StockHealth
+                      rows={activeRawData}
+                      onFocusAsin={asin => setQuickDrawerTarget({ kind: 'asin', key: asin })}
+                    />
+                  </Suspense>
+                </>
+              )}
+
+              {activeTab === 'topics' && (
+                <TopicsHub
+                  refundCount={refundData.length}
+                  reviewCount={reviewData.length}
+                  keywordCount={searchTermData.length}
+                  onOpenRefund={() => handleOpenRefundAnalysis()}
+                  onOpenReview={() => setReviewModalOpen(true)}
+                  onOpenKeyword={() => setKeywordModalOpen(true)}
+                  onOpenSimulator={() => handleOpenCalculator()}
+                  onOpenDetail={() => { setDetailType('PL'); setDetailModalOpen(true); }}
+                  onOpenDoctor={() => setShowCloudAdmin(true)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </main>
 
         {/* Modals */}
         <DataUploadModal 
@@ -1628,8 +1821,8 @@ const App: React.FC = () => {
         </div>}
 
         {/* Chat Bot Integration with All Data Sources */}
-        {!chatLoaded && <button type="button" aria-label="打开 AI 顾问" onClick={() => setChatLoaded(true)} className="fixed bottom-6 right-6 z-50 rounded-full bg-blue-600 p-4 text-white shadow-xl hover:bg-blue-700"><Sparkles className="h-6 w-6" /></button>}
-        {chatLoaded && <Suspense fallback={<div role="status" className="fixed bottom-6 right-6 z-50 rounded-full bg-blue-600 p-4 text-white">加载中…</div>}><ChatBot 
+        {!chatLoaded && <button type="button" aria-label="打开 AI 顾问" onClick={() => setChatLoaded(true)} className="fixed bottom-6 right-6 z-50 rounded-full bg-[linear-gradient(135deg,#3b82f6_0%,#6366f1_55%,#7c3aed_100%)] p-3.5 text-white shadow-[0_12px_28px_-6px_rgba(79,70,229,0.55)] transition hover:scale-105 active:scale-95"><Sparkles className="h-5 w-5" /></button>}
+        {chatLoaded && <Suspense fallback={<div role="status" className="fixed bottom-6 right-6 z-50 rounded-full bg-[#4f46e5] p-3.5 text-xs text-white shadow-lg">加载中…</div>}><ChatBot 
             data={processedData} 
             inventory={processedData?.inventory || null}
             refunds={refundData}
@@ -1638,7 +1831,6 @@ const App: React.FC = () => {
             rawInventory={inventoryData}
             initialOpen
         /></Suspense>}
-      </div>
     </div>
   );
 };
