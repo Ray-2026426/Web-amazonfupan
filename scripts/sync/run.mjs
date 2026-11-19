@@ -276,6 +276,14 @@ async function uploadToSupabase({ dailyRows, currency, startedAt, range, dates, 
         log(`  ${date} 已原子替换 ${dayRows.length} 行`);
     }
 
+    // 刷新涉事月/周汇总表（含未过完的当月/本周），并滚动清理 35 天前的日明细
+    try {
+        const rollup = await postgrest('rpc/refresh_fact_rollups', { p_dates: dates, p_currency: currency, p_keep_days: 35 });
+        log(`  月/周汇总已刷新：月 ${rollup?.month_rows ?? '?'} 行、周 ${rollup?.week_rows ?? '?'} 行、清理旧日明细 ${rollup?.pruned_daily ?? 0} 行`);
+    } catch (error) {
+        log(`⚠ 刷新月/周汇总失败（不影响日明细已入库；请确认已在 Supabase 执行最新 db/schema.sql）：${String(error.message || error).slice(0, 160)}`);
+    }
+
     await postgrest('sync_runs', [
         {
             started_at: startedAt,
@@ -420,6 +428,15 @@ async function runPatch({ dates, usedShops, startedAt, range }) {
 
     await saveDailyChecks(checks).catch((error) => log(`⚠ 对账结果写入失败：${String(error.message || error)}`));
     await saveProductLinks(links);
+
+    if (patchedDays > 0) {
+        try {
+            const rollup = await postgrest('rpc/refresh_fact_rollups', { p_dates: dates, p_currency: CURRENCY, p_keep_days: 35 });
+            log(`月/周汇总已刷新：月 ${rollup?.month_rows ?? '?'} 行、周 ${rollup?.week_rows ?? '?'} 行`);
+        } catch (error) {
+            log(`⚠ 刷新月/周汇总失败：${String(error.message || error).slice(0, 160)}`);
+        }
+    }
 
     await postgrest('sync_runs', [{
         started_at: startedAt,

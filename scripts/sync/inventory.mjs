@@ -194,3 +194,12 @@ for (let i = 0; i < uniqueRows.length; i += 500) {
     await insertBatch(uniqueRows.slice(i, i + 500));
 }
 console.log(`已写入 fact_inventory：${uniqueRows.length} 行（${DATE}）`);
+
+// 只保留最近 7 天库存快照，避免历史快照把免费数据库撑满
+const keepAfter = new Date(Date.parse(`${DATE}T00:00:00Z`) - 6 * 86400000).toISOString().slice(0, 10);
+const pruneRes = await fetch(`${BASE}/rest/v1/fact_inventory?date=lt.${keepAfter}`, { method: 'DELETE', headers: headers() });
+if (pruneRes.ok) {
+    console.log(`已清理 ${keepAfter} 之前的旧库存快照`);
+} else {
+    console.log(`⚠ 旧库存快照清理失败 HTTP ${pruneRes.status}（不影响本次写入）`);
+}

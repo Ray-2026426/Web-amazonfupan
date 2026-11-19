@@ -15,8 +15,14 @@ const DIMENSION_COLUMNS = [
   'sub_category', 'parent_asin', 'product_name', 'currency',
 ];
 
-export const dataColumns = (monthly) =>
-  [...(monthly ? ['period'] : ['date']), ...DIMENSION_COLUMNS, ...numberFields].join(',');
+export const dataColumns = (granularity) => {
+  const keyCols = granularity === true || granularity === 'month'
+    ? ['period']
+    : granularity === 'week'
+      ? ['period', 'week_start']
+      : ['date'];
+  return [...keyCols, ...DIMENSION_COLUMNS, ...numberFields].join(',');
+};
 
 /** 并发取的页数窗口：Supabase 单页上限 1000 行，窗口越大首屏越快、但别把连接打满 */
 const PAGE_CONCURRENCY = 6;
@@ -176,7 +182,11 @@ export async function fetchPage(table, params, limit = 1000, offset = 0) {
 }
 
 export function asDataRow(row, granularity) {
-  const date = granularity === 'month' ? `${row.period}-01` : row.date;
+  const date = granularity === 'month'
+    ? `${row.period}-01`
+    : granularity === 'week'
+      ? row.week_start
+      : row.date;
   const data = { ...row, id: `${row.sid}|${row.asin}|${date}`, date, child_asin: row.asin };
   for (const key of numberFields) data[key] = Number(row[key] ?? 0);
   return data;
@@ -233,6 +243,19 @@ export async function rowsForRange(from, to) {
       { rejectIfOverflow: true }
     );
     segments.push(...rows.map((row) => asDataRow(row, part.granularity)));
+  }
+  if (segments.length === 0 && days === 7 && new Date(`${from}T00:00:00Z`).getUTCDay() === 0) {
+    // 若查询的是已归档的历史自然周（周日~周六），fact_daily 已清理则回退读周汇总表
+    const weekRows = await fetchTable(
+      'v_fact_week',
+      [
+        ['select', dataColumns('week')], ['week_start', `eq.${from}`], ['currency', `eq.${currency}`],
+        ['order', 'week_start.asc,sid.asc,asin.asc'],
+      ],
+      60000,
+      { rejectIfOverflow: true }
+    );
+    segments.push(...weekRows.map((row) => asDataRow(row, 'week')));
   }
   return segments;
 }

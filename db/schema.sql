@@ -55,75 +55,148 @@ create table if not exists fact_daily (
 alter table fact_daily add column if not exists order_quantity numeric;
 alter table fact_daily add column if not exists fba_international_fee numeric;
 
--- 月汇总 / 周汇总：用视图从 fact_daily 现算，而不是另存一张表。
--- 原因：定时任务每次只拉 3 天，如果按窗口推汇总，跨月/跨周会写出「半个月」的错数。
--- 视图永远基于全部日明细，天然不会有这个问题。
+-- 周定义：周日~周六为完整一周（如 2026-11-15 ~ 2026-11-21 为 2026-W47），与前端 utils.ts 完全一致
+create or replace function public.business_week_info(d date)
+returns table (period text, week_start date)
+language sql
+immutable
+as $$
+    select
+        w.week_year::text || '-W' || lpad((((w.sun - w.first_sun) / 7) + 1)::text, 2, '0') as period,
+        w.sun as week_start
+    from (
+        select
+            sun,
+            extract(year from (sun + 6))::int as week_year,
+            (make_date(extract(year from (sun + 6))::int, 1, 1)
+             - extract(dow from make_date(extract(year from (sun + 6))::int, 1, 1))::int) as first_sun
+        from (select (d - extract(dow from d)::int) as sun) s
+    ) w;
+$$;
+
+-- 月汇总实体表（2025-01 至今及未来每月，含未过完的当月；每次同步后自动刷新）
+create table if not exists fact_month (
+    period                text        not null,
+    sid                   text        not null,
+    asin                  text        not null,
+    country               text,
+    shop_name             text,
+    brand                 text,
+    manager               text,
+    sub_category          text,
+    parent_asin           text,
+    product_name          text,
+    currency              text        not null default 'USD',
+    sales_quantity        numeric,
+    order_quantity        numeric,
+    sales_amount          numeric,
+    gross_profit          numeric,
+    sessions              numeric,
+    first_mile_cost       numeric,
+    procurement_cost      numeric,
+    storage_fee           numeric,
+    fba_fee               numeric,
+    refund_cost           numeric,
+    platform_commission   numeric,
+    ad_spend              numeric,
+    ad_sales              numeric,
+    ad_orders             numeric,
+    sp_spend              numeric,
+    sp_sales              numeric,
+    sd_spend              numeric,
+    sd_sales              numeric,
+    sb_spend              numeric,
+    sb_sales              numeric,
+    sbv_spend             numeric,
+    sbv_sales             numeric,
+    impressions           numeric,
+    clicks                numeric,
+    natural_orders        numeric,
+    natural_clicks        numeric,
+    review_count          numeric,
+    fba_sellable_qty      numeric,
+    rating                numeric,
+    fba_international_fee numeric,
+    updated_at            timestamptz not null default now(),
+    primary key (period, sid, asin, currency)
+);
+create index if not exists idx_fact_month_period on fact_month (period);
+alter table fact_month enable row level security;
+revoke all on table fact_month from anon, authenticated;
+grant select, insert, update, delete on table fact_month to service_role;
+
+-- 周汇总实体表（2026-W01 至今及未来每周，含未过完的本周；周日~周六）
+create table if not exists fact_week (
+    period                text        not null,
+    week_start            date        not null,
+    sid                   text        not null,
+    asin                  text        not null,
+    country               text,
+    shop_name             text,
+    brand                 text,
+    manager               text,
+    sub_category          text,
+    parent_asin           text,
+    product_name          text,
+    currency              text        not null default 'USD',
+    sales_quantity        numeric,
+    order_quantity        numeric,
+    sales_amount          numeric,
+    gross_profit          numeric,
+    sessions              numeric,
+    first_mile_cost       numeric,
+    procurement_cost      numeric,
+    storage_fee           numeric,
+    fba_fee               numeric,
+    refund_cost           numeric,
+    platform_commission   numeric,
+    ad_spend              numeric,
+    ad_sales              numeric,
+    ad_orders             numeric,
+    sp_spend              numeric,
+    sp_sales              numeric,
+    sd_spend              numeric,
+    sd_sales              numeric,
+    sb_spend              numeric,
+    sb_sales              numeric,
+    sbv_spend             numeric,
+    sbv_sales             numeric,
+    impressions           numeric,
+    clicks                numeric,
+    natural_orders        numeric,
+    natural_clicks        numeric,
+    review_count          numeric,
+    fba_sellable_qty      numeric,
+    rating                numeric,
+    fba_international_fee numeric,
+    updated_at            timestamptz not null default now(),
+    primary key (period, sid, asin, currency)
+);
+create index if not exists idx_fact_week_start on fact_week (week_start);
+alter table fact_week enable row level security;
+revoke all on table fact_week from anon, authenticated;
+grant select, insert, update, delete on table fact_week to service_role;
+
+-- 兼容视图：api/trend.js、api/export.js、serverless/supabase.js 继续读取 v_fact_month / v_fact_week
 create or replace view v_fact_month as
 select
-    to_char(date, 'YYYY-MM') as period,
-    sid, asin, country, shop_name, brand, manager, sub_category, parent_asin, product_name, currency,
-    sum(sales_quantity) as sales_quantity,
-    sum(sales_amount) as sales_amount,
-    sum(gross_profit) as gross_profit,
-    sum(sessions) as sessions,
-    sum(first_mile_cost) as first_mile_cost,
-    sum(procurement_cost) as procurement_cost,
-    sum(storage_fee) as storage_fee,
-    sum(fba_fee) as fba_fee,
-    sum(refund_cost) as refund_cost,
-    sum(platform_commission) as platform_commission,
-    sum(ad_spend) as ad_spend,
-    sum(ad_sales) as ad_sales,
-    sum(ad_orders) as ad_orders,
-    sum(sp_spend) as sp_spend, sum(sp_sales) as sp_sales,
-    sum(sd_spend) as sd_spend, sum(sd_sales) as sd_sales,
-    sum(sb_spend) as sb_spend, sum(sb_sales) as sb_sales,
-    sum(sbv_spend) as sbv_spend, sum(sbv_sales) as sbv_sales,
-    sum(impressions) as impressions,
-    sum(clicks) as clicks,
-    sum(natural_orders) as natural_orders,
-    sum(natural_clicks) as natural_clicks,
-    (array_agg(review_count order by date desc))[1] as review_count,
-    (array_agg(fba_sellable_qty order by date desc))[1] as fba_sellable_qty,
-    (array_agg(rating order by date desc))[1] as rating,
-    sum(order_quantity) as order_quantity,
-    sum(fba_international_fee) as fba_international_fee
-from fact_daily
-group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
+    period, sid, asin, country, shop_name, brand, manager, sub_category, parent_asin, product_name, currency,
+    sales_quantity, sales_amount, gross_profit, sessions, first_mile_cost, procurement_cost, storage_fee,
+    fba_fee, refund_cost, platform_commission, ad_spend, ad_sales, ad_orders,
+    sp_spend, sp_sales, sd_spend, sd_sales, sb_spend, sb_sales, sbv_spend, sbv_sales,
+    impressions, clicks, natural_orders, natural_clicks, review_count, fba_sellable_qty, rating,
+    order_quantity, fba_international_fee
+from fact_month;
 
--- 周汇总：看板用的是「周日起算」的自然周，date_trunc('week') 是周一起算，必须手算
 create or replace view v_fact_week as
 select
-    to_char(date - (extract(dow from date)::int), 'IYYY-"W"IW') as period,
-    (date - (extract(dow from date)::int)) as week_start,
-    sid, asin, country, shop_name, brand, manager, sub_category, parent_asin, product_name, currency,
-    sum(sales_quantity) as sales_quantity,
-    sum(sales_amount) as sales_amount,
-    sum(gross_profit) as gross_profit,
-    sum(sessions) as sessions,
-    sum(first_mile_cost) as first_mile_cost,
-    sum(procurement_cost) as procurement_cost,
-    sum(storage_fee) as storage_fee,
-    sum(fba_fee) as fba_fee,
-    sum(refund_cost) as refund_cost,
-    sum(platform_commission) as platform_commission,
-    sum(ad_spend) as ad_spend,
-    sum(ad_sales) as ad_sales,
-    sum(ad_orders) as ad_orders,
-    sum(sp_spend) as sp_spend, sum(sp_sales) as sp_sales,
-    sum(sd_spend) as sd_spend, sum(sd_sales) as sd_sales,
-    sum(sb_spend) as sb_spend, sum(sb_sales) as sb_sales,
-    sum(sbv_spend) as sbv_spend, sum(sbv_sales) as sbv_sales,
-    sum(impressions) as impressions,
-    sum(clicks) as clicks,
-    sum(natural_orders) as natural_orders,
-    sum(natural_clicks) as natural_clicks,
-    (array_agg(review_count order by date desc))[1] as review_count,
-    (array_agg(fba_sellable_qty order by date desc))[1] as fba_sellable_qty,
-    (array_agg(rating order by date desc))[1] as rating,
-    sum(fba_international_fee) as fba_international_fee
-from fact_daily
-group by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12;
+    period, week_start, sid, asin, country, shop_name, brand, manager, sub_category, parent_asin, product_name, currency,
+    sales_quantity, sales_amount, gross_profit, sessions, first_mile_cost, procurement_cost, storage_fee,
+    fba_fee, refund_cost, platform_commission, ad_spend, ad_sales, ad_orders,
+    sp_spend, sp_sales, sd_spend, sd_sales, sb_spend, sb_sales, sbv_spend, sbv_sales,
+    impressions, clicks, natural_orders, natural_clicks, review_count, fba_sellable_qty, rating,
+    order_quantity, fba_international_fee
+from fact_week;
 
 -- 每次同步的审计记录（前端据此显示「数据截至日 / 上次同步」
 create table if not exists sync_runs (
@@ -146,7 +219,6 @@ create table if not exists sync_runs (
 create index if not exists idx_fact_daily_date on fact_daily (date);
 create index if not exists idx_fact_daily_date_sid on fact_daily (date, sid);
 create index if not exists idx_fact_daily_asin on fact_daily (asin);
-create index if not exists idx_fact_daily_period on fact_daily (date, sid, asin);
 
 -- 每日覆盖：数据质量页用，一天一行，方便一次看清哪些日期缺数据、哪些数字异常
 create or replace view v_fact_daily_coverage as
@@ -454,6 +526,135 @@ $$;
 
 revoke all on function public.replace_fact_daily(date, text, jsonb) from public, anon, authenticated;
 grant execute on function public.replace_fact_daily(date, text, jsonb) to service_role;
+
+-- 每次日明细同步后调用：
+--   1. 重新汇总本次涉及到的月份（含未过完的当月）写入 fact_month
+--   2. 重新汇总本次涉及到的自然周（周日~周六，含未过完的本周）写入 fact_week
+--   3. 清理 fact_daily 里超过 p_keep_days（默认 35 天）的旧日明细，控制容量
+create or replace function public.refresh_fact_rollups(
+    p_dates date[],
+    p_currency text default 'USD',
+    p_keep_days integer default 35
+)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+    v_months text[];
+    v_week_starts date[];
+    v_month_rows integer := 0;
+    v_week_rows integer := 0;
+    v_pruned_rows integer := 0;
+    v_max_date date;
+begin
+    if p_dates is null or array_length(p_dates, 1) is null then
+        return jsonb_build_object('months', 0, 'weeks', 0, 'pruned_daily', 0);
+    end if;
+
+    select array_agg(distinct to_char(d, 'YYYY-MM')) into v_months from unnest(p_dates) d;
+    select array_agg(distinct (d - extract(dow from d)::int)) into v_week_starts from unnest(p_dates) d;
+
+    -- 1. 刷新涉及的月份（整月重算）
+    if v_months is not null and array_length(v_months, 1) > 0 then
+        delete from fact_month
+        where currency = p_currency and period = any(v_months);
+
+        insert into fact_month (
+            period, sid, asin, country, shop_name, brand, manager, sub_category, parent_asin, product_name, currency,
+            sales_quantity, order_quantity, sales_amount, gross_profit, sessions, first_mile_cost, procurement_cost,
+            storage_fee, fba_fee, refund_cost, platform_commission, ad_spend, ad_sales, ad_orders,
+            sp_spend, sp_sales, sd_spend, sd_sales, sb_spend, sb_sales, sbv_spend, sbv_sales,
+            impressions, clicks, natural_orders, natural_clicks, review_count, fba_sellable_qty, rating,
+            fba_international_fee, updated_at
+        )
+        select
+            to_char(date, 'YYYY-MM') as period,
+            sid, asin,
+            (array_agg(country order by date desc))[1],
+            (array_agg(shop_name order by date desc))[1],
+            (array_agg(brand order by date desc))[1],
+            (array_agg(manager order by date desc))[1],
+            (array_agg(sub_category order by date desc))[1],
+            (array_agg(parent_asin order by date desc))[1],
+            (array_agg(product_name order by date desc))[1],
+            currency,
+            sum(sales_quantity), sum(order_quantity), sum(sales_amount), sum(gross_profit), sum(sessions),
+            sum(first_mile_cost), sum(procurement_cost), sum(storage_fee), sum(fba_fee), sum(refund_cost),
+            sum(platform_commission), sum(ad_spend), sum(ad_sales), sum(ad_orders),
+            sum(sp_spend), sum(sp_sales), sum(sd_spend), sum(sd_sales),
+            sum(sb_spend), sum(sb_sales), sum(sbv_spend), sum(sbv_sales),
+            sum(impressions), sum(clicks), sum(natural_orders), sum(natural_clicks),
+            (array_agg(review_count order by date desc))[1],
+            (array_agg(fba_sellable_qty order by date desc))[1],
+            (array_agg(rating order by date desc))[1],
+            sum(fba_international_fee),
+            now()
+        from fact_daily
+        where currency = p_currency and to_char(date, 'YYYY-MM') = any(v_months)
+        group by 1, sid, asin, currency;
+        get diagnostics v_month_rows = row_count;
+    end if;
+
+    -- 2. 刷新涉及的周（周日~周六，含未过完的本周）
+    if v_week_starts is not null and array_length(v_week_starts, 1) > 0 then
+        delete from fact_week
+        where currency = p_currency and week_start = any(v_week_starts);
+
+        insert into fact_week (
+            period, week_start, sid, asin, country, shop_name, brand, manager, sub_category, parent_asin, product_name, currency,
+            sales_quantity, order_quantity, sales_amount, gross_profit, sessions, first_mile_cost, procurement_cost,
+            storage_fee, fba_fee, refund_cost, platform_commission, ad_spend, ad_sales, ad_orders,
+            sp_spend, sp_sales, sd_spend, sd_sales, sb_spend, sb_sales, sbv_spend, sbv_sales,
+            impressions, clicks, natural_orders, natural_clicks, review_count, fba_sellable_qty, rating,
+            fba_international_fee, updated_at
+        )
+        select
+            bw.period, bw.week_start,
+            f.sid, f.asin,
+            (array_agg(f.country order by f.date desc))[1],
+            (array_agg(f.shop_name order by f.date desc))[1],
+            (array_agg(f.brand order by f.date desc))[1],
+            (array_agg(f.manager order by f.date desc))[1],
+            (array_agg(f.sub_category order by f.date desc))[1],
+            (array_agg(f.parent_asin order by f.date desc))[1],
+            (array_agg(f.product_name order by f.date desc))[1],
+            f.currency,
+            sum(f.sales_quantity), sum(f.order_quantity), sum(f.sales_amount), sum(f.gross_profit), sum(f.sessions),
+            sum(f.first_mile_cost), sum(f.procurement_cost), sum(f.storage_fee), sum(f.fba_fee), sum(f.refund_cost),
+            sum(f.platform_commission), sum(f.ad_spend), sum(f.ad_sales), sum(f.ad_orders),
+            sum(f.sp_spend), sum(f.sp_sales), sum(f.sd_spend), sum(f.sd_sales),
+            sum(f.sb_spend), sum(f.sb_sales), sum(f.sbv_spend), sum(f.sbv_sales),
+            sum(f.impressions), sum(f.clicks), sum(f.natural_orders), sum(f.natural_clicks),
+            (array_agg(f.review_count order by f.date desc))[1],
+            (array_agg(f.fba_sellable_qty order by f.date desc))[1],
+            (array_agg(f.rating order by f.date desc))[1],
+            sum(f.fba_international_fee),
+            now()
+        from fact_daily f
+        cross join lateral public.business_week_info(f.date) bw
+        where f.currency = p_currency and bw.week_start = any(v_week_starts)
+        group by bw.period, bw.week_start, f.sid, f.asin, f.currency;
+        get diagnostics v_week_rows = row_count;
+    end if;
+
+    -- 3. 滚动清理超过 p_keep_days 的日明细（只删早于最新日期 p_keep_days 天的）
+    if p_keep_days is not null and p_keep_days > 0 then
+        select max(date) into v_max_date from fact_daily where currency = p_currency;
+        if v_max_date is not null then
+            delete from fact_daily
+            where currency = p_currency and date < (v_max_date - (p_keep_days - 1));
+            get diagnostics v_pruned_rows = row_count;
+        end if;
+    end if;
+
+    return jsonb_build_object('month_rows', v_month_rows, 'week_rows', v_week_rows, 'pruned_daily', v_pruned_rows);
+end;
+$$;
+
+revoke all on function public.refresh_fact_rollups(date[], text, integer) from public, anon, authenticated;
+grant execute on function public.refresh_fact_rollups(date[], text, integer) to service_role;
 
 -- 管理后台配置。浏览器只调用受管理密码保护的 Vercel API。
 create table if not exists sync_settings (
