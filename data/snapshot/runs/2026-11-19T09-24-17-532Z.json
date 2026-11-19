@@ -1,0 +1,167 @@
+{
+  "at": "2026-11-19T11:44:21.699Z",
+  "range": {
+    "from": "2026-10-30",
+    "to": "2026-11-18"
+  },
+  "days": 20,
+  "rowsAdded": 30577,
+  "rowsTotal": 30577,
+  "bytes": 36205015,
+  "costMatchRate": 0.783,
+  "failedShopCalls": 0,
+  "warnings": [],
+  "mcpCalls": 3241,
+  "durationMs": 8405297,
+  "currency": "USD",
+  "report": {
+    "ok": true,
+    "errors": [],
+    "warnings": [],
+    "zeroFiltered": 893683,
+    "costMatchRate": 0.7834319913660595,
+    "negativeShare": 0.5734375511005004,
+    "reconciliations": [
+      {
+        "date": "2026-10-30",
+        "expectedGrossProfit": 613.05,
+        "actualGrossProfit": 613.1800000000038,
+        "expectedAmount": 19399.01,
+        "actualAmount": 21033.349999999995
+      },
+      {
+        "date": "2026-10-31",
+        "expectedGrossProfit": 1060.82,
+        "actualGrossProfit": 1061.020000000008,
+        "expectedAmount": 20636.34,
+        "actualAmount": 22496.260000000013
+      },
+      {
+        "date": "2026-11-01",
+        "expectedGrossProfit": 1989.88,
+        "actualGrossProfit": 1990.1400000000065,
+        "expectedAmount": 25773.73,
+        "actualAmount": 27977.38000000004
+      },
+      {
+        "date": "2026-11-02",
+        "expectedGrossProfit": 1859.22,
+        "actualGrossProfit": 1859.4099999999983,
+        "expectedAmount": 26714.37,
+        "actualAmount": 28970.660000000044
+      },
+      {
+        "date": "2026-11-03",
+        "expectedGrossProfit": 634.16,
+        "actualGrossProfit": 634.2400000000035,
+        "expectedAmount": 25835.05,
+        "actualAmount": 27859.410000000058
+      },
+      {
+        "date": "2026-11-04",
+        "expectedGrossProfit": 1798.49,
+        "actualGrossProfit": 1798.5800000000054,
+        "expectedAmount": 27088.75,
+        "actualAmount": 29155.620000000024
+      },
+      {
+        "date": "2026-11-05",
+        "expectedGrossProfit": 1809.36,
+        "actualGrossProfit": 1809.3700000000076,
+        "expectedAmount": 26091.11,
+        "actualAmount": 28169.100000000046
+      },
+      {
+        "date": "2026-11-06",
+        "expectedGrossProfit": 1118.87,
+        "actualGrossProfit": 1119.0500000000086,
+        "expectedAmount": 25071.3,
+        "actualAmount": 26811.75000000003
+      },
+      {
+        "date": "2026-11-07",
+        "expectedGrossProfit": 1353.16,
+        "actualGrossProfit": 1353.2900000000093,
+        "expectedAmount": 27476.55,
+        "actualAmount": 29469.69000000003
+      },
+      {
+        "date": "2026-11-08",
+        "expectedGrossProfit": 2060.43,
+        "actualGrossProfit": 2060.589999999983,
+        "expectedAmount": 29473.79,
+        "actualAmount": 31932.96000000005
+      },
+      {
+        "date": "2026-11-09",
+        "expectedGrossProfit": 1646.2,
+        "actualGrossProfit": 1646.3800000000067,
+        "expectedAmount": 28562.07,
+        "actualAmount": 30753.550000000047
+      },
+      {
+        "date": "2026-11-10",
+        "expectedGrossProfit": 1965.99,
+        "actualGrossProfit": 1966.1600000000096,
+        "expectedAmount": 26035.78,
+        "actualAmount": 27910.020000000055
+      },
+      {
+        "date": "2026-11-11",
+        "expectedGrossProfit": 1468.41,
+        "actualGrossProfit": 1468.6100000000074,
+        "expectedAmount": 26005.82,
+        "actualAmount": 27953.540000000037
+      },
+      {
+        "date": "2026-11-12",
+        "expectedGrossProfit": 2182.16,
+        "actualGrossProfit": 2182.3999999999874,
+        "expectedAmount": 23158.27,
+        "actualAmount": 24909.540000000048
+      },
+      {
+        "date": "2026-11-13",
+        "expectedGrossProfit": 1246.77,
+        "actualGrossProfit": 1246.8000000000077,
+        "expectedAmount": 21292.59,
+        "actualAmount": 22936.570000000032
+      },
+      {
+        "date": "2026-11-14",
+        "expectedGrossProfit": 590.61,
+        "actualGrossProfit": 590.8700000000057,
+        "expectedAmount": 22797.69,
+        "actualAmount": 24749.560000000038
+      },
+      {
+        "date": "2026-11-15",
+        "expectedGrossProfit": 2646.71,
+        "actualGrossProfit": 2647.03999999998,
+        "expectedAmount": 27522.83,
+        "actualAmount": 29920.81000000005
+      },
+      {
+        "date": "2026-11-16",
+        "expectedGrossProfit": 2354.42,
+        "actualGrossProfit": 2354.669999999975,
+        "expectedAmount": 25748.06,
+        "actualAmount": 28021.180000000048
+      },
+      {
+        "date": "2026-11-17",
+        "expectedGrossProfit": 931.74,
+        "actualGrossProfit": 931.9100000000035,
+        "expectedAmount": 24077.23,
+        "actualAmount": 26155.78000000002
+      },
+      {
+        "date": "2026-11-18",
+        "expectedGrossProfit": 1277.4,
+        "actualGrossProfit": 1277.580000000009,
+        "expectedAmount": 23428.15,
+        "actualAmount": 25432.550000000032
+      }
+    ]
+  }
+}
