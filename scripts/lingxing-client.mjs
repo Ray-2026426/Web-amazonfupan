@@ -164,8 +164,10 @@ export function createClient({ key = process.env.LINGXING_MCP_KEY, url = process
      * 早期版本把两者混在一起重试，结果每轮同步反复尝试鉴权、把配额烧光，4 次全失败。
      */
     const RATE_LIMIT_RE = /code=429|认证请求过于频繁|too many requests|请求过于频繁/i;
+    const SCHEMA_STALE_RE = /status:\s*422|工具参数定义已更新|刷新工具列表/i;
 
     const isRateLimited = (e) => RATE_LIMIT_RE.test(String((e && e.message) || e));
+    const isSchemaStale = (e) => SCHEMA_STALE_RE.test(String((e && e.message) || e));
 
     /** 业务调用用的退避重试（不含鉴权） */
     async function withRateLimitRetry(fn, { tries = 3, baseMs = 20000 } = {}) {
@@ -215,7 +217,20 @@ export function createClient({ key = process.env.LINGXING_MCP_KEY, url = process
             }
             throw e;
         }
-        const raw = await withRateLimitRetry(() => rpc('tools/call', { name: 'action', arguments: args }).then(unwrap));
+        let raw;
+        for (let refreshAttempt = 0; refreshAttempt <= 2; refreshAttempt++) {
+            try {
+                raw = await withRateLimitRetry(() => rpc('tools/call', { name: 'action', arguments: args }).then(unwrap));
+                break;
+            } catch (e) {
+                if (!isSchemaStale(e) || refreshAttempt === 2) throw e;
+                if (verbose) console.error(`  [lingxing] ${toolId} 提示工具定义已更新，刷新工具列表与 schema 后重试`);
+                schemaReady.delete(toolId);
+                await rpc('tools/list', {});
+                await rpc('tools/call', { name: 'help', arguments: { limit: 50, offset: 0 } });
+                await ensureSchema(toolId);
+            }
+        }
         if (verbose) console.error(`  [lingxing] ${toolId} → 顶层键 ${Object.keys(raw).slice(0, 8).join(',')}`);
         return payload(raw);
     }
