@@ -93,9 +93,14 @@ function getClient() {
 }
 
 const STRING_PAGING = new Set(['query_order_profit_list']);
+const TOOL_MAX_PAGE = {
+    query_order_profit_list: 200,
+    query_product_performance_asin_lists: 500,
+};
 
 async function fetchPaged(toolId, baseParams) {
     const asString = STRING_PAGING.has(toolId);
+    const pageSize = Math.min(PAGE, TOOL_MAX_PAGE[toolId] || PAGE);
     const rows = [];
     let offset = 0;
     let total = null;
@@ -105,7 +110,7 @@ async function fetchPaged(toolId, baseParams) {
         const d = await getClient().call(toolId, {
             ...baseParams,
             offset: asString ? String(offset) : offset,
-            length: asString ? String(PAGE) : PAGE,
+            length: asString ? String(pageSize) : pageSize,
         });
         calls += 1;
         if (total === null) {
@@ -125,7 +130,7 @@ async function fetchPaged(toolId, baseParams) {
             break;
         }
         emptyRetries = 0;
-        offset += PAGE;
+        offset += pageSize;
         if (offset > 500000) break;
     }
     if (rows.length !== total) throw new Error(`${toolId} 分页不完整：${rows.length}/${total}`);
