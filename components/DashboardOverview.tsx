@@ -336,7 +336,7 @@ const DashboardOverviewInner: React.FC<DashboardOverviewProps> = ({    current,
 }: DashboardOverviewProps) => {
     const isWeeklyMode = periodMode === 'week';
     const isDailyMode = periodMode === 'day';
-    const [expandedMetric, setExpandedMetric] = useState<MetricCardKey | null>(null);
+    const [expandedMetric, setExpandedMetric] = useState<MetricCardKey | null>('gross_profit');
     /** 首屏主指标：默认毛利额（更关心利润），可切到销售额 */
     const [mainMetric, setMainMetric] = useState<'sales_amount' | 'gross_profit'>('gross_profit');
     /** 趋势用的数据源：优先长历史，这样选单日/短区间时曲线依然连续 */

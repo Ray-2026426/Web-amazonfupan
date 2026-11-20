@@ -465,18 +465,38 @@ const App: React.FC = () => {
     try { localStorage.setItem('amazon-dashboard-data-source', dataSource); } catch { /* 忽略 */ }
   }, [dataSource]);
 
-  /** 趋势用的长历史（服务端按日/周/月聚合）：点开趋势时不再只有当前区间 */
+  /** 趋势用的长历史（服务端按日/周/月聚合，支持维度筛选下推）：点开或默认展示趋势时始终跟随筛选自动更新 */
   const [trendHistory, setTrendHistory] = useState<{ day: DataRow[]; month: DataRow[]; week: DataRow[] }>({ day: [], month: [], week: [] });
   useEffect(() => {
     if (!CLOUD_ENABLED || !cloudToken || !cloudConnected) return;
     let cancelled = false;
+    const controller = new AbortController();
+    const filterParams = new URLSearchParams();
+    const DIM_KEYS: Array<[keyof FilterState, string]> = [
+      ['countries', 'country'],
+      ['shops', 'shop'],
+      ['brands', 'brand'],
+      ['managers', 'manager'],
+      ['subCategories', 'sub'],
+      ['parentAsins', 'pasin'],
+      ['childAsins', 'casin'],
+      ['productNames', 'pname'],
+    ];
+    for (const [field, param] of DIM_KEYS) {
+      const vals = filters[field];
+      if (Array.isArray(vals) && vals.length > 0 && !vals.includes('__NONE__')) {
+        filterParams.set(param, vals.join(','));
+      }
+    }
+    const qs = filterParams.toString();
+    const suffix = qs ? `&${qs}` : '';
     void (async () => {
       try {
         const headers = { Authorization: `Bearer ${cloudToken}` };
         const [dayResponse, monthResponse, weekResponse] = await Promise.all([
-          fetch('/api/trend?mode=day&periods=90', { headers }),
-          fetch('/api/trend?mode=month&periods=24', { headers }),
-          fetch('/api/trend?mode=week&periods=52', { headers }),
+          fetch(`/api/trend?mode=day&periods=35${suffix}`, { headers, signal: controller.signal }),
+          fetch(`/api/trend?mode=month&periods=24${suffix}`, { headers, signal: controller.signal }),
+          fetch(`/api/trend?mode=week&periods=52${suffix}`, { headers, signal: controller.signal }),
         ]);
         const day = dayResponse.ok ? await dayResponse.json() : null;
         const month = monthResponse.ok ? await monthResponse.json() : null;
@@ -489,8 +509,8 @@ const App: React.FC = () => {
         });
       } catch { /* 失败就退回当前区间数据 */ }
     })();
-    return () => { cancelled = true; };
-  }, [cloudConnected, cloudToken]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [cloudConnected, cloudToken, dimensionSignature, cloudRefreshTick]);
 
   /**
    * 趋势长历史同样是领星原值（不含前端「毛利修正」开关），
@@ -641,10 +661,10 @@ const App: React.FC = () => {
       const refresh = async () => {
           try {
               /**
-               * 区间缓存：切回刚看过的区间直接命中，不再等三次接口。
+               * 区间缓存：只按「起止日期」缓存全量明细，切维度筛选时直接本地秒过滤，不再重拉接口。
                * 5 分钟内有效；切到新区间才真正请求。
                */
-              const cacheKey = `${filters.startDate}|${filters.endDate}|${dimensionSignature}`;
+              const cacheKey = `${filters.startDate}|${filters.endDate}`;
               const cached = cloudRangeCache.current.get(cacheKey);
               if (cached && Date.now() - cached.at < 5 * 60 * 1000) {
                   setCloudRows(cached.rows);
@@ -1034,30 +1054,25 @@ const App: React.FC = () => {
       const latest = cloudCutoff || dataEndDate;
 
       setFilters(prev => {
-          /**
-           * 已经在看一段有数据的区间时，切粒度只是换「怎么聚合」，不应该把用户挑好的区间吞掉。
-           * 只有区间缺失/倒置/超出数据范围时才回落到该粒度的默认区间。
-           */
-          const usable = prev.startDate && prev.endDate
-              && prev.startDate <= prev.endDate
-              && (!latest || prev.endDate <= latest);
-          if (usable) return prev;
+          // 以当前选中区间的结束日（不超过数据截止日）为锚点，切粒度时自动对齐该粒度的自然边界
+          const rawAnchor = prev.endDate && /^\d{4}-\d{2}-\d{2}$/.test(prev.endDate)
+              ? (latest && prev.endDate > latest ? latest : prev.endDate)
+              : anchorStr;
+          const [ry, rm, rd] = rawAnchor.split('-').map(Number);
+          const refDate = new Date(ry, rm - 1, rd);
 
           if (mode === 'week') {
-              // 默认看上一个完整自然周（数据通常截止到昨天/今天）
-              const lastWeekDay = new Date(anchor.getTime() - 7 * 24 * 60 * 60 * 1000);
-              const { start, end } = getISOWeekDateRange(lastWeekDay);
+              const { start, end } = getISOWeekDateRange(refDate);
               return { ...prev, startDate: formatDate(start), endDate: formatDate(end) };
           }
           if (mode === 'day') {
-              // 默认最近 7 天（含截止日），只有一个日期时就是单日
-              const start = new Date(anchor);
-              start.setDate(anchor.getDate() - 6);
-              return { ...prev, startDate: fmt(start), endDate: fmt(anchor) };
+              // 切到日度：默认落到最新可用单日
+              const dayStr = latest && /^\d{4}-\d{2}-\d{2}$/.test(latest) ? latest : fmt(refDate);
+              return { ...prev, startDate: dayStr, endDate: dayStr };
           }
-          // 月度回到截止日所在自然月
-          const start = new Date(ay, am - 1, 1);
-          const end = new Date(ay, am, 0);
+          // 切到月度：落到参考日所在完整自然月
+          const start = new Date(ry, rm - 1, 1);
+          const end = new Date(ry, rm, 0);
           return { ...prev, startDate: fmt(start), endDate: fmt(end) };
       });
   };
@@ -1074,7 +1089,7 @@ const App: React.FC = () => {
        * 服务端聚合已支持维度筛选（aggregate_range_f），所以有筛选时也能走快路径。
        * 但聚合结果必须和「当前筛选」绑定：key 里带上筛选签名，变了就重新算。
        */
-      const cloudMatch = useCloudData && cloudAgg && cloudAgg.key === `${filters.startDate}|${filters.endDate}|${dimensionSignature}` ? cloudAgg : null;
+      const cloudMatch = useCloudData && !hasActiveFilters && cloudAgg && cloudAgg.key === `${filters.startDate}|${filters.endDate}` ? cloudAgg : null;
       if (activeData.length === 0 && !cloudMatch) return null;
       if (!filters.startDate || !filters.endDate) return null;
 
@@ -1084,14 +1099,28 @@ const App: React.FC = () => {
       const currentRows = filterData(activeData, periods.current, filters);
       const lastRows = filterData(activeData, periods.last, filters);
       const yearRows = filterData(activeData, periods.year, filters);
-      // Aggregate：优先用服务端聚合结果（首屏快），没有再回退到明细聚合
-      const current = cloudMatch ? aggregatedFromCloud(cloudMatch.current as unknown as Record<string, unknown>, addBackFbaFee) : aggregateData(currentRows);
-      const last = cloudMatch
-          ? (cloudMatch.last ? aggregatedFromCloud(cloudMatch.last as unknown as Record<string, unknown>, addBackFbaFee) : null)
-          : (lastRows.length > 0 ? aggregateData(lastRows) : null);
-      const year = cloudMatch
-          ? (cloudMatch.year ? aggregatedFromCloud(cloudMatch.year as unknown as Record<string, unknown>, addBackFbaFee) : null)
-          : (yearRows.length > 0 ? aggregateData(yearRows) : null);
+
+      // 明细已到达时一律用明细实时聚合（保证筛选立刻生效、且同比/环比从月表/周表正常算出）；
+      // 仅在首屏明细尚未返回前，用 cloudMatch（且 rows > 0）先行渲染 KPI
+      const cloudCurrentValid = cloudMatch && Number(cloudMatch.current?.rows || 0) > 0;
+      const cloudLastValid = cloudMatch && Number(cloudMatch.last?.rows || 0) > 0;
+      const cloudYearValid = cloudMatch && Number(cloudMatch.year?.rows || 0) > 0;
+
+      const current = currentRows.length > 0
+          ? aggregateData(currentRows)
+          : cloudCurrentValid
+              ? aggregatedFromCloud(cloudMatch.current as unknown as Record<string, unknown>, addBackFbaFee)
+              : aggregateData(currentRows);
+      const last = lastRows.length > 0
+          ? aggregateData(lastRows)
+          : cloudLastValid
+              ? aggregatedFromCloud(cloudMatch.last as unknown as Record<string, unknown>, addBackFbaFee)
+              : null;
+      const year = yearRows.length > 0
+          ? aggregateData(yearRows)
+          : cloudYearValid
+              ? aggregatedFromCloud(cloudMatch.year as unknown as Record<string, unknown>, addBackFbaFee)
+              : null;
 
       // Targets：月度取全月目标；周度/日度按天拆成「区间分摊月目标」。序时仅月度展示用。
       /**
@@ -1611,12 +1640,19 @@ const App: React.FC = () => {
                       targetRows={displayTargetData}
                       pacingRatio={processedData.pacingRatio}
                       historyData={
-                        useCloudData && !hasActiveFilters
-                          ? periodMode === 'month'
-                            ? trendHistoryCorrected.month
-                            : periodMode === 'week'
-                            ? trendHistoryCorrected.week
-                            : trendHistoryCorrected.day
+                        useCloudData
+                          ? (periodMode === 'month'
+                              ? trendHistoryCorrected.month
+                              : periodMode === 'week'
+                              ? trendHistoryCorrected.week
+                              : trendHistoryCorrected.day
+                            ).length > 0
+                            ? (periodMode === 'month'
+                                ? trendHistoryCorrected.month
+                                : periodMode === 'week'
+                                ? trendHistoryCorrected.week
+                                : trendHistoryCorrected.day)
+                            : activeRawData
                           : performanceData
                       }
                     />

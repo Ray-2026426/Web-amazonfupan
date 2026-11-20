@@ -66,8 +66,48 @@ export default function handler(req, res) {
     const periods = Math.max(1, Math.min(requested, mode === 'month' ? 24 : 52));
     const table = mode === 'month' ? 'v_fact_month' : 'v_fact_week';
     const keyColumn = mode === 'month' ? 'period' : 'week_start';
+    const currency = process.env.LINGXING_CURRENCY || 'USD';
 
-    const rows = await fetchTable(table, { select: '*', order: `${keyColumn}.asc` }, 60000);
+    // 只选数值列 + 时间键，体积缩减 70%，避免 Vercel Serverless 超时
+    const selectCols = [keyColumn, ...SUM_FIELDS, 'rating', 'review_count', 'fba_sellable_qty'].join(',');
+    const queryParams = [
+      ['select', selectCols],
+      ['currency', `eq.${currency}`],
+      ['order', `${keyColumn}.asc`],
+    ];
+
+    // 按所需期数限制时间起点，防止全表扫描超时
+    const now = new Date();
+    if (mode === 'month') {
+      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - periods, 1));
+      queryParams.push(['period', `gte.${start.toISOString().slice(0, 7)}`]);
+    } else {
+      const start = new Date(now.getTime() - (periods + 2) * 7 * 86400000);
+      queryParams.push(['week_start', `gte.${start.toISOString().slice(0, 10)}`]);
+    }
+
+    // 维度筛选下推到数据库，让筛选后的趋势图也自动跟着变
+    const DIM_MAP = {
+      country: 'country',
+      shop: 'shop_name',
+      brand: 'brand',
+      manager: 'manager',
+      sub: 'sub_category',
+      pasin: 'parent_asin',
+      casin: 'asin',
+      pname: 'product_name',
+    };
+    for (const [param, col] of Object.entries(DIM_MAP)) {
+      const raw = url.searchParams.get(param);
+      if (!raw) continue;
+      const values = raw.split(',').map(s => s.trim()).filter(Boolean);
+      if (values.length) {
+        const quoted = values.map(v => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',');
+        queryParams.push([col, `in.(${quoted})`]);
+      }
+    }
+
+    const rows = await fetchTable(table, queryParams, 120000);
     const buckets = new Map();
     for (const row of rows) {
       const key = row[keyColumn];

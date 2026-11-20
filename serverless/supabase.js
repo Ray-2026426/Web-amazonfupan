@@ -262,5 +262,20 @@ export async function rowsForRange(from, to) {
     );
     segments.push(...weekRows.map((row) => asDataRow(row, 'week')));
   }
+  if (segments.length === 0 && Date.now() - Date.parse(`${to}T00:00:00Z`) > 35 * 86400000) {
+    // 超过 35 天的历史月份（含未过完月份的去年同期，如 2025-11-01 ~ 2025-11-18）在 fact_daily 已清理后回退读月汇总表
+    const lowMonth = from.slice(0, 7);
+    const highMonth = to.slice(0, 7);
+    const monthRows = await fetchTable(
+      'v_fact_month',
+      [
+        ['select', dataColumns('month')], ['period', `gte.${lowMonth}`], ['period', `lte.${highMonth}`], ['currency', `eq.${currency}`],
+        ['order', 'period.asc,sid.asc,asin.asc'],
+      ],
+      60000,
+      { rejectIfOverflow: true }
+    );
+    segments.push(...monthRows.map((row) => asDataRow(row, 'month')));
+  }
   return segments;
 }
