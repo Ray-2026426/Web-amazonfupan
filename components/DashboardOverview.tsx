@@ -50,32 +50,32 @@ const getGapTone = (actual: number, target: number) => {
 
 const toneClassMap = {
     sky: {
-        ring: 'ring-sky-200/80',
-        text: 'text-sky-700',
-        pill: 'bg-sky-500/10 text-sky-700 border-sky-200/80',
-        bar: 'from-sky-500 to-cyan-400',
-        glow: 'from-sky-500/12 via-cyan-400/10 to-transparent'
+        ring: 'ring-indigo-500/15',
+        text: 'text-[#4f46e5]',
+        pill: 'bg-[#eef2ff] text-[#4f46e5] border-indigo-200/60',
+        bar: 'from-[#4f46e5] to-[#6366f1]',
+        glow: 'from-transparent via-transparent to-transparent'
     },
     emerald: {
-        ring: 'ring-emerald-200/80',
-        text: 'text-emerald-700',
-        pill: 'bg-emerald-500/10 text-emerald-700 border-emerald-200/80',
-        bar: 'from-emerald-500 to-teal-400',
-        glow: 'from-emerald-500/12 via-teal-400/10 to-transparent'
+        ring: 'ring-emerald-500/15',
+        text: 'text-emerald-600',
+        pill: 'bg-emerald-50 text-emerald-700 border-emerald-200/60',
+        bar: 'from-emerald-500 to-teal-500',
+        glow: 'from-transparent via-transparent to-transparent'
     },
     amber: {
-        ring: 'ring-amber-200/80',
-        text: 'text-amber-700',
-        pill: 'bg-amber-500/10 text-amber-700 border-amber-200/80',
+        ring: 'ring-amber-500/15',
+        text: 'text-amber-600',
+        pill: 'bg-amber-50 text-amber-700 border-amber-200/60',
         bar: 'from-amber-500 to-orange-400',
-        glow: 'from-amber-500/12 via-orange-400/10 to-transparent'
+        glow: 'from-transparent via-transparent to-transparent'
     },
     rose: {
-        ring: 'ring-rose-200/80',
-        text: 'text-rose-700',
-        pill: 'bg-rose-500/10 text-rose-700 border-rose-200/80',
-        bar: 'from-rose-500 to-red-400',
-        glow: 'from-rose-500/12 via-red-400/10 to-transparent'
+        ring: 'ring-rose-500/15',
+        text: 'text-rose-600',
+        pill: 'bg-rose-50 text-rose-700 border-rose-200/60',
+        bar: 'from-rose-500 to-red-500',
+        glow: 'from-transparent via-transparent to-transparent'
     }
 };
 
@@ -123,61 +123,68 @@ const ProgressMetricCard = ({
         <div
             onClick={onClick}
             title={metricKey in METRICS ? METRICS[metricKey as keyof typeof METRICS].definition : undefined}
-            className={`relative overflow-hidden rounded-2xl border bg-white p-5 shadow-[0_18px_50px_-30px_rgba(15,23,42,0.35)] transition-shadow duration-200 cursor-pointer ${featured ? 'lg:col-span-2 border-sky-300 bg-gradient-to-br from-sky-50 to-white' : ''}
+            className={`relative overflow-hidden rounded-[24px] border bg-white p-5 sm:p-6 transition-[transform,box-shadow,border-color] duration-200 cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-24px_rgba(15,23,42,0.22)] dark:bg-[#191c24] ${featured ? 'lg:col-span-2 border-indigo-500/25' : ''}
                 ${isActive
-                    ? 'border-sky-400/60 ring-2 ring-sky-400/30 shadow-[0_20px_60px_-25px_rgba(14,165,233,0.4)]'
-                    : 'border-white/80 ring-1 ' + tone.ring + ' hover:shadow-[0_20px_55px_-28px_rgba(15,23,42,0.45)]'
+                    ? 'border-[#4f46e5] ring-2 ring-indigo-500/20'
+                    : 'border-black/[0.06] dark:border-white/[0.08]'
                 }
             `}
         >
-            <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${tone.glow}`} />
             <div className="relative flex items-start justify-between gap-3">
                 <div>
-                    <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                    <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-[#86868b] dark:text-[#a7abb8]">
                         {label}
+                        {featured && (
+                            <span className="rounded-full bg-[#eef2ff] px-2 py-0.5 text-[11px] font-semibold text-[#4f46e5] dark:bg-indigo-500/15 dark:text-indigo-300">
+                                核心目标
+                            </span>
+                        )}
                         {isActive && (
-                            <TrendingUp className="w-3 h-3 text-sky-500" />
+                            <TrendingUp className="w-3.5 h-3.5 text-[#4f46e5]" />
                         )}
                     </div>
-                    <div className="text-3xl font-bold tracking-tight text-slate-900 font-mono">
+                    <div className="text-[32px] font-bold leading-tight tracking-tight text-[#1d1d1f] num-tabular dark:text-[#f5f5f7]">
                         {formatter(value)}
                     </div>
                 </div>
-                <div className={`flex h-11 w-11 items-center justify-center rounded-2xl border bg-white/80 ${tone.pill}`}>
+                <div className={`flex h-10 w-10 items-center justify-center rounded-2xl border ${tone.pill}`}>
                     {icon}
                 </div>
             </div>
 
-            {hasTarget ? <div className="relative mt-5 space-y-2">
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>目标</span>
-                    <span className="font-mono text-slate-700">{formatter(max)}</span>
-                </div>
-                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200/70">
+            {hasTarget ? <div className="relative mt-4 space-y-2">
+                <div className="relative h-1.5 overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.1]">
                     <div
                         className={`h-full rounded-full bg-gradient-to-r ${tone.bar} transition-all duration-700`}
                         style={{ width: `${Math.min(progress, 100)}%` }}
                     />
+                    {!isRateMetric && pacingRatio > 0 && pacingRatio < 0.999 && (
+                        <div
+                            title={`当前时间进度 ${(pacingRatio * 100).toFixed(0)}%`}
+                            className="absolute inset-y-0 border-l-2 border-[#1d1d1f]/40 dark:border-white/50"
+                            style={{ left: `${Math.min(pacingRatio * 100, 100)}%` }}
+                        />
+                    )}
                 </div>
                 <div className="flex items-center justify-between text-xs gap-2">
                     <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-semibold ${tone.pill}`}>
-                            {(ratio * 100).toFixed(1)}%
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${tone.pill}`}>
+                            达成 {(ratio * 100).toFixed(1)}%
                         </span>
                         {pacingPct !== null && pacingTone && (
-                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-semibold ${pacingTone.pill}`}>
+                            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${pacingTone.pill}`}>
                                 序时 {(pacingPct * 100).toFixed(1)}%
                             </span>
                         )}
                         {gapStr && gapTone && (
-                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-semibold ${gapTone.pill}`}>
+                            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${gapTone.pill}`}>
                                 距目标 {gapStr}
                             </span>
                         )}
                     </div>
-                    <span className="font-mono text-slate-400 whitespace-nowrap">{inverseColor ? '预算使用率' : '目标达成率'}</span>
+                    <span className="text-[11px] text-[#86868b] num-tabular whitespace-nowrap dark:text-[#a7abb8]">目标 {formatter(max)}</span>
                 </div>
-            </div> : <p className="relative mt-5 text-xs font-medium text-slate-500">未导入目标表，暂不计算达成率</p>}
+            </div> : <p className="relative mt-4 text-xs text-[#86868b]">未导入目标表，暂不计算达成率</p>}
         </div>
     );
 };
