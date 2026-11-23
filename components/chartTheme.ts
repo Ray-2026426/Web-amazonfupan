@@ -40,57 +40,57 @@ export type ChartTheme = {
 
 const LIGHT: ChartTheme = {
     isDark: false,
-    grid: 'rgba(0, 0, 0, 0.06)',
-    axisTick: '#86868b',
-    cursor: '#c7c7cc',
+    grid: '#eef2f7',
+    axisTick: '#94a3b8',
+    cursor: '#cbd5e1',
     surface: '#ffffff',
-    tooltipBg: 'rgba(255, 255, 255, 0.96)',
-    tooltipBorder: 'rgba(0, 0, 0, 0.08)',
-    tooltipShadow: '0 18px 40px -20px rgba(15, 23, 42, 0.28), 0 2px 8px -4px rgba(15, 23, 42, 0.08)',
-    text: '#1d1d1f',
-    textMuted: '#424245',
-    textSubtle: '#86868b',
-    positive: '#10b981',
-    negative: '#ef4444',
-    target: '#aeaeb2',
+    tooltipBg: 'rgba(255, 255, 255, 0.97)',
+    tooltipBorder: '#e2e8f0',
+    tooltipShadow: '0 18px 40px -20px rgba(15, 23, 42, 0.35), 0 2px 8px -4px rgba(15, 23, 42, 0.12)',
+    text: '#0f172a',
+    textMuted: '#64748b',
+    textSubtle: '#94a3b8',
+    positive: '#059669',
+    negative: '#e11d48',
+    target: '#d97706',
     series: [
-        '#4f46e5', // Kairo 靛蓝：主指标
-        '#8b5cf6', // Kairo 紫罗兰
-        '#10b981', // 翡翠绿
-        '#f59e0b', // 琥珀
-        '#ef4444', // 警示红
-        '#3b82f6', // 亮蓝
-        '#06b6d4', // 青
-        '#ec4899', // 粉
+        '#2563eb', // 蓝：主指标
+        '#0d9488', // 青绿
+        '#7c3aed', // 紫
+        '#d97706', // 琥珀
+        '#e11d48', // 玫红
+        '#0891b2', // 青
+        '#16a34a', // 绿
+        '#c026d3', // 品红
         '#ea580c', // 橙
-        '#64748b', // 中性灰
+        '#475569', // 石板灰
     ],
 };
 
 const DARK: ChartTheme = {
     isDark: true,
-    grid: 'rgba(255, 255, 255, 0.08)',
-    axisTick: '#a7abb8',
-    cursor: '#4b5563',
-    surface: '#191c24',
-    tooltipBg: 'rgba(25, 28, 36, 0.97)',
-    tooltipBorder: 'rgba(255, 255, 255, 0.12)',
-    tooltipShadow: '0 20px 44px -18px rgba(0, 0, 0, 0.75)',
-    text: '#f5f5f7',
-    textMuted: '#c7c9d1',
-    textSubtle: '#858a99',
-    positive: '#34d399',
-    negative: '#f87171',
-    target: '#858a99',
+    grid: '#232a33',
+    axisTick: '#8b949e',
+    cursor: '#484f58',
+    surface: '#161b22',
+    tooltipBg: 'rgba(13, 17, 23, 0.97)',
+    tooltipBorder: '#30363d',
+    tooltipShadow: '0 20px 44px -18px rgba(0, 0, 0, 0.85)',
+    text: '#e6edf3',
+    textMuted: '#8b949e',
+    textSubtle: '#6e7681',
+    positive: '#3fb950',
+    negative: '#f85149',
+    target: '#e3b341',
     series: [
-        '#818cf8',
-        '#a78bfa',
-        '#34d399',
-        '#fbbf24',
-        '#f87171',
         '#60a5fa',
+        '#2dd4bf',
+        '#a78bfa',
+        '#fbbf24',
+        '#fb7185',
         '#22d3ee',
-        '#f472b6',
+        '#4ade80',
+        '#e879f9',
         '#fb923c',
         '#94a3b8',
     ],

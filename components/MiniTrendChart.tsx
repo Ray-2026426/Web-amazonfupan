@@ -89,11 +89,9 @@ export const MiniTrendChart: React.FC<MiniTrendChartProps> = ({
     const chartData = useMemo(() => {
         if (rawData.length === 0) return [];
 
-        // 按维度筛选，但不限制日期范围（需要完整历史）；
-        // 若 rawData 来自服务端 /api/trend 预聚合序列（已按维度下推筛选），跳过前端维度过滤
+        // 按维度筛选，但不限制日期范围（需要完整历史）
         const dateRange = getWideDateRange(rawData);
-        const isServerAggregated = rawData.every(r => !r.shop_name && !r.child_asin && !r.brand);
-        const filtered = isServerAggregated ? rawData : filterData(rawData, dateRange, filters);
+        const filtered = filterData(rawData, dateRange, filters);
 
         // 按时间分组
         const timeGroups: Record<string, DataRow[]> = {};
